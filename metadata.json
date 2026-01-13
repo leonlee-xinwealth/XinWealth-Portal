@@ -1,0 +1,5 @@
+{
+  "name": "XinWealth Client Portal",
+  "description": "A premium client portal for XinWealth allowing users to view investment portfolios, transaction history, and insurance details (coming soon). Integrated with Lark Base for data visualization.",
+  "requestFramePermissions": []
+}
