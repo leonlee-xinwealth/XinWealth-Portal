@@ -1,6 +1,4 @@
-// Vercel Serverless Function to fetch Investment Data
-// Using ES Module syntax
-
+// Robust Data Handler
 export default async function handler(req, res) {
   const { name } = req.query;
 
@@ -21,11 +19,8 @@ export default async function handler(req, res) {
     const tokenData = await tokenRes.json();
     const accessToken = tokenData.tenant_access_token;
 
-    // 2. Fetch Investment Records
-    // Filter by "Full Name" to match the logged-in user
-    const filterFormula = `CurrentValue.["Full Name"]="${name}"`;
-
-    const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_BASE_TOKEN}/tables/${process.env.LARK_TABLE_INVESTMENT}/records?filter=${encodeURIComponent(filterFormula)}&page_size=100`;
+    // 2. Fetch Records (No filter, filter in memory for safety)
+    const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_BASE_TOKEN}/tables/${process.env.LARK_TABLE_INVESTMENT}/records?page_size=500`;
 
     const recordsRes = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -37,12 +32,18 @@ export default async function handler(req, res) {
        return res.status(200).json({ records: [] });
     }
 
-    // 3. Sort Logic
-    // Lark dates are usually returned as timestamps (ms) or strings. 
-    // We convert to ensure accurate chronological order for the graph.
-    const sortedRecords = recordsData.data.items.sort((a, b) => {
-        const dateA = new Date(a.fields["Date"]).getTime();
-        const dateB = new Date(b.fields["Date"]).getTime();
+    // 3. Filter by Name in memory
+    const userRecords = recordsData.data.items.filter(item => {
+        const rowName = item.fields["Full Name"] || item.fields["Name"] || item.fields["Client Name"];
+        return String(rowName).trim() === String(name).trim();
+    });
+
+    // 4. Sort Logic
+    const sortedRecords = userRecords.sort((a, b) => {
+        const dateFieldA = a.fields["Date"] || a.fields["date"] || 0;
+        const dateFieldB = b.fields["Date"] || b.fields["date"] || 0;
+        const dateA = new Date(dateFieldA).getTime();
+        const dateB = new Date(dateFieldB).getTime();
         return dateA - dateB;
     });
 
@@ -50,6 +51,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error("Data API Error:", error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: error.message });
   }
 }

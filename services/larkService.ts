@@ -2,10 +2,8 @@ import { PortfolioDataPoint, Transaction, ClientProfile } from '../types';
 
 /**
  * Connects to Vercel Serverless Functions in the /api folder.
- * These functions then securely communicate with Lark Base.
  */
 
-// Helper to store/retrieve user session
 const setSession = (data: any) => localStorage.setItem('xinwealth_user', JSON.stringify(data));
 const getSession = () => {
   const s = localStorage.getItem('xinwealth_user');
@@ -21,27 +19,41 @@ export const authenticateUser = async (email: string, pass: string): Promise<boo
       body: JSON.stringify({ email, password: pass })
     });
 
-    if (!response.ok) {
-      throw new Error('Authentication failed');
+    const contentType = response.headers.get("content-type");
+    if (contentType && contentType.indexOf("application/json") !== -1) {
+       const data = await response.json();
+       if (!response.ok) {
+         throw new Error(data.error || 'Authentication failed (Server Error)');
+       }
+       setSession(data); 
+       return true;
+    } else {
+       // If backend returns HTML (e.g. 404 page or Vercel error page)
+       const text = await response.text();
+       console.error("Non-JSON response from server:", text);
+       throw new Error(`Server connection failed. Status: ${response.status}. Please ensure API is running.`);
     }
 
-    const userData = await response.json();
-    setSession(userData); 
-    return true;
   } catch (error) {
-    console.error(error);
+    console.error("Auth Error:", error);
     throw error;
   }
 };
 
-// Helper to fetch data from our backend
 const fetchData = async () => {
   const user = getSession();
   if (!user || !user.name) throw new Error("No user session found");
 
   const response = await fetch(`/api/data?name=${encodeURIComponent(user.name)}`);
-  if (!response.ok) throw new Error("Failed to fetch data");
-  return response.json();
+  
+  const contentType = response.headers.get("content-type");
+  if (contentType && contentType.indexOf("application/json") !== -1) {
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to fetch data");
+      return data;
+  } else {
+      throw new Error("Server connection failed (Invalid Response)");
+  }
 };
 
 export const fetchClientProfile = async (): Promise<ClientProfile> => {
@@ -52,59 +64,57 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
      return { name: getSession()?.name || 'Client', totalValue: 0, totalReturn: 0, returnPercentage: 0, lastUpdated: '-' };
   }
 
-  const latestRecord = records[records.length - 1]; // Sorted by date in API
+  const latestRecord = records[records.length - 1]; 
 
-  // Calculate Logic:
-  // Total Value = "End Value" of the latest record
-  // Net Invested Capital = Sum of all "Cashflow" (Deposits)
-  // Total Return = Total Value - Net Invested Capital
-  
-  const currentVal = latestRecord.fields["End Value"] || 0;
+  // Fields mapping - robust check
+  const endValue = latestRecord.fields["End Value"] || latestRecord.fields["end value"] || 0;
   
   const totalInvested = records.reduce((acc: number, r: any) => {
-    return acc + (r.fields["Cashflow"] || 0);
+    const cashflow = r.fields["Cashflow"] || r.fields["cashflow"] || 0;
+    return acc + cashflow;
   }, 0);
 
-  const totalRet = currentVal - totalInvested;
-  
-  // Return % = (Total Return / Total Invested) * 100
+  const totalRet = endValue - totalInvested;
   const retPercent = totalInvested > 0 ? (totalRet / totalInvested) * 100 : 0;
+  const dateStr = latestRecord.fields["Date"] || latestRecord.fields["date"] || Date.now();
 
   return {
     name: getSession()?.name,
-    totalValue: currentVal,
+    totalValue: endValue,
     totalReturn: totalRet,
     returnPercentage: parseFloat(retPercent.toFixed(2)),
-    lastUpdated: new Date(latestRecord.fields["Date"] || Date.now()).toLocaleDateString()
+    lastUpdated: new Date(dateStr).toLocaleDateString()
   };
 };
 
 export const fetchPortfolioHistory = async (): Promise<PortfolioDataPoint[]> => {
   const data = await fetchData();
   
-  // Transform Lark records to Graph data
   return data.records.map((record: any) => ({
-    date: new Date(record.fields["Date"]).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-    portfolioValue: record.fields["End Value"] || 0,
-    fdValue: record.fields["FD"] || 0
+    date: new Date(record.fields["Date"] || record.fields["date"]).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+    portfolioValue: record.fields["End Value"] || record.fields["end value"] || 0,
+    fdValue: record.fields["FD"] || record.fields["fd"] || 0
   }));
 };
 
 export const fetchTransactions = async (): Promise<Transaction[]> => {
   const data = await fetchData();
 
-  // Filter records that have "Cashflow" to show as transactions
-  const txs = data.records
-    .filter((r: any) => r.fields["Cashflow"] && r.fields["Cashflow"] !== 0)
-    .map((r: any, index: number) => ({
-      id: r.recordId || `tx-${index}`,
-      date: new Date(r.fields["Date"]).toLocaleDateString('en-CA'),
-      type: r.fields["Cashflow"] > 0 ? 'Deposit' : 'Withdrawal',
-      asset: 'Portfolio Adjustment',
-      amount: Math.abs(r.fields["Cashflow"]),
-      status: 'Completed'
-    }));
-    
-  // Reverse to show newest first
-  return txs.reverse();
+  return data.records
+    .filter((r: any) => {
+        const cf = r.fields["Cashflow"] || r.fields["cashflow"];
+        return cf && cf !== 0;
+    })
+    .map((r: any, index: number) => {
+      const cf = r.fields["Cashflow"] || r.fields["cashflow"];
+      return {
+        id: r.recordId || `tx-${index}`,
+        date: new Date(r.fields["Date"] || r.fields["date"]).toLocaleDateString('en-CA'),
+        type: cf > 0 ? 'Deposit' : 'Withdrawal',
+        asset: 'Portfolio Adjustment',
+        amount: Math.abs(cf),
+        status: 'Completed'
+      };
+    })
+    .reverse();
 };

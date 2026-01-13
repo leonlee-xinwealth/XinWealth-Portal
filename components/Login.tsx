@@ -20,8 +20,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     try {
       await authenticateUser(email, password);
       onLoginSuccess();
-    } catch (err) {
-      setError('Invalid credentials. Please check your email and password.');
+    } catch (err: any) {
+      // 显示具体的错误信息，方便排查
+      console.error("Login failed:", err);
+      setError(err.message || 'Login failed. Please check console for details.');
     } finally {
       setIsLoading(false);
     }
@@ -78,9 +80,9 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           </div>
 
           {error && (
-            <div className="p-4 rounded-xl bg-red-50 text-red-500 text-sm font-medium flex items-center gap-2">
-              <span>⚠️</span>
-              {error}
+            <div className="p-4 rounded-xl bg-red-50 text-red-500 text-sm font-medium flex items-center gap-2 break-words">
+              <span className="shrink-0">⚠️</span>
+              <span>{error}</span>
             </div>
           )}
 
