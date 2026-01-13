@@ -1,6 +1,7 @@
 // Vercel Serverless Function to fetch Investment Data
+// Using ES Module syntax
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   const { name } = req.query;
 
   if (!name) {
@@ -20,14 +21,10 @@ module.exports = async (req, res) => {
     const tokenData = await tokenRes.json();
     const accessToken = tokenData.tenant_access_token;
 
-    // 2. Fetch Investment Records filtered by "Full Name"
-    // Using the "Investment" table from your screenshot
-    // Formula: CurrentValue.["Full Name"] = "Name"
+    // 2. Fetch Investment Records
+    // Filter by "Full Name" to match the logged-in user
     const filterFormula = `CurrentValue.["Full Name"]="${name}"`;
 
-    // We also sort by Date ascending to ensure the graph draws correctly (1 = Ascending)
-    // Note: You might need to check the exact Sort syntax for Lark API, usually "sort" param: ["Date DESC"] or similar in payload
-    // Here we fetch and sort in JS to be safe and simple
     const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_BASE_TOKEN}/tables/${process.env.LARK_TABLE_INVESTMENT}/records?filter=${encodeURIComponent(filterFormula)}&page_size=100`;
 
     const recordsRes = await fetch(url, {
@@ -40,8 +37,9 @@ module.exports = async (req, res) => {
        return res.status(200).json({ records: [] });
     }
 
-    // Sort items by Date (field "Date" is a timestamp in Lark usually, or YYYY/MM/DD string)
-    // We convert to timestamp to sort correctly
+    // 3. Sort Logic
+    // Lark dates are usually returned as timestamps (ms) or strings. 
+    // We convert to ensure accurate chronological order for the graph.
     const sortedRecords = recordsData.data.items.sort((a, b) => {
         const dateA = new Date(a.fields["Date"]).getTime();
         const dateB = new Date(b.fields["Date"]).getTime();
@@ -51,7 +49,7 @@ module.exports = async (req, res) => {
     return res.status(200).json({ records: sortedRecords });
 
   } catch (error) {
-    console.error(error);
+    console.error("Data API Error:", error);
     return res.status(500).json({ error: 'Internal server error' });
   }
-};
+}

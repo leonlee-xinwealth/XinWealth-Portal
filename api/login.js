@@ -1,7 +1,7 @@
 // Vercel Serverless Function to handle Login
-// This runs on the server, keeping your LARK_APP_SECRET safe.
+// Using ES Module syntax to match package.json "type": "module"
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -22,8 +22,7 @@ module.exports = async (req, res) => {
     const accessToken = tokenData.tenant_access_token;
 
     // 2. Search Client Table for Email
-    // Note: We use the "filter" parameter to find the user
-    // Assumes columns: "Email Address", "Password", "Full Name"
+    // Using strict filter on "Email Address" column
     const filterFormula = `CurrentValue.["Email Address"]="${email}"`;
     
     const searchRes = await fetch(
@@ -40,11 +39,17 @@ module.exports = async (req, res) => {
     }
 
     const userRecord = searchData.data.items[0];
-    const storedPassword = userRecord.fields["Password"]; // Ensure this column name matches Lark exactly
+    
+    // Safety check: ensure Password field exists
+    const storedPassword = userRecord.fields["Password"];
+    if (storedPassword === undefined) {
+      console.error("Password field missing in Lark Client Table for user:", email);
+      return res.status(500).json({ error: 'System configuration error' });
+    }
 
     // 3. Verify Password
-    // In production, passwords should be hashed. Since Lark Base stores text, we compare directly.
-    if (storedPassword === password) {
+    // Direct string comparison as per requirements
+    if (String(storedPassword) === String(password)) {
       return res.status(200).json({ 
         success: true, 
         name: userRecord.fields["Full Name"],
@@ -55,7 +60,7 @@ module.exports = async (req, res) => {
     }
 
   } catch (error) {
-    console.error(error);
+    console.error("Login API Error:", error);
     return res.status(500).json({ error: 'Internal server error' });
   }
-};
+}

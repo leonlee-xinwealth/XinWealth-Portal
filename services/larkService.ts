@@ -26,7 +26,6 @@ export const authenticateUser = async (email: string, pass: string): Promise<boo
     }
 
     const userData = await response.json();
-    // Store user name to fetch specific data later
     setSession(userData); 
     return true;
   } catch (error) {
@@ -47,18 +46,29 @@ const fetchData = async () => {
 
 export const fetchClientProfile = async (): Promise<ClientProfile> => {
   const data = await fetchData();
-  const latestRecord = data.records[data.records.length - 1]; // Assuming sorted by date
-
-  if (!latestRecord) {
+  const records = data.records;
+  
+  if (!records || records.length === 0) {
      return { name: getSession()?.name || 'Client', totalValue: 0, totalReturn: 0, returnPercentage: 0, lastUpdated: '-' };
   }
 
-  // Calculate generic profile data based on latest record
-  // Note: Lark fields come in as fields["End Value"] etc.
+  const latestRecord = records[records.length - 1]; // Sorted by date in API
+
+  // Calculate Logic:
+  // Total Value = "End Value" of the latest record
+  // Net Invested Capital = Sum of all "Cashflow" (Deposits)
+  // Total Return = Total Value - Net Invested Capital
+  
   const currentVal = latestRecord.fields["End Value"] || 0;
-  const startVal = data.records[0]?.fields["Start Value"] || 0; // Compare vs first record
-  const totalRet = currentVal - startVal;
-  const retPercent = startVal > 0 ? (totalRet / startVal) * 100 : 0;
+  
+  const totalInvested = records.reduce((acc: number, r: any) => {
+    return acc + (r.fields["Cashflow"] || 0);
+  }, 0);
+
+  const totalRet = currentVal - totalInvested;
+  
+  // Return % = (Total Return / Total Invested) * 100
+  const retPercent = totalInvested > 0 ? (totalRet / totalInvested) * 100 : 0;
 
   return {
     name: getSession()?.name,
@@ -84,13 +94,12 @@ export const fetchTransactions = async (): Promise<Transaction[]> => {
   const data = await fetchData();
 
   // Filter records that have "Cashflow" to show as transactions
-  // We map the "Investment" table rows to transactions for simplicity based on your screenshot
   const txs = data.records
     .filter((r: any) => r.fields["Cashflow"] && r.fields["Cashflow"] !== 0)
     .map((r: any, index: number) => ({
       id: r.recordId || `tx-${index}`,
       date: new Date(r.fields["Date"]).toLocaleDateString('en-CA'),
-      type: r.fields["Cashflow"] > 0 ? 'Deposit' : 'Withdrawal', // Simplified logic
+      type: r.fields["Cashflow"] > 0 ? 'Deposit' : 'Withdrawal',
       asset: 'Portfolio Adjustment',
       amount: Math.abs(r.fields["Cashflow"]),
       status: 'Completed'
