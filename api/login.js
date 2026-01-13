@@ -16,32 +16,43 @@ export default async function handler(req, res) {
   const { email, password } = req.body;
 
   // 1. Env Var Check
-  if (!process.env.LARK_APP_ID || !process.env.LARK_APP_SECRET || !process.env.LARK_BASE_TOKEN) {
+  const appId = (process.env.LARK_APP_ID || "").trim();
+  const appSecret = (process.env.LARK_APP_SECRET || "").trim();
+  const baseToken = (process.env.LARK_BASE_TOKEN || "").trim();
+  const tableClient = (process.env.LARK_TABLE_CLIENT || "").trim();
+
+  if (!appId || !appSecret || !baseToken) {
     console.error("Missing Environment Variables");
-    return res.status(500).json({ error: 'Server Config Error: Missing Lark Credentials in Environment Variables.' });
+    return res.status(500).json({ error: 'Server Config Error: Missing Lark Credentials (LARK_APP_ID, LARK_APP_SECRET) in Environment Variables.' });
   }
 
   try {
     // 2. Get Token
+    console.log(`Attempting Lark Auth with App ID: ${appId}`); // Debug log (safe, no secret)
+
     const tokenRes = await fetch("https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        app_id: process.env.LARK_APP_ID,
-        app_secret: process.env.LARK_APP_SECRET
+        app_id: appId,
+        app_secret: appSecret
       })
     });
     
     const tokenData = await tokenRes.json();
     if (tokenData.code !== 0) {
-        console.error("Token Error:", tokenData);
-        return res.status(500).json({ error: `Lark Auth Failed: ${tokenData.msg}` });
+        console.error("Lark Token Error:", tokenData);
+        // Specifically catch the invalid secret error to give better advice
+        if (tokenData.msg && tokenData.msg.includes("app secret invalid")) {
+            return res.status(500).json({ error: `Lark Auth Failed: Invalid App Secret. Please check LARK_APP_SECRET in Vercel Settings.` });
+        }
+        return res.status(500).json({ error: `Lark Auth Failed: ${tokenData.msg} (Code: ${tokenData.code})` });
     }
     const accessToken = tokenData.tenant_access_token;
 
-    // 3. Fetch Records (Fetch ALL to avoid fragile filter formulas)
-    // We fetch a larger page size to ensure we find the user
-    const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${process.env.LARK_BASE_TOKEN}/tables/${process.env.LARK_TABLE_CLIENT}/records?page_size=500`;
+    // 3. Fetch Records
+    // Using explicit page size and no filter to ensure we get data
+    const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${baseToken}/tables/${tableClient}/records?page_size=500`;
     
     const searchRes = await fetch(url, {
         headers: { Authorization: `Bearer ${accessToken}` }
@@ -51,29 +62,25 @@ export default async function handler(req, res) {
 
     if (!searchData.data || !searchData.data.items) {
       console.error("Search Data Error:", searchData);
-      return res.status(500).json({ error: 'Failed to search client table. Check Table ID.' });
+      return res.status(500).json({ error: 'Failed to search client table. Check LARK_TABLE_CLIENT ID.' });
     }
 
     const items = searchData.data.items;
 
-    // 4. Debugging: Log available keys from the first record to help debugging
-    if (items.length > 0) {
-        console.log("Available Fields in Table:", Object.keys(items[0].fields));
-    }
-
-    // 5. Robust Find: Try exact match or case-insensitive match on keys
+    // 4. Robust Find
     const userRecord = items.find(item => {
         const itemEmail = item.fields["Email Address"] || item.fields["Email"] || item.fields["email"];
         if (!itemEmail) return false;
-        // Trim and lowercase comparison
         return String(itemEmail).trim().toLowerCase() === String(email).trim().toLowerCase();
     });
 
     if (!userRecord) {
-      return res.status(401).json({ error: `User not found: ${email}. Checked ${items.length} records.` });
+      // Don't expose this detailed info to client in production, but helpful for your debugging
+      console.log(`User ${email} not found in ${items.length} records.`);
+      return res.status(401).json({ error: `User email not found in records.` });
     }
     
-    // 6. Verify Password
+    // 5. Verify Password
     const storedPassword = userRecord.fields["Password"] || userRecord.fields["password"] || userRecord.fields["Pass"];
     
     if (String(storedPassword).trim() === String(password).trim()) {
