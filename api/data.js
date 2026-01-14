@@ -1,4 +1,29 @@
 // Robust Data Handler
+
+// Helper to handle Lark Field types (Text, Lookup Array, Link Object)
+const extractLarkValue = (field) => {
+    if (!field) return "";
+    // If it's a simple string or number
+    if (typeof field === 'string' || typeof field === 'number') return String(field);
+    
+    // If it's an array (Lookup field or Link field)
+    if (Array.isArray(field)) {
+        if (field.length === 0) return "";
+        const first = field[0];
+        // If array of objects (Link), extract text
+        if (typeof first === 'object' && first !== null && first.text) {
+            return first.text;
+        }
+        // If array of strings (Lookup)
+        return String(first);
+    }
+    
+    // If single object (uncommon but possible)
+    if (typeof field === 'object' && field.text) return field.text;
+    
+    return String(field);
+};
+
 export default async function handler(req, res) {
   const { name } = req.query;
 
@@ -45,10 +70,12 @@ export default async function handler(req, res) {
        return res.status(200).json({ records: [] });
     }
 
-    // 4. Filter by Name in memory
+    // 4. Filter by Name in memory using Robust Extraction
     const userRecords = recordsData.data.items.filter(item => {
-        const rowName = item.fields["Full Name"] || item.fields["Name"] || item.fields["Client Name"];
-        return String(rowName).trim() === String(name).trim();
+        const rawName = item.fields["Full Name"] || item.fields["Name"] || item.fields["Client Name"];
+        const rowName = extractLarkValue(rawName);
+        
+        return rowName.trim() === String(name).trim();
     });
 
     // 5. Sort Logic

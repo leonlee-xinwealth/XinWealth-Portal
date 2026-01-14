@@ -4,6 +4,7 @@ import Investment from './components/Investment';
 import Insurance from './components/Insurance';
 import Login from './components/Login';
 import { ViewState } from './types';
+import { clearSession } from './services/larkService'; // Import clearSession
 import { Menu } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -16,8 +17,9 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    clearSession(); // CRITICAL: Clear local storage data
     setIsAuthenticated(false);
-    setCurrentView(ViewState.INVESTMENT); // Reset view on logout
+    setCurrentView(ViewState.INVESTMENT);
   };
 
   const renderContent = () => {

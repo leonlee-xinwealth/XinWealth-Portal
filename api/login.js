@@ -1,4 +1,29 @@
 // Robust Login Handler
+
+// Helper to handle Lark Field types (Text, Lookup Array, Link Object)
+const extractLarkValue = (field) => {
+    if (!field) return "";
+    // If it's a simple string or number
+    if (typeof field === 'string' || typeof field === 'number') return String(field);
+    
+    // If it's an array (Lookup field or Link field)
+    if (Array.isArray(field)) {
+        if (field.length === 0) return "";
+        const first = field[0];
+        // If array of objects (Link), extract text
+        if (typeof first === 'object' && first !== null && first.text) {
+            return first.text;
+        }
+        // If array of strings (Lookup)
+        return String(first);
+    }
+    
+    // If single object (uncommon but possible)
+    if (typeof field === 'object' && field.text) return field.text;
+    
+    return String(field);
+};
+
 export default async function handler(req, res) {
   // CORS handling for local dev if needed
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -28,8 +53,6 @@ export default async function handler(req, res) {
 
   try {
     // 2. Get Token
-    console.log(`Attempting Lark Auth with App ID: ${appId}`); // Debug log (safe, no secret)
-
     const tokenRes = await fetch("https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -42,7 +65,6 @@ export default async function handler(req, res) {
     const tokenData = await tokenRes.json();
     if (tokenData.code !== 0) {
         console.error("Lark Token Error:", tokenData);
-        // Specifically catch the invalid secret error to give better advice
         if (tokenData.msg && tokenData.msg.includes("app secret invalid")) {
             return res.status(500).json({ error: `Lark Auth Failed: Invalid App Secret. Please check LARK_APP_SECRET in Vercel Settings.` });
         }
@@ -69,24 +91,26 @@ export default async function handler(req, res) {
 
     // 4. Robust Find
     const userRecord = items.find(item => {
-        const itemEmail = item.fields["Email Address"] || item.fields["Email"] || item.fields["email"];
-        if (!itemEmail) return false;
-        return String(itemEmail).trim().toLowerCase() === String(email).trim().toLowerCase();
+        // Robust extraction for Email field (handles Link/Lookup arrays)
+        const rawEmail = item.fields["Email Address"] || item.fields["Email"] || item.fields["email"];
+        const itemEmail = extractLarkValue(rawEmail);
+        
+        return itemEmail.trim().toLowerCase() === String(email).trim().toLowerCase();
     });
 
     if (!userRecord) {
-      // Don't expose this detailed info to client in production, but helpful for your debugging
       console.log(`User ${email} not found in ${items.length} records.`);
       return res.status(401).json({ error: `User email not found in records.` });
     }
     
     // 5. Verify Password
-    const storedPassword = userRecord.fields["Password"] || userRecord.fields["password"] || userRecord.fields["Pass"];
+    const storedPassword = extractLarkValue(userRecord.fields["Password"] || userRecord.fields["password"] || userRecord.fields["Pass"]);
+    const userName = extractLarkValue(userRecord.fields["Full Name"] || userRecord.fields["Name"]);
     
-    if (String(storedPassword).trim() === String(password).trim()) {
+    if (storedPassword.trim() === String(password).trim()) {
       return res.status(200).json({ 
         success: true, 
-        name: userRecord.fields["Full Name"] || userRecord.fields["Name"],
+        name: userName,
         recordId: userRecord.record_id
       });
     } else {

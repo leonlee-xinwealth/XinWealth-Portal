@@ -78,7 +78,9 @@ const fetchData = async () => {
   const user = getSession();
   if (!user || !user.name) throw new Error("No user session found");
 
-  const response = await fetch(`/api/data?name=${encodeURIComponent(user.name)}`);
+  // ADDED TIMESTAMP TO PREVENT CACHING
+  const timestamp = new Date().getTime();
+  const response = await fetch(`/api/data?name=${encodeURIComponent(user.name)}&_t=${timestamp}`);
   
   const contentType = response.headers.get("content-type");
   if (contentType && contentType.indexOf("application/json") !== -1) {
