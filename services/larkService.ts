@@ -12,15 +12,39 @@ const getSession = () => {
 export const clearSession = () => localStorage.removeItem('xinwealth_user');
 
 // Helper to ensure we are working with numbers, not strings
+// Updated to handle "RM" prefix and commas
 const safeFloat = (val: any): number => {
   if (typeof val === 'number') return val;
   if (typeof val === 'string') {
-    // Remove commas and other non-numeric chars (except dot and minus)
-    const clean = val.replace(/,/g, '').trim();
+    // Remove "RM", commas, spaces, and other non-numeric chars (except dot and minus)
+    const clean = val.replace(/RM/g, '').replace(/,/g, '').trim();
     return parseFloat(clean) || 0;
   }
   return 0;
 };
+
+// --- DATA CLEANING HELPER ---
+// Groups records by Month-Year (YYYY-MM) and keeps only the LATEST record for that month.
+// This fixes the chart duplication issue and prevents double-counting cashflows in math formulas.
+const deduplicateByMonth = (records: any[]) => {
+  const map = new Map<string, any>();
+  
+  records.forEach(record => {
+    const d = new Date(record.fields["Date"] || record.fields["date"]);
+    if (isNaN(d.getTime())) return;
+
+    // Key format: 2025-08
+    const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
+    
+    // Since records are sorted by date from API, setting it repeatedly 
+    // ensures the Map holds the *last* (latest) record for that month.
+    map.set(key, record);
+  });
+
+  // Convert map values back to array
+  return Array.from(map.values());
+};
+
 
 export const authenticateUser = async (email: string, pass: string): Promise<boolean> => {
   try {
@@ -73,7 +97,7 @@ const calculateXIRR = (values: number[], dates: Date[], guess = 0.1): number => 
   const tolerance = 1e-5;
   const maxIter = 100;
   
-  if (values.length !== dates.length) return 0;
+  if (values.length !== dates.length || values.length === 0) return 0;
   
   let x0 = guess;
   const t0 = dates[0].getTime(); // Reference date
@@ -98,33 +122,33 @@ const calculateXIRR = (values: number[], dates: Date[], guess = 0.1): number => 
   return 0; // Failed to converge
 };
 
-// Calculate TWR using Modified Dietz or Chain Linking
+// Calculate TWR
+// Formula per period: (End - (Start + CF)) / (Start + CF)
 const calculateTWR = (records: any[]): number => {
     let cumulativeTwr = 1;
-    let prevEndValue = 0;
+    let prevEndValue = 0; // Represents "Start Value" of current period
 
     for (const record of records) {
         const endValue = safeFloat(record.fields["End Value"] || record.fields["end value"]);
         const cashflow = safeFloat(record.fields["Cashflow"] || record.fields["cashflow"]);
         
-        const startValue = prevEndValue;
+        // Denominator (Capital Base) = Start Value + Cashflow
+        const capitalBase = prevEndValue + cashflow;
         
-        // Modified Dietz assumption: Cashflow occurs in the middle
-        let denominator = startValue + (cashflow * 0.5); 
-        
-        if (startValue === 0 && cashflow > 0) {
-             denominator = cashflow; 
-        }
-        
-        if (denominator === 0) {
+        if (capitalBase === 0) {
+            // Handle edge case (e.g. first month no money yet? or full withdrawal)
             prevEndValue = endValue;
             continue; 
         }
 
-        const gain = endValue - startValue - cashflow;
-        const periodReturn = gain / denominator;
+        // Gain = End - CapitalBase
+        // Return = Gain / CapitalBase
+        const gain = endValue - capitalBase;
+        const periodReturn = gain / capitalBase;
 
         cumulativeTwr *= (1 + periodReturn);
+        
+        // The End Value of this month becomes the Start Value of next month
         prevEndValue = endValue;
     }
 
@@ -133,9 +157,9 @@ const calculateTWR = (records: any[]): number => {
 
 export const fetchClientProfile = async (): Promise<ClientProfile> => {
   const data = await fetchData();
-  const records = data.records; 
+  let rawRecords = data.records; 
   
-  if (!records || records.length === 0) {
+  if (!rawRecords || rawRecords.length === 0) {
      return { 
          name: getSession()?.name || 'Client', 
          totalValue: 0, 
@@ -149,34 +173,35 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
     };
   }
 
-  const latestRecord = records[records.length - 1]; 
+  // CRITICAL STEP: CLEAN DATA
+  // Use unique monthly records for calculations to avoid double counting
+  const cleanRecords = deduplicateByMonth(rawRecords);
+
+  const latestRecord = cleanRecords[cleanRecords.length - 1]; 
   const currentVal = safeFloat(latestRecord.fields["End Value"]);
   
   // 1. Total Invested (Sum of Net Cashflow)
-  // CRITICAL FIX: Ensure we are summing numbers, not strings
-  const totalInvested = records.reduce((acc: number, r: any) => {
+  // Use cleanRecords to avoid double counting if API returns duplicates
+  const totalInvested = cleanRecords.reduce((acc: number, r: any) => {
     return acc + safeFloat(r.fields["Cashflow"]);
   }, 0);
 
-  // 2. Total Return Formula: Portfolio Market Value / Sum of Net Cashflow
-  // Note: To display as a "Return %", we typically show (Ratio - 1). 
-  // If Value is 120 and Cost is 100, Ratio is 1.2, Return is 20%.
+  // 2. Total Return Formula: (Portfolio Market Value / Sum of Net Cashflow) - 1
   const retPercent = totalInvested !== 0 ? ((currentVal / totalInvested) - 1) * 100 : 0;
-  
-  // Just for metadata (absolute return amount)
   const totalRet = currentVal - totalInvested;
 
   // 3. TWR Calculation
-  const twr = calculateTWR(records);
+  const twr = calculateTWR(cleanRecords);
 
   // 4. MWR (XIRR) Calculation
-  const xirrStreams = records
+  const xirrStreams = cleanRecords
     .filter((r: any) => safeFloat(r.fields["Cashflow"]) !== 0)
     .map((r: any) => ({
         amount: -safeFloat(r.fields["Cashflow"]), // Cash IN is negative for XIRR
         date: new Date(r.fields["Date"] || r.fields["date"])
     }));
   
+  // Add terminal value
   xirrStreams.push({
       amount: currentVal,
       date: new Date(latestRecord.fields["Date"] || latestRecord.fields["date"])
@@ -188,7 +213,6 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
   );
 
   // 5. FD Difference (Based on Latest Lark FD Value)
-  // Retrieve the actual FD field from Lark
   const latestFDValue = safeFloat(latestRecord.fields["FD"] || latestRecord.fields["fd"]);
   
   let fdDiff = 0;
@@ -211,9 +235,12 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
 
 export const fetchPortfolioHistory = async (): Promise<PortfolioDataPoint[]> => {
   const data = await fetchData();
-  const records = data.records;
+  const rawRecords = data.records;
   
-  return records
+  // Clean duplicates so the chart doesn't show "Aug 25" twice
+  const cleanRecords = deduplicateByMonth(rawRecords);
+  
+  return cleanRecords
     .map((record: any) => {
         const val = safeFloat(record.fields["End Value"] || record.fields["end value"]);
         const fd = safeFloat(record.fields["FD"] || record.fields["fd"]);
@@ -224,13 +251,9 @@ export const fetchPortfolioHistory = async (): Promise<PortfolioDataPoint[]> => 
             fdValue: fd
         };
     })
-    // 6. Data Cleaning for Chart
-    // Filter out records where Portfolio Value is 0 or suspiciously low (unless it's the very start)
-    // This fixes the "dip to zero" anomaly if Lark has empty rows or zero values in the middle of history
-    .filter((point, index) => {
-        // Always keep the first and last point if possible, but remove 0s in between
-        if (point.portfolioValue === 0) return false;
-        return true;
+    .filter((point) => {
+        // Keep point if value is valid, or if it's explicitly 0 but has a valid date
+        return !isNaN(point.portfolioValue);
     });
 };
 
