@@ -59,7 +59,7 @@ const Investment: React.FC = () => {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
-        {/* Card 1: Total Value */}
+        {/* Card 1: Portfolio Market Value */}
         <div className="group bg-xin-blue p-8 rounded-[2.5rem] shadow-xl hover:-translate-y-2 transition-transform duration-500 relative overflow-hidden">
             <div className="absolute top-0 right-0 p-8 opacity-10">
                 <DollarSign size={120} />
@@ -68,17 +68,16 @@ const Investment: React.FC = () => {
                 <div className="w-12 h-12 bg-white/10 rounded-2xl flex items-center justify-center mb-6 backdrop-blur-sm">
                     <DollarSign className="text-xin-gold" size={24} />
                 </div>
-                <p className="text-xin-gold text-sm font-bold tracking-widest uppercase mb-2">Total Net Worth</p>
+                {/* MODIFICATION: Changed label to Portfolio Market Value */}
+                <p className="text-xin-gold text-sm font-bold tracking-widest uppercase mb-2">Portfolio Market Value</p>
                 <h3 className="text-4xl font-bold text-white tracking-tight">
                     ${profile?.totalValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </h3>
-                 <p className="mt-2 text-white/50 text-xs uppercase tracking-wider font-medium">
-                   Net Invested: ${profile?.totalInvested.toLocaleString()}
-                 </p>
+                {/* MODIFICATION: Removed Net Invested Subtitle */}
             </div>
         </div>
 
-        {/* Card 2: Return Metrics (Tri-Split) */}
+        {/* Card 2: Return Metrics */}
         <div className="group bg-white p-8 rounded-[2.5rem] shadow-sm hover:shadow-[0_20px_40px_-10px_rgba(12,46,74,0.08)] hover:-translate-y-2 transition-all duration-500 border border-slate-50">
             <div className="w-12 h-12 bg-green-50 rounded-2xl flex items-center justify-center mb-6">
                 <BarChart3 className="text-green-600" size={24} />
@@ -117,14 +116,14 @@ const Investment: React.FC = () => {
             <div className="w-12 h-12 bg-slate-50 rounded-2xl flex items-center justify-center mb-6">
                 <Percent className="text-slate-400" size={24} />
             </div>
-            <p className="text-slate-400 text-xs font-bold tracking-widest uppercase mb-2">Vs Fixed Deposit (3%)</p>
+            <p className="text-slate-400 text-xs font-bold tracking-widest uppercase mb-2">Vs Fixed Deposit</p>
             <h3 className={`text-3xl font-bold tracking-tight ${(profile?.fdDifference || 0) >= 0 ? 'text-xin-blue' : 'text-red-500'}`}>
                {(profile?.fdDifference || 0) >= 0 ? 'Outperforming' : 'Underperforming'}
             </h3>
             <p className="mt-2 text-sm text-slate-500 leading-relaxed">
                 Difference vs FD: <span className="text-xin-blue font-bold">{(profile?.fdDifference || 0) > 0 ? '+' : ''}{profile?.fdDifference}%</span>
                 <br />
-                <span className="text-xs text-slate-400">Comparing current value vs theoretical 3% FD</span>
+                <span className="text-xs text-slate-400">Comparing portfolio vs Lark FD value</span>
             </p>
         </div>
       </div>
@@ -134,7 +133,7 @@ const Investment: React.FC = () => {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-10 gap-4">
             <div>
                 <h3 className="text-2xl font-bold text-xin-blue mb-2 font-serif">Performance Analysis</h3>
-                <p className="text-slate-500">Monthly Market Value vs. Fixed Deposit (3%)</p>
+                <p className="text-slate-500">Monthly Market Value vs. Fixed Deposit</p>
             </div>
             <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
@@ -143,7 +142,7 @@ const Investment: React.FC = () => {
                 </div>
                 <div className="flex items-center gap-2">
                     <span className="w-3 h-3 rounded-full bg-slate-300"></span>
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">FD @ 3%</span>
+                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">FD</span>
                 </div>
             </div>
         </div>
@@ -165,7 +164,9 @@ const Investment: React.FC = () => {
                         tick={{ fill: '#94a3b8', fontSize: 12 }}
                         dy={10}
                     />
+                    {/* MODIFICATION: Added domain=['auto', 'auto'] to let chart scale above 10k */}
                     <YAxis 
+                        domain={['auto', 'auto']}
                         axisLine={false} 
                         tickLine={false} 
                         tick={{ fill: '#94a3b8', fontSize: 12 }}
@@ -189,7 +190,7 @@ const Investment: React.FC = () => {
                         strokeWidth={2} 
                         strokeDasharray="5 5" 
                         dot={false}
-                        name="Fixed Deposit (3%)"
+                        name="Fixed Deposit"
                     />
                     {/* Portfolio Area */}
                     <Area 

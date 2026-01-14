@@ -11,6 +11,17 @@ const getSession = () => {
 };
 export const clearSession = () => localStorage.removeItem('xinwealth_user');
 
+// Helper to ensure we are working with numbers, not strings
+const safeFloat = (val: any): number => {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    // Remove commas and other non-numeric chars (except dot and minus)
+    const clean = val.replace(/,/g, '').trim();
+    return parseFloat(clean) || 0;
+  }
+  return 0;
+};
+
 export const authenticateUser = async (email: string, pass: string): Promise<boolean> => {
   try {
     const response = await fetch('/api/login', {
@@ -59,7 +70,6 @@ const fetchData = async () => {
 
 // Calculate XIRR using Newton-Raphson method for MWR
 const calculateXIRR = (values: number[], dates: Date[], guess = 0.1): number => {
-  // Credits to standard XIRR algorithm implementations
   const tolerance = 1e-5;
   const maxIter = 100;
   
@@ -89,30 +99,21 @@ const calculateXIRR = (values: number[], dates: Date[], guess = 0.1): number => 
 };
 
 // Calculate TWR using Modified Dietz or Chain Linking
-// Since we have monthly snapshots, we chain periodic returns.
-// Period Return = (EndVal - StartVal - Cashflow) / (StartVal + 0.5 * Cashflow)
-// Note: This assumes Cashflow happens roughly in middle of month if unknown, or we handle it based on available data.
 const calculateTWR = (records: any[]): number => {
     let cumulativeTwr = 1;
     let prevEndValue = 0;
 
     for (const record of records) {
-        const endValue = record.fields["End Value"] || 0;
-        const cashflow = record.fields["Cashflow"] || 0;
+        const endValue = safeFloat(record.fields["End Value"] || record.fields["end value"]);
+        const cashflow = safeFloat(record.fields["Cashflow"] || record.fields["cashflow"]);
         
-        // Start Value for this period is End Value of previous period
         const startValue = prevEndValue;
-
-        // Simple Modified Dietz for the period
-        // Denominator: Capital at risk. We assume CF happens mid-period => 0.5 weight
-        // If startValue is 0 (first deposit), denominator is just cashflow (or 0.5 depending on timing convention)
-        // Let's assume CF happens at START of period for the very first entry, and mid for others.
         
-        let denominator = startValue + (cashflow * 0.5); // Modified Dietz assumption
+        // Modified Dietz assumption: Cashflow occurs in the middle
+        let denominator = startValue + (cashflow * 0.5); 
         
-        // Handling first deposit scenario specifically
         if (startValue === 0 && cashflow > 0) {
-             denominator = cashflow; // First deposit is the basis
+             denominator = cashflow; 
         }
         
         if (denominator === 0) {
@@ -130,42 +131,9 @@ const calculateTWR = (records: any[]): number => {
     return (cumulativeTwr - 1) * 100;
 };
 
-// Calculate Dynamic FD Series (3% p.a.)
-// Returns map of date string -> fd value
-const calculateFDSeries = (records: any[]): Map<string, number> => {
-    const fdMap = new Map<string, number>();
-    let currentFD = 0;
-    const rate = 0.03; // 3%
-
-    if (records.length === 0) return fdMap;
-
-    let prevDate = new Date(records[0].fields["Date"]);
-
-    for (const record of records) {
-        const currDate = new Date(record.fields["Date"]);
-        const cashflow = record.fields["Cashflow"] || 0;
-
-        // Calculate interest accrued since last record
-        const timeDiff = currDate.getTime() - prevDate.getTime();
-        const daysDiff = timeDiff / (1000 * 3600 * 24);
-        
-        // Apply interest
-        currentFD = currentFD * (1 + (rate * (daysDiff / 365)));
-        
-        // Add new cashflow
-        currentFD += cashflow;
-
-        fdMap.set(currDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }), currentFD);
-        
-        prevDate = currDate;
-    }
-    return fdMap;
-};
-
-
 export const fetchClientProfile = async (): Promise<ClientProfile> => {
   const data = await fetchData();
-  const records = data.records; // Assuming sorted by date from API
+  const records = data.records; 
   
   if (!records || records.length === 0) {
      return { 
@@ -182,34 +150,36 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
   }
 
   const latestRecord = records[records.length - 1]; 
-  const currentVal = latestRecord.fields["End Value"] || 0;
+  const currentVal = safeFloat(latestRecord.fields["End Value"]);
   
+  // 1. Total Invested (Sum of Net Cashflow)
+  // CRITICAL FIX: Ensure we are summing numbers, not strings
   const totalInvested = records.reduce((acc: number, r: any) => {
-    return acc + (r.fields["Cashflow"] || 0);
+    return acc + safeFloat(r.fields["Cashflow"]);
   }, 0);
 
-  // 1. Total Return (Simple ROI based on Net Cashflow)
-  // Formula: (Current - Invested) / Invested
+  // 2. Total Return Formula: Portfolio Market Value / Sum of Net Cashflow
+  // Note: To display as a "Return %", we typically show (Ratio - 1). 
+  // If Value is 120 and Cost is 100, Ratio is 1.2, Return is 20%.
+  const retPercent = totalInvested !== 0 ? ((currentVal / totalInvested) - 1) * 100 : 0;
+  
+  // Just for metadata (absolute return amount)
   const totalRet = currentVal - totalInvested;
-  const retPercent = totalInvested > 0 ? (totalRet / totalInvested) * 100 : 0;
 
-  // 2. TWR Calculation
+  // 3. TWR Calculation
   const twr = calculateTWR(records);
 
-  // 3. MWR (XIRR) Calculation
-  // Prepare streams: [ {amount: -cashflow, date}, {amount: -cashflow, date} ... {amount: +currentVal, date: now} ]
-  // Note: XIRR function expects deposits as negative, current value as positive
+  // 4. MWR (XIRR) Calculation
   const xirrStreams = records
-    .filter((r: any) => r.fields["Cashflow"] !== 0)
+    .filter((r: any) => safeFloat(r.fields["Cashflow"]) !== 0)
     .map((r: any) => ({
-        amount: -(r.fields["Cashflow"] || 0), // Cash IN to portfolio is negative for XIRR (investment)
-        date: new Date(r.fields["Date"])
+        amount: -safeFloat(r.fields["Cashflow"]), // Cash IN is negative for XIRR
+        date: new Date(r.fields["Date"] || r.fields["date"])
     }));
   
-  // Add terminal value (as if we withdrew everything today)
   xirrStreams.push({
       amount: currentVal,
-      date: new Date(latestRecord.fields["Date"])
+      date: new Date(latestRecord.fields["Date"] || latestRecord.fields["date"])
   });
 
   const mwr = calculateXIRR(
@@ -217,24 +187,14 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
       xirrStreams.map(s => s.date)
   );
 
-  // 4. FD Difference (vs 3%)
-  // Re-run FD calc to get the final FD value
-  const fdMap = calculateFDSeries(records);
-  const latestDateKey = new Date(latestRecord.fields["Date"]).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-  // We might need to match exact keys, or just run the logic up to end
-  // Let's simplify: run the logic one last time for the final number
-  let finalFD = 0;
-  let prevDate = new Date(records[0].fields["Date"]);
-  records.forEach((r: any) => {
-      const d = new Date(r.fields["Date"]);
-      const cf = r.fields["Cashflow"] || 0;
-      const days = (d.getTime() - prevDate.getTime()) / (1000 * 3600 * 24);
-      finalFD = finalFD * (1 + (0.03 * (days / 365)));
-      finalFD += cf;
-      prevDate = d;
-  });
+  // 5. FD Difference (Based on Latest Lark FD Value)
+  // Retrieve the actual FD field from Lark
+  const latestFDValue = safeFloat(latestRecord.fields["FD"] || latestRecord.fields["fd"]);
   
-  const fdDiff = finalFD > 0 ? ((currentVal - finalFD) / finalFD) * 100 : 0;
+  let fdDiff = 0;
+  if (latestFDValue > 0) {
+      fdDiff = ((currentVal - latestFDValue) / latestFDValue) * 100;
+  }
 
   return {
     name: getSession()?.name,
@@ -245,7 +205,7 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
     twr: parseFloat(twr.toFixed(2)),
     mwr: parseFloat(mwr.toFixed(2)),
     fdDifference: parseFloat(fdDiff.toFixed(2)),
-    lastUpdated: new Date(latestRecord.fields["Date"]).toLocaleDateString()
+    lastUpdated: new Date(latestRecord.fields["Date"] || latestRecord.fields["date"]).toLocaleDateString()
   };
 };
 
@@ -253,19 +213,27 @@ export const fetchPortfolioHistory = async (): Promise<PortfolioDataPoint[]> => 
   const data = await fetchData();
   const records = data.records;
   
-  const fdMap = calculateFDSeries(records);
-
-  return records.map((record: any) => {
-    const dateKey = new Date(record.fields["Date"]).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-    return {
-        date: dateKey,
-        portfolioValue: record.fields["End Value"] || 0,
-        fdValue: fdMap.get(dateKey) || 0 // Use calculated FD
-    };
-  });
+  return records
+    .map((record: any) => {
+        const val = safeFloat(record.fields["End Value"] || record.fields["end value"]);
+        const fd = safeFloat(record.fields["FD"] || record.fields["fd"]);
+        
+        return {
+            date: new Date(record.fields["Date"] || record.fields["date"]).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+            portfolioValue: val,
+            fdValue: fd
+        };
+    })
+    // 6. Data Cleaning for Chart
+    // Filter out records where Portfolio Value is 0 or suspiciously low (unless it's the very start)
+    // This fixes the "dip to zero" anomaly if Lark has empty rows or zero values in the middle of history
+    .filter((point, index) => {
+        // Always keep the first and last point if possible, but remove 0s in between
+        if (point.portfolioValue === 0) return false;
+        return true;
+    });
 };
 
-// Deprecated: fetchTransactions removed as per request
 export const fetchTransactions = async (): Promise<Transaction[]> => {
     return [];
 };
