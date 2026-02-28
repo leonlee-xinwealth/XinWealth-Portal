@@ -28,5 +28,6 @@ export interface ClientProfile {
   twr: number; // Time Weighted Return
   mwr: number; // Money Weighted Return (XIRR)
   fdDifference: number; // % Difference vs FD
+  fdDifferenceValue: number; // Absolute value difference vs FD
   lastUpdated: string;
 }

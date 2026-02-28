@@ -28,14 +28,14 @@ const safeFloat = (val: any): number => {
 // This fixes the chart duplication issue and prevents double-counting cashflows in math formulas.
 const deduplicateByMonth = (records: any[]) => {
   const map = new Map<string, any>();
-  
+
   records.forEach(record => {
     const d = new Date(record.fields["Date"] || record.fields["date"]);
     if (isNaN(d.getTime())) return;
 
     // Key format: 2025-08
     const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
-    
+
     // Since records are sorted by date from API, setting it repeatedly 
     // ensures the Map holds the *last* (latest) record for that month.
     map.set(key, record);
@@ -56,16 +56,16 @@ export const authenticateUser = async (email: string, pass: string): Promise<boo
 
     const contentType = response.headers.get("content-type");
     if (contentType && contentType.indexOf("application/json") !== -1) {
-       const data = await response.json();
-       if (!response.ok) {
-         throw new Error(data.error || 'Authentication failed (Server Error)');
-       }
-       setSession(data); 
-       return true;
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Authentication failed (Server Error)');
+      }
+      setSession(data);
+      return true;
     } else {
-       const text = await response.text();
-       console.error("Non-JSON response from server:", text);
-       throw new Error(`Server connection failed. Status: ${response.status}. Please ensure API is running.`);
+      const text = await response.text();
+      console.error("Non-JSON response from server:", text);
+      throw new Error(`Server connection failed. Status: ${response.status}. Please ensure API is running.`);
     }
 
   } catch (error) {
@@ -81,14 +81,14 @@ const fetchData = async () => {
   // ADDED TIMESTAMP TO PREVENT CACHING
   const timestamp = new Date().getTime();
   const response = await fetch(`/api/data?name=${encodeURIComponent(user.name)}&_t=${timestamp}`);
-  
+
   const contentType = response.headers.get("content-type");
   if (contentType && contentType.indexOf("application/json") !== -1) {
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Failed to fetch data");
-      return data;
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Failed to fetch data");
+    return data;
   } else {
-      throw new Error("Server connection failed (Invalid Response)");
+    throw new Error("Server connection failed (Invalid Response)");
   }
 };
 
@@ -98,9 +98,9 @@ const fetchData = async () => {
 const calculateXIRR = (values: number[], dates: Date[], guess = 0.1): number => {
   const tolerance = 1e-5;
   const maxIter = 100;
-  
+
   if (values.length !== dates.length || values.length === 0) return 0;
-  
+
   let x0 = guess;
   const t0 = dates[0].getTime(); // Reference date
 
@@ -127,51 +127,52 @@ const calculateXIRR = (values: number[], dates: Date[], guess = 0.1): number => 
 // Calculate TWR
 // Formula per period: (End - (Start + CF)) / (Start + CF)
 const calculateTWR = (records: any[]): number => {
-    let cumulativeTwr = 1;
-    let prevEndValue = 0; // Represents "Start Value" of current period
+  let cumulativeTwr = 1;
+  let prevEndValue = 0; // Represents "Start Value" of current period
 
-    for (const record of records) {
-        const endValue = safeFloat(record.fields["End Value"] || record.fields["end value"]);
-        const cashflow = safeFloat(record.fields["Cashflow"] || record.fields["cashflow"]);
-        
-        // Denominator (Capital Base) = Start Value + Cashflow
-        const capitalBase = prevEndValue + cashflow;
-        
-        if (capitalBase === 0) {
-            // Handle edge case (e.g. first month no money yet? or full withdrawal)
-            prevEndValue = endValue;
-            continue; 
-        }
+  for (const record of records) {
+    const endValue = safeFloat(record.fields["End Value"] || record.fields["end value"]);
+    const cashflow = safeFloat(record.fields["Cashflow"] || record.fields["cashflow"]);
 
-        // Gain = End - CapitalBase
-        // Return = Gain / CapitalBase
-        const gain = endValue - capitalBase;
-        const periodReturn = gain / capitalBase;
+    // Denominator (Capital Base) = Start Value + Cashflow
+    const capitalBase = prevEndValue + cashflow;
 
-        cumulativeTwr *= (1 + periodReturn);
-        
-        // The End Value of this month becomes the Start Value of next month
-        prevEndValue = endValue;
+    if (capitalBase === 0) {
+      // Handle edge case (e.g. first month no money yet? or full withdrawal)
+      prevEndValue = endValue;
+      continue;
     }
 
-    return (cumulativeTwr - 1) * 100;
+    // Gain = End - CapitalBase
+    // Return = Gain / CapitalBase
+    const gain = endValue - capitalBase;
+    const periodReturn = gain / capitalBase;
+
+    cumulativeTwr *= (1 + periodReturn);
+
+    // The End Value of this month becomes the Start Value of next month
+    prevEndValue = endValue;
+  }
+
+  return (cumulativeTwr - 1) * 100;
 };
 
 export const fetchClientProfile = async (): Promise<ClientProfile> => {
   const data = await fetchData();
-  let rawRecords = data.records; 
-  
+  let rawRecords = data.records;
+
   if (!rawRecords || rawRecords.length === 0) {
-     return { 
-         name: getSession()?.name || 'Client', 
-         totalValue: 0, 
-         totalInvested: 0,
-         totalReturn: 0, 
-         returnPercentage: 0, 
-         twr: 0, 
-         mwr: 0, 
-         fdDifference: 0,
-         lastUpdated: '-' 
+    return {
+      name: getSession()?.name || 'Client',
+      totalValue: 0,
+      totalInvested: 0,
+      totalReturn: 0,
+      returnPercentage: 0,
+      twr: 0,
+      mwr: 0,
+      fdDifference: 0,
+      fdDifferenceValue: 0,
+      lastUpdated: '-'
     };
   }
 
@@ -179,9 +180,9 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
   // Use unique monthly records for calculations to avoid double counting
   const cleanRecords = deduplicateByMonth(rawRecords);
 
-  const latestRecord = cleanRecords[cleanRecords.length - 1]; 
+  const latestRecord = cleanRecords[cleanRecords.length - 1];
   const currentVal = safeFloat(latestRecord.fields["End Value"]);
-  
+
   // 1. Total Invested (Sum of Net Cashflow)
   // Use cleanRecords to avoid double counting if API returns duplicates
   const totalInvested = cleanRecords.reduce((acc: number, r: any) => {
@@ -199,27 +200,29 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
   const xirrStreams = cleanRecords
     .filter((r: any) => safeFloat(r.fields["Cashflow"]) !== 0)
     .map((r: any) => ({
-        amount: -safeFloat(r.fields["Cashflow"]), // Cash IN is negative for XIRR
-        date: new Date(r.fields["Date"] || r.fields["date"])
+      amount: -safeFloat(r.fields["Cashflow"]), // Cash IN is negative for XIRR
+      date: new Date(r.fields["Date"] || r.fields["date"])
     }));
-  
+
   // Add terminal value
   xirrStreams.push({
-      amount: currentVal,
-      date: new Date(latestRecord.fields["Date"] || latestRecord.fields["date"])
+    amount: currentVal,
+    date: new Date(latestRecord.fields["Date"] || latestRecord.fields["date"])
   });
 
   const mwr = calculateXIRR(
-      xirrStreams.map(s => s.amount),
-      xirrStreams.map(s => s.date)
+    xirrStreams.map(s => s.amount),
+    xirrStreams.map(s => s.date)
   );
 
   // 5. FD Difference (Based on Latest Lark FD Value)
   const latestFDValue = safeFloat(latestRecord.fields["FD"] || latestRecord.fields["fd"]);
-  
+
   let fdDiff = 0;
+  let fdDiffValue = 0;
   if (latestFDValue > 0) {
-      fdDiff = ((currentVal - latestFDValue) / latestFDValue) * 100;
+    fdDiff = ((currentVal - latestFDValue) / latestFDValue) * 100;
+    fdDiffValue = currentVal - latestFDValue;
   }
 
   return {
@@ -231,6 +234,7 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
     twr: parseFloat(twr.toFixed(2)),
     mwr: parseFloat(mwr.toFixed(2)),
     fdDifference: parseFloat(fdDiff.toFixed(2)),
+    fdDifferenceValue: fdDiffValue,
     lastUpdated: new Date(latestRecord.fields["Date"] || latestRecord.fields["date"]).toLocaleDateString()
   };
 };
@@ -238,27 +242,27 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
 export const fetchPortfolioHistory = async (): Promise<PortfolioDataPoint[]> => {
   const data = await fetchData();
   const rawRecords = data.records;
-  
+
   // Clean duplicates so the chart doesn't show "Aug 25" twice
   const cleanRecords = deduplicateByMonth(rawRecords);
-  
+
   return cleanRecords
     .map((record: any) => {
-        const val = safeFloat(record.fields["End Value"] || record.fields["end value"]);
-        const fd = safeFloat(record.fields["FD"] || record.fields["fd"]);
-        
-        return {
-            date: new Date(record.fields["Date"] || record.fields["date"]).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-            portfolioValue: val,
-            fdValue: fd
-        };
+      const val = safeFloat(record.fields["End Value"] || record.fields["end value"]);
+      const fd = safeFloat(record.fields["FD"] || record.fields["fd"]);
+
+      return {
+        date: new Date(record.fields["Date"] || record.fields["date"]).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+        portfolioValue: val,
+        fdValue: fd
+      };
     })
     .filter((point) => {
-        // Keep point if value is valid, or if it's explicitly 0 but has a valid date
-        return !isNaN(point.portfolioValue);
+      // Keep point if value is valid, or if it's explicitly 0 but has a valid date
+      return !isNaN(point.portfolioValue);
     });
 };
 
 export const fetchTransactions = async (): Promise<Transaction[]> => {
-    return [];
+  return [];
 };
