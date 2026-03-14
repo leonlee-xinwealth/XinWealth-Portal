@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { KYCData, FinancialItem, KYCInvestmentsData } from '../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Trash2, ChevronDown, ChevronUp, PlusCircle, TrendingUp, Briefcase, Landmark, Currency, Wallet, LineChart, Building, FolderPlus } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, PlusCircle, TrendingUp, Briefcase, Landmark, DollarSign, Wallet, LineChart, Building2, FolderPlus } from 'lucide-react';
 
 interface InvestmentsStepProps {
     formData: KYCData;
@@ -201,7 +201,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                     />
                     <ExpandableInvestmentCard 
                         title={t('investments.unitTrusts')}
-                        icon={Building}
+                        icon={Building2}
                         collectionPath="unitTrusts"
                     />
                     <ExpandableInvestmentCard 
@@ -211,7 +211,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                     />
                     <ExpandableInvestmentCard 
                         title={t('investments.forex')}
-                        icon={Currency}
+                        icon={DollarSign}
                         collectionPath="forex"
                     />
                     <ExpandableInvestmentCard 
