@@ -99,7 +99,12 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
                             >
                                 <option value="" disabled>Select...</option>
                                 <option value="Malaysian">Malaysian</option>
-                                <option value="Singaporean">Singaporean</option>
+                                <option value="American">American</option>
+                                <option value="Australian">Australian</option>
+                                <option value="British">British</option>
+                                <option value="Canadian">Canadian</option>
+                                <option value="Chinese">Chinese</option>
+                                <option value="Filipino">Filipino</option>
                                 <option value="Other">Other</option>
                             </select>
                         </div>
@@ -115,8 +120,13 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
                             >
                                 <option value="" disabled>Select...</option>
                                 <option value="Malaysia Citizen">Malaysia Citizen</option>
-                                <option value="PR">Permanent Resident</option>
-                                <option value="Non-Resident">Non-Resident</option>
+                                <option value="Malaysian PR">Malaysian PR</option>
+                                <option value="Work Pass">Work Pass</option>
+                                <option value="Student Pass">Student Pass</option>
+                                <option value="Long Term Visit Pass">Long Term Visit Pass</option>
+                                <option value="Employment Pass">Employment Pass</option>
+                                <option value="Dependant Pass">Dependant Pass</option>
+                                <option value="Other">Other</option>
                             </select>
                         </div>
                         <div>
@@ -130,6 +140,7 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
                                 <option value="Single">Single</option>
                                 <option value="Married">Married</option>
                                 <option value="Divorced">Divorced</option>
+                                <option value="Separated">Separated</option>
                                 <option value="Widowed">Widowed</option>
                             </select>
                         </div>
