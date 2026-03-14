@@ -139,7 +139,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                         onClick={() => addExpenseItem(collectionPath, defaultType)} 
                         className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors"
                     >
-                        <PlusCircle size={18} /> {t('expenses.addBtn')}
+                        <PlusCircle size={18} /> {t('expenses.add')}
                     </button>
                 </div>
             );
@@ -295,7 +295,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                         defaultType="All - Miscellaneous"
                     />
                     <ExpandableExpenseCard 
-                        title={t('expenses.other')}
+                        title={t('expenses.others')}
                         icon={FolderPlus}
                         collectionPath="otherExpenses"
                         options={OTHER_EXPENSES_OPTIONS}

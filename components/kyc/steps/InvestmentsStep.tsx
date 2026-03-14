@@ -79,7 +79,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                         onClick={() => addInvestmentItem(collectionPath)} 
                         className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors"
                     >
-                        <PlusCircle size={18} /> {t('investments.addBtn')}
+                        <PlusCircle size={18} /> {t('investments.add')}
                     </button>
                 </div>
             );
@@ -215,12 +215,12 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                         collectionPath="forex"
                     />
                     <ExpandableInvestmentCard 
-                        title={t('investments.moneyMarket')}
+                        title={t('investments.money')}
                         icon={Wallet}
                         collectionPath="moneyMarket"
                     />
                     <ExpandableInvestmentCard 
-                        title={t('investments.other')}
+                        title={t('investments.others')}
                         icon={FolderPlus}
                         collectionPath="otherInvestments"
                     />
