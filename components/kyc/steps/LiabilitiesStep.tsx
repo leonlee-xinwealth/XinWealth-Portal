@@ -35,21 +35,20 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
         const newItems = [...liabilitiesData[collectionPath], { id: Date.now().toString() + Math.random().toString(), amount: '', description: '' }];
         updateLiabilities({ [collectionPath]: newItems });
         setExpandedCard(collectionPath as string);
-    });
+    };
 
     const removeLoanItem = (collectionPath: keyof KYCLiabilitiesData, idToRemove: string) => {
         const newItems = liabilitiesData[collectionPath].filter(item => item.id !== idToRemove);
         updateLiabilities({ [collectionPath]: newItems });
-        setExpandedCard(collectionPath as string);
-    });
+        if (newItems.length === 0) setExpandedCard(null);
+    };
 
     const updateLoanItemField = (collectionPath: keyof KYCLiabilitiesData, idToUpdate: string, field: 'amount' | 'description', value: string) => {
         const newItems = liabilitiesData[collectionPath].map(item => 
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
         updateLiabilities({ [collectionPath]: newItems });
-        setExpandedCard(collectionPath as string);
-    });
+    };
 
     // Reusable Expandable Card for Loans
     const ExpandableLoanCard = ({ 

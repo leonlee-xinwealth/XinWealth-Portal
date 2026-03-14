@@ -38,14 +38,14 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
         const newItems = [...newArray, { id: Date.now().toString() + Math.random().toString(), amount: '', description: '' }];
         updateInvestments({ [collectionPath]: newItems });
         setExpandedCard(collectionPath as string);
-    });
+    };
 
     const removeInvestmentItem = (collectionPath: keyof KYCInvestmentsData, idToRemove: string) => {
         const newArray = investmentsData[collectionPath] || [];
         const newItems = newArray.filter((item: FinancialItem) => item.id !== idToRemove);
         updateInvestments({ [collectionPath]: newItems });
-        setExpandedCard(collectionPath as string);
-    });
+        if (newItems.length === 0) setExpandedCard(null);
+    };
 
     const updateInvestmentItemField = (collectionPath: keyof KYCInvestmentsData, idToUpdate: string, field: 'amount' | 'description', value: string) => {
         const newArray = investmentsData[collectionPath] || [];
@@ -53,8 +53,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
         updateInvestments({ [collectionPath]: newItems });
-        setExpandedCard(collectionPath as string);
-    });
+    };
 
     // Reusable Expandable Card for Investments
     const ExpandableInvestmentCard = ({ 
@@ -166,7 +165,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                                 onClick={() => addInvestmentItem(collectionPath)} 
                                 className="text-xin-blue flex items-center gap-2 text-sm font-semibold hover:text-xin-cyan transition-colors bg-slate-50 px-4 py-2 rounded-full border border-xin-cyan/20"
                             >
-                                <PlusCircle size={18} /> Add Another Investment
+                                <PlusCircle size={18} /> {isZh ? '添加另一项投资' : 'Add Another Investment'}
                             </button>
                         </div>
                     </div>

@@ -21,8 +21,9 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
 
     const assetsData = formData.assets || {
         savings: '',
-        epfSejahtera: '',
         epfPersaraan: '',
+        epfSejahtera: '',
+        epfFleksibel: '',
         properties: [],
         vehicles: [],
         otherAssets: []
@@ -213,7 +214,26 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
 
                 <div className="space-y-6">
                     <div>
-                        <label className={labelClasses}>{t('assets.epf.sejahtera')}</label>
+                        <label className={labelClasses}>{t('assets.epf.account1')}</label>
+                        <div className="relative mt-2">
+                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                <span className="text-gray-500 font-medium">RM</span>
+                            </div>
+                            <input
+                                type="text"
+                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
+                                value={assetsData.epfPersaraan}
+                                onChange={(e) => {
+                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
+                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
+                                    updateAssets({ epfPersaraan: formattedValue });
+                                }}
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className={labelClasses}>{t('assets.epf.account2')}</label>
                         <div className="relative mt-2">
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
@@ -232,7 +252,7 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                     </div>
 
                     <div>
-                        <label className={labelClasses}>{t('assets.epf.persaraan')}</label>
+                        <label className={labelClasses}>{t('assets.epf.account3')}</label>
                         <div className="relative mt-2">
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
@@ -240,11 +260,11 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                             <input
                                 type="text"
                                 className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
-                                value={assetsData.epfPersaraan}
+                                value={assetsData.epfFleksibel}
                                 onChange={(e) => {
                                     const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
                                     const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                    updateAssets({ epfPersaraan: formattedValue });
+                                    updateAssets({ epfFleksibel: formattedValue });
                                 }}
                             />
                         </div>

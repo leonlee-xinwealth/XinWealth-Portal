@@ -132,10 +132,14 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                                                 <span className="text-gray-500 font-medium pb-0.5">RM</span>
                                             </div>
                                             <input 
-                                                type="number" 
+                                                type="text" 
                                                 className="w-full pl-12 pr-16 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
                                                 value={item.amount}
-                                                onChange={(e) => updateIncomeItemField(collectionPath, item.id, 'amount', e.target.value)}
+                                                onChange={(e) => {
+                                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
+                                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
+                                                    updateIncomeItemField(collectionPath, item.id, 'amount', formattedValue);
+                                                }}
                                             />
                                             <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium pb-0.5 border-l border-gray-200 pl-3 my-2">
                                                 {periodSuffix}

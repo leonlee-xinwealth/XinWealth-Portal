@@ -94,14 +94,14 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
         const newItems = [...newArray, { id: Date.now().toString() + Math.random().toString(), type: defaultType, amount: '' }];
         updateExpenses({ [collectionPath]: newItems });
         setExpandedCard(collectionPath as string);
-    });
+    };
 
     const removeExpenseItem = (collectionPath: keyof KYCExpensesData, idToRemove: string) => {
         const newArray = expensesData[collectionPath] || [];
         const newItems = newArray.filter(item => item.id !== idToRemove);
         updateExpenses({ [collectionPath]: newItems });
-        setExpandedCard(collectionPath as string);
-    });
+        if (newItems.length === 0) setExpandedCard(null);
+    };
 
     const updateExpenseItemField = (collectionPath: keyof KYCExpensesData, idToUpdate: string, field: 'type' | 'amount', value: string) => {
         const newArray = expensesData[collectionPath] || [];
@@ -109,8 +109,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
         updateExpenses({ [collectionPath]: newItems });
-        setExpandedCard(collectionPath as string);
-    });
+    };
 
     // Reusable Expandable Card for Expenses
     const ExpandableExpenseCard = ({ 

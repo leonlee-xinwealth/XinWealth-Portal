@@ -62,6 +62,7 @@ export interface KYCAssetsData {
   savings: string;
   epfSejahtera: string;
   epfPersaraan: string;
+  epfFleksibel: string;
   properties: FinancialItem[];
   vehicles: FinancialItem[];
   otherAssets: FinancialItem[];
@@ -147,6 +148,7 @@ export const initialKYCData: KYCData = {
     savings: '',
     epfSejahtera: '',
     epfPersaraan: '',
+    epfFleksibel: '',
     properties: [],
     vehicles: [],
     otherAssets: [],
