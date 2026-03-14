@@ -64,7 +64,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
     }) => {
         const items = investmentsData[collectionPath] || [];
         const hasItems = items.length > 0;
-        const [isCollapsed, setIsCollapsed] = useState(false);
+        const [isCollapsed, setIsCollapsed] = useState(true);
 
         if (!hasItems) {
             return (

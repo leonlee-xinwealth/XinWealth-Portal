@@ -124,7 +124,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
     }) => {
         const items = expensesData[collectionPath] || [];
         const hasItems = items.length > 0;
-        const [isCollapsed, setIsCollapsed] = useState(false);
+        const [isCollapsed, setIsCollapsed] = useState(true);
 
         if (!hasItems) {
             return (

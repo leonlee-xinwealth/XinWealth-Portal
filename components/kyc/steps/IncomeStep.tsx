@@ -62,7 +62,7 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
     }) => {
         const items = incomeData[collectionPath];
         const hasItems = items.length > 0;
-        const [isCollapsed, setIsCollapsed] = useState(false);
+        const [isCollapsed, setIsCollapsed] = useState(true);
 
         if (!hasItems) {
             return (

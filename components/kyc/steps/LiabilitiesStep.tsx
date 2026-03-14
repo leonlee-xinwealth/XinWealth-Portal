@@ -59,7 +59,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
     }) => {
         const items = liabilitiesData[collectionPath];
         const hasItems = items.length > 0;
-        const [isCollapsed, setIsCollapsed] = useState(false);
+        const [isCollapsed, setIsCollapsed] = useState(true);
 
         if (!hasItems) {
             return (
@@ -177,7 +177,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                 
                 <div className="space-y-4">
                     <ExpandableLoanCard 
-                        title={t('liabilities.mortgage')}
+                        title={t('liabilities.mortgages')}
                         icon={Home}
                         collectionPath="mortgages"
                     />
@@ -192,7 +192,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                         collectionPath="studyLoans"
                     />
                     <ExpandableLoanCard 
-                        title={t('liabilities.interestOnly')}
+                        title={t('liabilities.interest')}
                         icon={Percent}
                         collectionPath="interestOnlyLoans"
                     />
@@ -202,7 +202,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                         collectionPath="renovationLoans"
                     />
                     <ExpandableLoanCard 
-                        title={t('liabilities.other')}
+                        title={t('liabilities.others')}
                         icon={FolderPlus}
                         collectionPath="otherLoans"
                     />
