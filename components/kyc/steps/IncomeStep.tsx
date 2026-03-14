@@ -15,6 +15,9 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
+
+    // Accordion: which card is currently expanded
+    const [expandedCard, setExpandedCard] = useState<string | null>(null);
     
     // Safety check just in case formData.income is somehow missing
     const incomeData = formData.income || {
@@ -32,11 +35,14 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
     const addIncomeItem = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>) => {
         const newItems = [...incomeData[collectionPath], { id: Date.now().toString() + Math.random().toString(), amount: '', description: '' }];
         updateIncome({ [collectionPath]: newItems });
+        // Auto-expand this card
+        setExpandedCard(collectionPath);
     };
 
     const removeIncomeItem = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>, idToRemove: string) => {
         const newItems = incomeData[collectionPath].filter(item => item.id !== idToRemove);
         updateIncome({ [collectionPath]: newItems });
+        if (newItems.length === 0) setExpandedCard(null);
     };
 
     const updateIncomeItemField = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>, idToUpdate: string, field: 'amount' | 'description', value: string) => {
@@ -62,7 +68,7 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
     }) => {
         const items = incomeData[collectionPath];
         const hasItems = items.length > 0;
-        const [isCollapsed, setIsCollapsed] = useState(true);
+        const isOpen = expandedCard === collectionPath;
 
         if (!hasItems) {
             return (
@@ -86,9 +92,9 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
         return (
             <div className="border border-gray-200 rounded-lg mb-6 bg-white shadow-sm overflow-hidden">
                 {/* Header */}
-                <div 
+                <div
                     className="p-5 flex items-center justify-between border-b border-gray-100 cursor-pointer bg-white"
-                    onClick={() => setIsCollapsed(!isCollapsed)}
+                    onClick={() => setExpandedCard(isOpen ? null : collectionPath)}
                 >
                     <div className="flex items-center gap-4">
                         <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-full text-slate-600">
@@ -97,13 +103,13 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                         <span className="font-semibold text-gray-800">{title} ({items.length})</span>
                     </div>
                     <button className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors">
-                        {isCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-                        {isCollapsed ? t('common.expand') : t('common.collapse')}
+                        {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                        {isOpen ? t('common.collapse') : t('common.expand')}
                     </button>
                 </div>
                 
                 {/* Body */}
-                {!isCollapsed && (
+                {isOpen && (
                     <div className="bg-slate-50 p-6 space-y-6">
                         {items.map((item, index) => (
                             <div key={item.id} className="relative bg-white p-6 rounded-md border border-gray-200 shadow-sm">

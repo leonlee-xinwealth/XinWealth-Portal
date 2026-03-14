@@ -71,6 +71,7 @@ const getSuffixForType = (type: string) => {
 
 const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
+    const [expandedCard, setExpandedCard] = useState<string | null>(null);
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     
@@ -92,13 +93,15 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
         const newArray = expensesData[collectionPath] || [];
         const newItems = [...newArray, { id: Date.now().toString() + Math.random().toString(), type: defaultType, amount: '' }];
         updateExpenses({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     const removeExpenseItem = (collectionPath: keyof KYCExpensesData, idToRemove: string) => {
         const newArray = expensesData[collectionPath] || [];
         const newItems = newArray.filter(item => item.id !== idToRemove);
         updateExpenses({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     const updateExpenseItemField = (collectionPath: keyof KYCExpensesData, idToUpdate: string, field: 'type' | 'amount', value: string) => {
         const newArray = expensesData[collectionPath] || [];
@@ -106,7 +109,8 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
         updateExpenses({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     // Reusable Expandable Card for Expenses
     const ExpandableExpenseCard = ({ 
@@ -124,7 +128,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
     }) => {
         const items = expensesData[collectionPath] || [];
         const hasItems = items.length > 0;
-        const [isCollapsed, setIsCollapsed] = useState(true);
+        const isOpen = expandedCard === (collectionPath as string);
 
         if (!hasItems) {
             return (
@@ -150,7 +154,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                 {/* Header */}
                 <div 
                     className="p-5 flex items-center justify-between border-b border-gray-100 cursor-pointer bg-white"
-                    onClick={() => setIsCollapsed(!isCollapsed)}
+                    onClick={() => setExpandedCard(isOpen ? null : (collectionPath as string))}
                 >
                     <div className="flex items-center gap-4">
                         <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-full text-slate-600">
@@ -159,13 +163,13 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                         <span className="font-semibold text-gray-800">{title} ({items.length})</span>
                     </div>
                     <button className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors overflow-hidden">
-                        {isCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-                        {isCollapsed ? t('common.expand') : t('common.collapse')}
+                        {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                        {isOpen ? t('common.collapse') : t('common.expand')}
                     </button>
                 </div>
                 
                 {/* Body */}
-                {!isCollapsed && (
+                {isOpen && (
                     <div className="bg-slate-50 p-6 space-y-4">
                         <div className="hidden md:grid grid-cols-12 gap-4 px-2 mb-2">
                             <div className="col-span-12 md:col-span-6 text-sm font-semibold text-gray-700">{t('common.type')}</div>

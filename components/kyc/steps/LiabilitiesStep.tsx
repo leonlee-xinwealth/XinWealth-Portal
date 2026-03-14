@@ -12,6 +12,7 @@ interface LiabilitiesStepProps {
 
 const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
+    const [expandedCard, setExpandedCard] = useState<string | null>(null);
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
@@ -33,19 +34,22 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
     const addLoanItem = (collectionPath: keyof KYCLiabilitiesData) => {
         const newItems = [...liabilitiesData[collectionPath], { id: Date.now().toString() + Math.random().toString(), amount: '', description: '' }];
         updateLiabilities({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     const removeLoanItem = (collectionPath: keyof KYCLiabilitiesData, idToRemove: string) => {
         const newItems = liabilitiesData[collectionPath].filter(item => item.id !== idToRemove);
         updateLiabilities({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     const updateLoanItemField = (collectionPath: keyof KYCLiabilitiesData, idToUpdate: string, field: 'amount' | 'description', value: string) => {
         const newItems = liabilitiesData[collectionPath].map(item => 
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
         updateLiabilities({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     // Reusable Expandable Card for Loans
     const ExpandableLoanCard = ({ 
@@ -59,7 +63,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
     }) => {
         const items = liabilitiesData[collectionPath];
         const hasItems = items.length > 0;
-        const [isCollapsed, setIsCollapsed] = useState(true);
+        const isOpen = expandedCard === (collectionPath as string);
 
         if (!hasItems) {
             return (
@@ -85,7 +89,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                 {/* Header */}
                 <div 
                     className="p-5 flex items-center justify-between border-b border-gray-100 cursor-pointer bg-white"
-                    onClick={() => setIsCollapsed(!isCollapsed)}
+                    onClick={() => setExpandedCard(isOpen ? null : (collectionPath as string))}
                 >
                     <div className="flex items-center gap-4">
                         <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-full text-slate-600">
@@ -94,13 +98,13 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                         <span className="font-semibold text-gray-800">{title} ({items.length})</span>
                     </div>
                     <button className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors">
-                        {isCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-                        {isCollapsed ? t('common.expand') : t('common.collapse')}
+                        {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                        {isOpen ? t('common.collapse') : t('common.expand')}
                     </button>
                 </div>
                 
                 {/* Body */}
-                {!isCollapsed && (
+                {isOpen && (
                     <div className="bg-slate-50 p-6 space-y-6">
                         {items.map((item, index) => (
                             <div key={item.id} className="relative bg-white p-6 rounded-md border border-gray-200 shadow-sm">

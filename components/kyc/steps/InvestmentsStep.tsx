@@ -12,6 +12,7 @@ interface InvestmentsStepProps {
 
 const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
+    const [expandedCard, setExpandedCard] = useState<string | null>(null);
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
@@ -36,13 +37,15 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
         const newArray = investmentsData[collectionPath] || [];
         const newItems = [...newArray, { id: Date.now().toString() + Math.random().toString(), amount: '', description: '' }];
         updateInvestments({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     const removeInvestmentItem = (collectionPath: keyof KYCInvestmentsData, idToRemove: string) => {
         const newArray = investmentsData[collectionPath] || [];
         const newItems = newArray.filter((item: FinancialItem) => item.id !== idToRemove);
         updateInvestments({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     const updateInvestmentItemField = (collectionPath: keyof KYCInvestmentsData, idToUpdate: string, field: 'amount' | 'description', value: string) => {
         const newArray = investmentsData[collectionPath] || [];
@@ -50,7 +53,8 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
         updateInvestments({ [collectionPath]: newItems });
-    };
+        setExpandedCard(collectionPath as string);
+    });
 
     // Reusable Expandable Card for Investments
     const ExpandableInvestmentCard = ({ 
@@ -64,7 +68,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
     }) => {
         const items = investmentsData[collectionPath] || [];
         const hasItems = items.length > 0;
-        const [isCollapsed, setIsCollapsed] = useState(true);
+        const isOpen = expandedCard === (collectionPath as string);
 
         if (!hasItems) {
             return (
@@ -90,7 +94,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                 {/* Header */}
                 <div 
                     className="p-5 flex items-center justify-between border-b border-gray-100 cursor-pointer bg-white"
-                    onClick={() => setIsCollapsed(!isCollapsed)}
+                    onClick={() => setExpandedCard(isOpen ? null : (collectionPath as string))}
                 >
                     <div className="flex items-center gap-4">
                         <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-full text-slate-600">
@@ -99,13 +103,13 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                         <span className="font-semibold text-gray-800">{title} ({items.length})</span>
                     </div>
                     <button className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors">
-                        {isCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-                        {isCollapsed ? t('common.expand') : t('common.collapse')}
+                        {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                        {isOpen ? t('common.collapse') : t('common.expand')}
                     </button>
                 </div>
                 
                 {/* Body */}
-                {!isCollapsed && (
+                {isOpen && (
                     <div className="bg-slate-50 p-6 space-y-6">
                         {items.map((item: FinancialItem, index: number) => (
                             <div key={item.id} className="relative bg-white p-6 rounded-md border border-gray-200 shadow-sm">
