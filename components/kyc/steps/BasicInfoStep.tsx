@@ -1,5 +1,6 @@
 import React from 'react';
 import { KYCData } from '../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 
 interface BasicInfoStepProps {
     formData: KYCData;
@@ -9,39 +10,62 @@ interface BasicInfoStepProps {
 }
 
 const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onNext, onPrev }) => {
-    
+    const { t, language } = useLanguage();
+    const isZh = language === 'zh';
+
     // Helper to render reusable toggle button groups
     const renderToggleGroup = (
         name: keyof KYCData, 
-        options: string[], 
+        options: { value: string, label: string }[], 
         currentValue: string
     ) => (
         <div className="flex flex-wrap shadow-sm rounded-md overflow-hidden bg-white mt-1 border border-gray-300 w-fit">
             {options.map((opt, idx) => {
-                const isSelected = currentValue === opt;
+                const isSelected = currentValue === opt.value;
                 return (
                     <button
-                        key={opt}
+                        key={opt.value}
                         type="button"
-                        onClick={() => updateData({ [name]: opt })}
+                        onClick={() => updateData({ [name]: opt.value })}
                         className={`px-4 py-2 text-sm font-medium border-r border-gray-300 last:border-r-0 transition-colors ${
                             isSelected 
-                                ? 'bg-blue-50 text-xin-blue flex-grow-0' 
+                                ? 'bg-slate-50 text-xin-blue font-semibold border-b-2 border-xin-cyan flex-grow-0' 
                                 : 'text-gray-600 hover:bg-gray-50 flex-grow-0'
                         }`}
-                        style={isSelected ? { boxShadow: 'inset 0 0 0 1px #1d4ed8', zIndex: 1 } : {}}
+                        style={isSelected ? { boxShadow: 'inset 0 0 0 1px #00B4D8', zIndex: 1 } : {}}
                     >
-                        {opt}
+                        {opt.label}
                     </button>
                 );
             })}
         </div>
     );
 
-    const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-blue focus:border-xin-blue transition-colors bg-white shadow-sm";
+    const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
-    const requiredSpan = <span className="text-gray-400 italic font-normal text-xs ml-2">Required</span>;
-    const optionalSpan = <span className="text-gray-400 italic font-normal text-xs ml-2">Optional</span>;
+    const requiredSpan = <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>;
+    const optionalSpan = <span className="text-gray-400 italic font-normal text-xs ml-2">{isZh ? '选填' : 'Optional'}</span>;
+
+    const salutationOptions = [
+        { value: 'Mr', label: isZh ? '先生 (Mr)' : 'Mr' },
+        { value: 'Ms', label: isZh ? '女士 (Ms)' : 'Ms' },
+        { value: 'Mdm', label: isZh ? '夫人 (Mdm)' : 'Mdm' },
+        { value: 'Mrs', label: isZh ? '太太 (Mrs)' : 'Mrs' },
+        { value: 'Dr', label: isZh ? '博士/医生 (Dr)' : 'Dr' }
+    ];
+
+    const employmentOptions = [
+        { value: 'Employed', label: isZh ? '受雇 (Employed)' : 'Employed' },
+        { value: 'Self-Employed', label: isZh ? '自雇 (Self-Employed)' : 'Self-Employed' },
+        { value: 'Unemployed', label: isZh ? '待业 (Unemployed)' : 'Unemployed' },
+        { value: 'Retired', label: isZh ? '退休 (Retired)' : 'Retired' }
+    ];
+
+    const taxOptions = [
+        { value: 'Tax-Resident', label: isZh ? '税务居民 (Tax-Resident)' : 'Tax-Resident' },
+        { value: 'Non Resident', label: isZh ? '非居民 (Non Resident)' : 'Non Resident' },
+        { value: 'Not Taxable', label: isZh ? '免税 (Not Taxable)' : 'Not Taxable' }
+    ];
 
     return (
         <div className="flex flex-col h-full space-y-8">
@@ -49,11 +73,13 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
                 
                 {/* Profile Section */}
-                <h2 className="text-2xl font-serif text-gray-800 mb-6 border-b border-gray-100 pb-4">Profile</h2>
+                <h2 className="text-2xl font-serif text-gray-800 mb-6 border-b border-gray-100 pb-4">
+                    {t('basic.title')}
+                </h2>
                 
                 <div className="space-y-6">
                     <div>
-                        <label className={labelClasses}>Name {requiredSpan}</label>
+                        <label className={labelClasses}>{t('basic.name')} {requiredSpan}</label>
                         <input 
                             type="text" 
                             className={inputClasses}
@@ -64,12 +90,12 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
                     </div>
 
                     <div>
-                        <label className={labelClasses}>Salutation {requiredSpan}</label>
-                        {renderToggleGroup('salutation', ['Mr', 'Ms', 'Mdm', 'Mrs', 'Dr'], formData.salutation)}
+                        <label className={labelClasses}>{t('basic.salutation')} {requiredSpan}</label>
+                        {renderToggleGroup('salutation', salutationOptions, formData.salutation)}
                     </div>
 
                     <div>
-                        <label className={labelClasses}>Email Address {requiredSpan}</label>
+                        <label className={labelClasses}>{t('basic.email')} {requiredSpan}</label>
                         <input 
                             type="email" 
                             className={inputClasses}
@@ -81,73 +107,73 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <label className={labelClasses}>Date of Birth {requiredSpan}</label>
+                            <label className={labelClasses}>{t('basic.dob')} {requiredSpan}</label>
                             <input 
                                 type="date" 
                                 className={inputClasses}
                                 value={formData.dateOfBirth}
                                 onChange={(e) => updateData({ dateOfBirth: e.target.value })}
                             />
-                            <p className="text-xs text-gray-500 mt-1">Example: 23-02-1992</p>
+                            <p className="text-xs text-gray-500 mt-1">{isZh ? '例如：23-02-1992' : 'Example: 23-02-1992'}</p>
                         </div>
                         <div>
-                            <label className={labelClasses}>Nationality {requiredSpan}</label>
+                            <label className={labelClasses}>{t('basic.nationality')} {requiredSpan}</label>
                             <select 
                                 className={inputClasses}
                                 value={formData.nationality}
                                 onChange={(e) => updateData({ nationality: e.target.value })}
                             >
-                                <option value="" disabled>Select...</option>
-                                <option value="Malaysian">Malaysian</option>
-                                <option value="American">American</option>
-                                <option value="Australian">Australian</option>
-                                <option value="British">British</option>
-                                <option value="Canadian">Canadian</option>
-                                <option value="Chinese">Chinese</option>
-                                <option value="Filipino">Filipino</option>
-                                <option value="Other">Other</option>
+                                <option value="" disabled>{isZh ? '请选择...' : 'Select...'}</option>
+                                <option value="Malaysian">{isZh ? '马来西亚 (Malaysian)' : 'Malaysian'}</option>
+                                <option value="American">{isZh ? '美国 (American)' : 'American'}</option>
+                                <option value="Australian">{isZh ? '澳大利亚 (Australian)' : 'Australian'}</option>
+                                <option value="British">{isZh ? '英国 (British)' : 'British'}</option>
+                                <option value="Canadian">{isZh ? '加拿大 (Canadian)' : 'Canadian'}</option>
+                                <option value="Chinese">{isZh ? '中国 (Chinese)' : 'Chinese'}</option>
+                                <option value="Filipino">{isZh ? '菲律宾 (Filipino)' : 'Filipino'}</option>
+                                <option value="Other">{isZh ? '其他 (Other)' : 'Other'}</option>
                             </select>
                         </div>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <label className={labelClasses}>Residency {requiredSpan}</label>
+                            <label className={labelClasses}>{t('basic.residency')} {requiredSpan}</label>
                             <select 
                                 className={inputClasses}
                                 value={formData.residency}
                                 onChange={(e) => updateData({ residency: e.target.value })}
                             >
-                                <option value="" disabled>Select...</option>
-                                <option value="Malaysia Citizen">Malaysia Citizen</option>
-                                <option value="Malaysian PR">Malaysian PR</option>
-                                <option value="Work Pass">Work Pass</option>
-                                <option value="Student Pass">Student Pass</option>
-                                <option value="Long Term Visit Pass">Long Term Visit Pass</option>
-                                <option value="Employment Pass">Employment Pass</option>
-                                <option value="Dependant Pass">Dependant Pass</option>
-                                <option value="Other">Other</option>
+                                <option value="" disabled>{isZh ? '请选择...' : 'Select...'}</option>
+                                <option value="Malaysia Citizen">{isZh ? '马来西亚公民 (Malaysia Citizen)' : 'Malaysia Citizen'}</option>
+                                <option value="Malaysian PR">{isZh ? '马来西亚永久居民 (Malaysian PR)' : 'Malaysian PR'}</option>
+                                <option value="Work Pass">{isZh ? '工作准证 (Work Pass)' : 'Work Pass'}</option>
+                                <option value="Student Pass">{isZh ? '学生准证 (Student Pass)' : 'Student Pass'}</option>
+                                <option value="Long Term Visit Pass">{isZh ? '长期探访准证 (Long Term Visit Pass)' : 'Long Term Visit Pass'}</option>
+                                <option value="Employment Pass">{isZh ? '就业准证 (Employment Pass)' : 'Employment Pass'}</option>
+                                <option value="Dependant Pass">{isZh ? '家属准证 (Dependant Pass)' : 'Dependant Pass'}</option>
+                                <option value="Other">{isZh ? '其他 (Other)' : 'Other'}</option>
                             </select>
                         </div>
                         <div>
-                            <label className={labelClasses}>Marital Status {optionalSpan}</label>
+                            <label className={labelClasses}>{t('basic.marital')} {optionalSpan}</label>
                             <select 
                                 className={inputClasses}
                                 value={formData.maritalStatus}
                                 onChange={(e) => updateData({ maritalStatus: e.target.value })}
                             >
-                                <option value="" disabled>Select...</option>
-                                <option value="Single">Single</option>
-                                <option value="Married">Married</option>
-                                <option value="Divorced">Divorced</option>
-                                <option value="Separated">Separated</option>
-                                <option value="Widowed">Widowed</option>
+                                <option value="" disabled>{isZh ? '请选择...' : 'Select...'}</option>
+                                <option value="Single">{isZh ? '单身 (Single)' : 'Single'}</option>
+                                <option value="Married">{isZh ? '已婚 (Married)' : 'Married'}</option>
+                                <option value="Divorced">{isZh ? '离婚 (Divorced)' : 'Divorced'}</option>
+                                <option value="Separated">{isZh ? '分居 (Separated)' : 'Separated'}</option>
+                                <option value="Widowed">{isZh ? '丧偶 (Widowed)' : 'Widowed'}</option>
                             </select>
                         </div>
                     </div>
 
                     <div>
-                        <label className={labelClasses}>Retirement Age {requiredSpan}</label>
+                        <label className={labelClasses}>{t('basic.retirement')} {requiredSpan}</label>
                         <input 
                             type="number" 
                             className={inputClasses}
@@ -159,21 +185,23 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
                 </div>
 
                 {/* Employment Section */}
-                <h2 className="text-2xl font-serif text-gray-800 mt-12 mb-6 border-b border-gray-100 pb-4">Employment Info</h2>
+                <h2 className="text-2xl font-serif text-gray-800 mt-12 mb-6 border-b border-gray-100 pb-4">
+                    {isZh ? '就业信息 (Employment Info)' : 'Employment Info'}
+                </h2>
 
                 <div className="space-y-6">
                     <div>
-                        <label className={labelClasses}>Employment Status {requiredSpan}</label>
-                        {renderToggleGroup('employmentStatus', ['Employed', 'Self-Employed', 'Unemployed', 'Retired'], formData.employmentStatus)}
+                        <label className={labelClasses}>{t('basic.employment')} {requiredSpan}</label>
+                        {renderToggleGroup('employmentStatus', employmentOptions, formData.employmentStatus)}
                     </div>
 
                     <div>
-                        <label className={labelClasses}>Tax Status {requiredSpan}</label>
-                        {renderToggleGroup('taxStatus', ['Tax-Resident', 'Non Resident', 'Not Taxable'], formData.taxStatus)}
+                        <label className={labelClasses}>{t('basic.tax')} {requiredSpan}</label>
+                        {renderToggleGroup('taxStatus', taxOptions, formData.taxStatus)}
                     </div>
 
                     <div>
-                        <label className={labelClasses}>Occupation {optionalSpan}</label>
+                        <label className={labelClasses}>{t('basic.occupation')} {optionalSpan}</label>
                         <input 
                             type="text" 
                             className={inputClasses}
@@ -189,13 +217,13 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
                         onClick={onPrev} 
                         className="px-6 py-2.5 border border-gray-300 rounded-md text-gray-600 font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors"
                     >
-                        <span>&lt;</span> Back
+                        <span>&lt;</span> {t('basic.back')}
                     </button>
                     <button 
                         onClick={onNext} 
-                        className="px-8 py-2.5 bg-xin-blue text-white font-medium rounded-md hover:bg-blue-800 flex items-center gap-2 transition-colors shadow-sm"
+                        className="px-8 py-2.5 bg-gradient-to-r from-xin-blue to-xin-blueLight text-white font-medium rounded-md hover:from-xin-dark hover:to-xin-blue flex items-center gap-2 transition-colors shadow-sm"
                     >
-                        Continue <span>&gt;</span>
+                        {t('basic.continue')} <span>&gt;</span>
                     </button>
                 </div>
             </div>

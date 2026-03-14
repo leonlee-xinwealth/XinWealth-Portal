@@ -10,11 +10,13 @@ const KYCLayoutContent: React.FC = () => {
     <div className="min-h-screen bg-[#f4f7f9] font-sans selection:bg-xin-gold selection:text-white pb-20">
       {/* Header */}
       <header className="bg-white shadow-sm border-b border-gray-100 py-4 px-6 md:px-12 flex items-center justify-between sticky top-0 z-50">
-        <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-xin-blue rounded-lg flex items-center justify-center">
-                <span className="text-xin-gold font-bold font-serif text-sm">X</span>
+        <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-gradient-to-br from-xin-blue to-xin-blueLight rounded-xl flex items-center justify-center shadow-sm border border-xin-blueLight/30">
+                <span className="text-xin-gold font-bold font-serif text-lg tracking-wider">X</span>
             </div>
-            <span className="font-serif font-bold text-xin-blue text-lg">XinWealth</span>
+            <div className="flex flex-col">
+              <span className="font-serif font-bold text-xin-blue leading-none text-xl tracking-tight">Xin<span className="text-xin-gold">Wealth</span></span>
+            </div>
         </div>
         
         <div className="flex items-center gap-6">

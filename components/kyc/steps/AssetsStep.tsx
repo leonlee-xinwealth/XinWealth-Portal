@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { KYCData, FinancialItem, KYCAssetsData } from '../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 import { Home, Car, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle, Building2 } from 'lucide-react';
 
 interface AssetsStepProps {
@@ -10,7 +11,9 @@ interface AssetsStepProps {
 }
 
 const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, onPrev }) => {
-    const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-blue focus:border-xin-blue transition-colors bg-white shadow-sm";
+    const { t, language } = useLanguage();
+    const isZh = language === 'zh';
+    const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
     
     // Safety check just in case formData.assets is somehow missing
@@ -69,9 +72,9 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                     </div>
                     <button 
                         onClick={() => addAssetItem(collectionPath)} 
-                        className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-blue-800 transition-colors"
+                        className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors"
                     >
-                        <PlusCircle size={18} /> Add Asset
+                        <PlusCircle size={18} /> {t('assets.addBtn')}
                     </button>
                 </div>
             );
@@ -90,9 +93,9 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                         </div>
                         <span className="font-semibold text-gray-800">{title} ({items.length})</span>
                     </div>
-                    <button className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-blue-800 transition-colors">
+                    <button className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors">
                         {isCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
-                        {isCollapsed ? "Expand" : "Collapse"}
+                        {isCollapsed ? t('common.expand') : t('common.collapse')}
                     </button>
                 </div>
                 
@@ -106,14 +109,14 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                         onClick={() => removeAssetItem(collectionPath, item.id)} 
                                         className="text-red-500 flex items-center gap-1.5 hover:text-red-700 text-sm font-medium transition-colors"
                                     >
-                                        <Trash2 size={16} /> Delete
+                                        <Trash2 size={16} /> {t('common.delete')}
                                     </button>
                                 </div>
 
                                 <div className="space-y-5">
                                     <div>
                                         <label className={labelClasses}>
-                                            Value <span className="text-gray-400 italic font-normal text-xs ml-2">Required</span>
+                                            {t('common.value')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
                                         </label>
                                         <div className="relative mt-1">
                                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
@@ -121,7 +124,7 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                             </div>
                                             <input 
                                                 type="text" 
-                                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-blue focus:border-xin-blue bg-white shadow-sm"
+                                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
                                                 value={item.amount}
                                                 onChange={(e) => {
                                                     const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
@@ -134,7 +137,7 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
 
                                     <div>
                                         <label className={labelClasses}>
-                                            Description <span className="text-gray-400 italic font-normal text-xs ml-2">Required</span>
+                                            {t('common.description')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
                                         </label>
                                         <input 
                                             type="text" 
@@ -143,7 +146,7 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                             value={item.description}
                                             onChange={(e) => updateAssetItemField(collectionPath, item.id, 'description', e.target.value)}
                                         />
-                                        <p className="text-xs text-gray-500 mt-1.5 font-medium">Maximum 100 characters</p>
+                                        <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
                                     </div>
                                 </div>
                             </div>
@@ -152,9 +155,9 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                         <div className="flex justify-center pt-2">
                             <button 
                                 onClick={() => addAssetItem(collectionPath)} 
-                                className="text-xin-blue flex items-center gap-2 text-sm font-semibold hover:text-blue-800 transition-colors bg-blue-50 px-4 py-2 rounded-full border border-blue-100"
+                                className="text-xin-blue flex items-center gap-2 text-sm font-semibold hover:text-xin-cyan transition-colors bg-slate-50 px-4 py-2 rounded-full border border-xin-cyan/20"
                             >
-                                <PlusCircle size={18} /> Add Another Asset
+                                <PlusCircle size={18} /> {isZh ? '添加另一项资产' : 'Add Another Asset'}
                             </button>
                         </div>
                     </div>
@@ -169,25 +172,25 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
                 
                 <div className="flex items-center gap-3 mb-8 border-b border-gray-100 pb-5">
-                    <div className="bg-xin-blue/10 p-2 rounded-md text-xin-blue">
+                    <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
                         <Building2 size={24} />
                     </div>
-                    <h2 className="text-2xl font-serif text-gray-800">Our Assets</h2>
+                    <h2 className="text-2xl font-serif text-gray-800">{t('assets.title')}</h2>
                 </div>
                 
                 {/* Savings Section */}
-                <h3 className="text-lg font-semibold text-gray-800 mb-6 border-b border-gray-100 pb-2">My Savings</h3>
+                <h3 className="text-lg font-semibold text-gray-800 mb-6 border-b border-gray-100 pb-2">{t('assets.savings')}</h3>
                 
                 <div className="space-y-6">
                     <div>
-                        <label className={`${labelClasses} text-xin-blue`}>My Savings is valued at</label>
+                        <label className={`${labelClasses} text-xin-blue`}>{t('assets.savingsLabel')}</label>
                         <div className="relative mt-2">
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
                             <input 
                                 type="text" 
-                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-blue focus:border-xin-blue bg-white shadow-sm transition-shadow"
+                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
                                 value={assetsData.savings}
                                 onChange={(e) => {
                                     const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
@@ -200,18 +203,18 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                 </div>
 
                 {/* EPF Section */}
-                <h3 className="text-lg font-semibold text-gray-800 mt-12 mb-6 border-b border-gray-100 pb-2">EPF</h3>
+                <h3 className="text-lg font-semibold text-gray-800 mt-12 mb-6 border-b border-gray-100 pb-2">{t('assets.epf')}</h3>
                 
                 <div className="space-y-6">
                     <div>
-                        <label className={labelClasses}>My EPF - Akaun Sejahtera is valued at</label>
+                        <label className={labelClasses}>{t('assets.epfSejahtera')}</label>
                         <div className="relative mt-2">
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
                             <input 
                                 type="text" 
-                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-blue focus:border-xin-blue bg-white shadow-sm transition-shadow"
+                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
                                 value={assetsData.epfSejahtera}
                                 onChange={(e) => {
                                     const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
@@ -223,14 +226,14 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                     </div>
 
                     <div>
-                        <label className={labelClasses}>My EPF - Akaun Persaraan is valued at</label>
+                        <label className={labelClasses}>{t('assets.epfPersaraan')}</label>
                         <div className="relative mt-2">
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
                             <input 
                                 type="text" 
-                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-blue focus:border-xin-blue bg-white shadow-sm transition-shadow"
+                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
                                 value={assetsData.epfPersaraan}
                                 onChange={(e) => {
                                     const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
@@ -243,21 +246,21 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                 </div>
 
                 {/* Dynamic Assets Section */}
-                <h3 className="text-lg font-semibold text-gray-800 mt-12 mb-2">Select all that applies</h3>
+                <h3 className="text-lg font-semibold text-gray-800 mt-12 mb-2">{t('common.selectAll')}</h3>
                 
                 <div className="space-y-4">
                     <ExpandableAssetCard 
-                        title="I own a property"
+                        title={t('assets.property')}
                         icon={Home}
                         collectionPath="properties"
                     />
                     <ExpandableAssetCard 
-                        title="I own a vehicle"
+                        title={t('assets.vehicle')}
                         icon={Car}
                         collectionPath="vehicles"
                     />
                     <ExpandableAssetCard 
-                        title="Other Assets"
+                        title={t('assets.other')}
                         icon={FolderPlus}
                         collectionPath="otherAssets"
                     />
@@ -269,13 +272,13 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                         onClick={onPrev} 
                         className="px-6 py-2.5 border border-gray-300 rounded-md text-gray-600 font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors"
                     >
-                        <span>&lt;</span> Back
+                        <span>&lt;</span> {t('basic.back')}
                     </button>
                     <button 
                         onClick={onNext} 
-                        className="px-8 py-2.5 bg-xin-blue text-white font-medium rounded-md hover:bg-blue-800 flex items-center gap-2 transition-colors shadow-sm"
+                        className="px-8 py-2.5 bg-gradient-to-r from-xin-blue to-xin-blueLight text-white font-medium rounded-md hover:from-xin-dark hover:to-xin-blue flex items-center gap-2 transition-colors shadow-sm"
                     >
-                        Continue <span>&gt;</span>
+                        {t('basic.continue')} <span>&gt;</span>
                     </button>
                 </div>
             </div>

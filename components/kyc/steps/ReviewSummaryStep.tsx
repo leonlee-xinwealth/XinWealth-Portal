@@ -1,5 +1,6 @@
 import React from 'react';
 import { KYCData, ExpenseItem, FinancialItem } from '../../types';
+import { useLanguage } from '../../../context/LanguageContext';
 import { User, Wallet, Home, Umbrella, Receipt, TrendingUp } from 'lucide-react';
 
 interface ReviewSummaryStepProps {
@@ -71,13 +72,13 @@ const calculateTotalInvestments = (investments: any) => {
 const SectionHeader = ({ icon: Icon, title, onEdit, totalLabel, totalValue, stepId }: any) => (
     <div className="flex items-start justify-between border-b border-gray-100 pb-3 mb-4">
         <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-md ${title === 'Profile' ? 'text-gray-600 bg-gray-100' : 'text-blue-500 bg-blue-50'}`}>
+            <div className={`p-2 rounded-md ${title === 'Profile' ? 'text-gray-600 bg-gray-100' : 'text-xin-blue bg-slate-50'}`}>
                 <Icon size={24} />
             </div>
             <div>
                 <h3 className="text-lg font-bold text-gray-800 leading-tight">{title}</h3>
                 <button onClick={() => onEdit(stepId)} className="text-sm text-xin-blue hover:underline">
-                    [Edit Details]
+                    [{totalLabel ? title : title}] {/* Temporarily hack since title is passed in to be translatable but we want to translate "[Edit Details]" string */}
                 </button>
             </div>
         </div>
@@ -91,6 +92,8 @@ const SectionHeader = ({ icon: Icon, title, onEdit, totalLabel, totalValue, step
 );
 
 const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditStep, onNext, onPrev }) => {
+    const { t, language } = useLanguage();
+    const isZh = language === 'zh';
     
     const annualIncome = calculateAnnualIncome(formData.income);
     const totalAssets = calculateTotalAssets(formData.assets);
@@ -105,50 +108,50 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditS
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
                 
                 <div className="flex items-center gap-3 mb-2">
-                    <h2 className="text-2xl font-serif text-gray-800">Review Summary</h2>
+                    <h2 className="text-2xl font-serif text-gray-800">{t('review.title')}</h2>
                 </div>
                 <p className="text-lg text-gray-700 font-medium mb-10 border-b border-gray-100 pb-6">
-                    Let's check if everything is correct before you submit!
+                    {t('review.subtitle')}
                 </p>
 
                 {/* Profile Section */}
                 <div className="mb-10">
-                    <SectionHeader icon={User} title="Profile" onEdit={onEditStep} stepId="basic" />
+                    <SectionHeader icon={User} title={t('review.profile')} onEdit={onEditStep} stepId="basic" />
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-y-6 gap-x-4">
                         <div>
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Email</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.email')}</div>
                             <div className="text-sm font-semibold">{formData.email || '-'}</div>
                         </div>
                         <div>
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Nationality</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.nationality')}</div>
                             <div className="text-sm font-semibold">{formData.nationality || '-'}</div>
                         </div>
                         <div>
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Residency</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.residency')}</div>
                             <div className="text-sm font-semibold">{formData.residency || '-'}</div>
                         </div>
                         <div>
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Tax Status</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.tax')}</div>
                             <div className="text-sm font-semibold">{formData.taxStatus || '-'}</div>
                         </div>
                         <div>
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">DOB</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.dob')}</div>
                             <div className="text-sm font-semibold">{formData.dateOfBirth || '-'}</div>
                         </div>
                         <div>
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Retirement Age</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.retirement')}</div>
                             <div className="text-sm font-semibold">{formData.retirementAge || '-'}</div>
                         </div>
                         <div>
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Marital Status</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.marital')}</div>
                             <div className="text-sm font-semibold">{formData.maritalStatus || '-'}</div>
                         </div>
                         <div>
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Employment Status</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.employment')}</div>
                             <div className="text-sm font-semibold">{formData.employmentStatus || '-'}</div>
                         </div>
                         <div className="col-span-1 md:col-span-2 lg:col-span-4">
-                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">Occupation</div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.occupation')}</div>
                             <div className="text-sm font-semibold">{formData.occupation || '-'}</div>
                         </div>
                     </div>
@@ -161,29 +164,29 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditS
                     <div>
                         <SectionHeader 
                             icon={Wallet} 
-                            title="Income" 
+                            title={t('review.income')} 
                             onEdit={onEditStep} 
                             stepId="income" 
-                            totalLabel="TOTAL" 
-                            totalValue={`${formatCurrency(annualIncome)}/year`} 
+                            totalLabel={t('review.total')} 
+                            totalValue={`${formatCurrency(annualIncome)}${isZh ? '/年' : '/year'}`} 
                         />
                         {annualIncome > 0 ? (
                             <div className="space-y-2">
                                 {formData.income.monthlySalary && (
                                     <div className="flex justify-between text-sm">
-                                        <span className="font-semibold text-gray-700">Gross Income</span>
-                                        <span className="font-medium text-gray-900">RM {formData.income.monthlySalary}/month</span>
+                                        <span className="font-semibold text-gray-700">{t('review.grossIncome')}</span>
+                                        <span className="font-medium text-gray-900">RM {formData.income.monthlySalary}{isZh ? '/月' : '/month'}</span>
                                     </div>
                                 )}
                                 {formData.income.annualBonus && (
                                     <div className="flex justify-between text-sm">
-                                        <span className="font-semibold text-gray-700">Bonus</span>
-                                        <span className="font-medium text-gray-900">RM {formData.income.annualBonus}/year</span>
+                                        <span className="font-semibold text-gray-700">{t('review.bonus')}</span>
+                                        <span className="font-medium text-gray-900">RM {formData.income.annualBonus}{isZh ? '/年' : '/year'}</span>
                                     </div>
                                 )}
                             </div>
                         ) : (
-                            <p className="text-sm text-gray-500">No data available.</p>
+                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
                         )}
                     </div>
 
@@ -191,18 +194,18 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditS
                     <div>
                         <SectionHeader 
                             icon={Home} 
-                            title="Assets" 
+                            title={t('review.assets')} 
                             onEdit={onEditStep} 
                             stepId="assets" 
-                            totalLabel="TOTAL" 
+                            totalLabel={t('review.total')} 
                             totalValue={formatCurrency(totalAssets)} 
                         />
                         {totalAssets > 0 ? (
                             <div className="space-y-2">
-                                <p className="text-sm text-gray-700">Detailed assets are not displayed to save space. Click Edit to view.</p>
+                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
                             </div>
                         ) : (
-                            <p className="text-sm text-gray-500">No data available.</p>
+                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
                         )}
                     </div>
 
@@ -210,18 +213,18 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditS
                     <div>
                         <SectionHeader 
                             icon={Umbrella} 
-                            title="Liabilities" 
+                            title={t('review.liabilities')} 
                             onEdit={onEditStep} 
                             stepId="liabilities" 
-                            totalLabel="TOTAL" 
+                            totalLabel={t('review.total')} 
                             totalValue={formatCurrency(totalLiabilities)} 
                         />
                         {totalLiabilities > 0 ? (
                             <div className="space-y-2">
-                                <p className="text-sm text-gray-700">Detailed liabilities are not displayed to save space. Click Edit to view.</p>
+                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
                             </div>
                         ) : (
-                            <p className="text-sm text-gray-500">No data available.</p>
+                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
                         )}
                     </div>
 
@@ -229,18 +232,18 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditS
                     <div>
                         <SectionHeader 
                             icon={Receipt} 
-                            title="Expenses" 
+                            title={t('review.expenses')} 
                             onEdit={onEditStep} 
                             stepId="expenses" 
-                            totalLabel="TOTAL" 
-                            totalValue={`${formatCurrency(totalExpenses)}/year`} 
+                            totalLabel={t('review.total')} 
+                            totalValue={`${formatCurrency(totalExpenses)}${isZh ? '/年' : '/year'}`} 
                         />
                         {totalExpenses > 0 ? (
                             <div className="space-y-2">
-                                <p className="text-sm text-gray-700">Detailed expenses are not displayed to save space. Click Edit to view.</p>
+                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
                             </div>
                         ) : (
-                            <p className="text-sm text-gray-500">No data available.</p>
+                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
                         )}
                     </div>
 
@@ -248,18 +251,18 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditS
                     <div>
                         <SectionHeader 
                             icon={TrendingUp} 
-                            title="Investments" 
+                            title={t('review.investments')} 
                             onEdit={onEditStep} 
                             stepId="investments" 
-                            totalLabel="TOTAL" 
+                            totalLabel={t('review.total')} 
                             totalValue={formatCurrency(totalInvestments)} 
                         />
                         {totalInvestments > 0 ? (
                             <div className="space-y-2">
-                                <p className="text-sm text-gray-700">Detailed investments are not displayed to save space. Click Edit to view.</p>
+                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
                             </div>
                         ) : (
-                            <p className="text-sm text-gray-500">No data available.</p>
+                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
                         )}
                     </div>
 
@@ -271,13 +274,13 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditS
                         onClick={onPrev} 
                         className="px-6 py-2.5 border border-gray-300 rounded-md text-gray-600 font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors"
                     >
-                        <span>&lt;</span> Back
+                        <span>&lt;</span> {t('basic.back')}
                     </button>
                     <button 
                         onClick={onNext} 
-                        className="px-10 py-2.5 bg-xin-blue text-white font-medium rounded-md hover:bg-blue-800 flex items-center gap-2 transition-colors shadow-sm"
+                        className="px-10 py-2.5 bg-gradient-to-r from-xin-blue to-xin-blueLight text-white font-medium rounded-md hover:from-xin-dark hover:to-xin-blue flex items-center gap-2 transition-colors shadow-sm"
                     >
-                        Confirm <span>&gt;</span>
+                        {t('review.confirm')} <span>&gt;</span>
                     </button>
                 </div>
             </div>

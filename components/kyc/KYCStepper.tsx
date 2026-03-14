@@ -18,7 +18,7 @@ const PlaceholderStep = ({ title, onNext, onPrev }: { title: string, onNext: () 
         <div className="flex-1 text-gray-500 py-12 text-center">Form fields for {title} will be implemented here.</div>
         <div className="mt-8 pt-6 border-t border-gray-100 flex justify-between">
             <button onClick={onPrev} className="px-6 py-2 border border-gray-300 rounded-md text-gray-600 hover:bg-gray-50 transition-colors">Back</button>
-            <button onClick={onNext} className="px-6 py-2 bg-xin-blue text-white rounded-md hover:bg-blue-800 transition-colors">Continue</button>
+            <button onClick={onNext} className="px-6 py-2 bg-xin-blue text-white rounded-md hover:bg-xin-dark transition-colors">Continue</button>
         </div>
     </div>
 );
