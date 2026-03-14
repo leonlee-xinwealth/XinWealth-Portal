@@ -31,3 +31,50 @@ export interface ClientProfile {
   fdDifferenceValue: number; // Absolute value difference vs FD
   lastUpdated: string;
 }
+
+export interface KYCData {
+  // Basic Info
+  name: string;
+  salutation: string;
+  email: string;
+  dateOfBirth: string;
+  nationality: string;
+  residency: string;
+  maritalStatus: string;
+  retirementAge: string;
+  
+  // Employment
+  employmentStatus: string;
+  taxStatus: string;
+  occupation: string;
+  
+  // PDPA
+  pdpaAccepted: boolean;
+  
+  // Placholders for next steps
+  income: any;
+  assets: any;
+  liabilities: any;
+  expenses: any;
+  investments: any;
+}
+
+export const initialKYCData: KYCData = {
+  name: '',
+  salutation: '',
+  email: '',
+  dateOfBirth: '',
+  nationality: '',
+  residency: '',
+  maritalStatus: '',
+  retirementAge: '55',
+  employmentStatus: '',
+  taxStatus: '',
+  occupation: '',
+  pdpaAccepted: false,
+  income: {},
+  assets: {},
+  liabilities: {},
+  expenses: {},
+  investments: {}
+};
