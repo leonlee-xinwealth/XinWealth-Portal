@@ -1,8 +1,11 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import KYCStepper from './KYCStepper';
+import { LanguageProvider, useLanguage } from '../../context/LanguageContext';
 
-const KYCLayout: React.FC = () => {
+const KYCLayoutContent: React.FC = () => {
+  const { language, setLanguage, t } = useLanguage();
+
   return (
     <div className="min-h-screen bg-[#f4f7f9] font-sans selection:bg-xin-gold selection:text-white pb-20">
       {/* Header */}
@@ -13,8 +16,26 @@ const KYCLayout: React.FC = () => {
             </div>
             <span className="font-serif font-bold text-xin-blue text-lg">XinWealth</span>
         </div>
-        <div className="text-sm font-medium text-gray-400 hidden sm:block">
-            Financial Advisory Services
+        
+        <div className="flex items-center gap-6">
+            <div className="text-sm font-medium text-gray-400 hidden sm:block">
+                {t('header.services')}
+            </div>
+            {/* Language Toggle */}
+            <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                <button 
+                    onClick={() => setLanguage('en')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${language === 'en' ? 'bg-white text-xin-blue shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                    EN
+                </button>
+                <button 
+                    onClick={() => setLanguage('zh')}
+                    className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${language === 'zh' ? 'bg-white text-xin-blue shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                    中文
+                </button>
+            </div>
         </div>
       </header>
 
@@ -27,6 +48,14 @@ const KYCLayout: React.FC = () => {
       </main>
     </div>
   );
+};
+
+const KYCLayout: React.FC = () => {
+    return (
+        <LanguageProvider>
+            <KYCLayoutContent />
+        </LanguageProvider>
+    );
 };
 
 export default KYCLayout;

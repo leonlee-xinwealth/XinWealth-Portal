@@ -3,6 +3,13 @@ import { KYCData, initialKYCData } from '../../types';
 import WelcomeStep from './steps/WelcomeStep';
 import PDPAStep from './steps/PDPAStep';
 import BasicInfoStep from './steps/BasicInfoStep';
+import IncomeStep from './steps/IncomeStep';
+import AssetsStep from './steps/AssetsStep';
+import LiabilitiesStep from './steps/LiabilitiesStep';
+import ExpensesStep from './steps/ExpensesStep';
+import InvestmentsStep from './steps/InvestmentsStep';
+import ReviewSummaryStep from './steps/ReviewSummaryStep';
+import { useLanguage } from '../../context/LanguageContext';
 
 // Placeholder steps
 const PlaceholderStep = ({ title, onNext, onPrev }: { title: string, onNext: () => void, onPrev: () => void }) => (
@@ -17,17 +24,18 @@ const PlaceholderStep = ({ title, onNext, onPrev }: { title: string, onNext: () 
 );
 
 export const STEPS = [
-    { id: 'welcome', label: 'Welcome', showNav: false },
-    { id: 'basic', label: 'Basic Information', showNav: true },
-    { id: 'income', label: 'Income', showNav: true },
-    { id: 'assets', label: 'Assets', showNav: true },
-    { id: 'liabilities', label: 'Liabilities', showNav: true },
-    { id: 'expenses', label: 'Expenses', showNav: true },
-    { id: 'investments', label: 'Investments', showNav: true },
-    { id: 'review', label: 'Review Summary', showNav: true },
+    { id: 'welcome', labelKey: 'nav.welcome', showNav: false },
+    { id: 'basic', labelKey: 'nav.basic', showNav: true },
+    { id: 'income', labelKey: 'nav.income', showNav: true },
+    { id: 'assets', labelKey: 'nav.assets', showNav: true },
+    { id: 'liabilities', labelKey: 'nav.liabilities', showNav: true },
+    { id: 'expenses', labelKey: 'nav.expenses', showNav: true },
+    { id: 'investments', labelKey: 'nav.investments', showNav: true },
+    { id: 'review', labelKey: 'nav.review', showNav: true },
 ];
 
 const KYCStepper: React.FC = () => {
+    const { t } = useLanguage();
     const [currentStepIndex, setCurrentStepIndex] = useState(0);
     const [formData, setFormData] = useState<KYCData>(initialKYCData);
     const [showPDPAModal, setShowPDPAModal] = useState(false);
@@ -58,6 +66,14 @@ const KYCStepper: React.FC = () => {
         }
     };
 
+    const handleNavigateToStep = (stepId: string) => {
+        const index = STEPS.findIndex(s => s.id === stepId);
+        if (index !== -1) {
+            setCurrentStepIndex(index);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+    };
+
     const updateFormData = (data: Partial<KYCData>) => {
         setFormData(prev => ({ ...prev, ...data }));
     };
@@ -79,17 +95,17 @@ const KYCStepper: React.FC = () => {
             case 'basic':
                 return <BasicInfoStep formData={formData} updateData={updateFormData} onNext={handleNext} onPrev={handlePrev} />;
             case 'income':
-                return <PlaceholderStep title="Income" onNext={handleNext} onPrev={handlePrev} />;
+                return <IncomeStep formData={formData} updateData={updateFormData} onNext={handleNext} onPrev={handlePrev} />;
             case 'assets':
-                return <PlaceholderStep title="Assets" onNext={handleNext} onPrev={handlePrev} />;
+                return <AssetsStep formData={formData} updateData={updateFormData} onNext={handleNext} onPrev={handlePrev} />;
             case 'liabilities':
-                return <PlaceholderStep title="Liabilities" onNext={handleNext} onPrev={handlePrev} />;
+                return <LiabilitiesStep formData={formData} updateData={updateFormData} onNext={handleNext} onPrev={handlePrev} />;
             case 'expenses':
-                return <PlaceholderStep title="Expenses" onNext={handleNext} onPrev={handlePrev} />;
+                return <ExpensesStep formData={formData} updateData={updateFormData} onNext={handleNext} onPrev={handlePrev} />;
             case 'investments':
-                return <PlaceholderStep title="Investments" onNext={handleNext} onPrev={handlePrev} />;
+                return <InvestmentsStep formData={formData} updateData={updateFormData} onNext={handleNext} onPrev={handlePrev} />;
             case 'review':
-                return <PlaceholderStep title="Review Summary" onNext={handleNext} onPrev={handlePrev} />;
+                return <ReviewSummaryStep formData={formData} onEditStep={handleNavigateToStep} onNext={handleNext} onPrev={handlePrev} />;
             default:
                 return <div>Unknown Step</div>;
         }
@@ -122,7 +138,7 @@ const KYCStepper: React.FC = () => {
                                         {isCurrent && <div className="w-2.5 h-2.5 rounded-full bg-xin-blue"></div>}
                                     </div>
                                     <span className={`text-sm ${isCurrent ? 'text-xin-blue font-semibold' : 'text-gray-500'}`}>
-                                        {step.label}
+                                        {t(step.labelKey)}
                                     </span>
                                 </div>
                             );

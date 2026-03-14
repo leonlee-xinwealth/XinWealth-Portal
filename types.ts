@@ -32,6 +32,70 @@ export interface ClientProfile {
   lastUpdated: string;
 }
 
+export interface IncomeItem {
+  id: string;
+  amount: string;
+  description: string;
+}
+
+export interface FinancialItem {
+  id: string;
+  amount: string;
+  description: string;
+}
+
+export interface ExpenseItem {
+  id: string;
+  type: string;
+  amount: string;
+}
+
+export interface KYCIncomeData {
+  monthlySalary: string;
+  annualBonus: string;
+  rentalIncome: IncomeItem[];
+  dividendIncome: IncomeItem[];
+  otherIncome: IncomeItem[];
+}
+
+export interface KYCAssetsData {
+  savings: string;
+  epfSejahtera: string;
+  epfPersaraan: string;
+  properties: FinancialItem[];
+  vehicles: FinancialItem[];
+  otherAssets: FinancialItem[];
+}
+
+export interface KYCLiabilitiesData {
+  mortgages: FinancialItem[];
+  carLoans: FinancialItem[];
+  studyLoans: FinancialItem[];
+  interestOnlyLoans: FinancialItem[];
+  renovationLoans: FinancialItem[];
+  otherLoans: FinancialItem[];
+}
+
+export interface KYCExpensesData {
+  household: ExpenseItem[];
+  transportation: ExpenseItem[];
+  dependants: ExpenseItem[];
+  personal: ExpenseItem[];
+  miscellaneous: ExpenseItem[];
+  otherExpenses: ExpenseItem[];
+}
+
+export interface KYCInvestmentsData {
+  etf: FinancialItem[];
+  bonds: FinancialItem[];
+  stocks: FinancialItem[];
+  unitTrusts: FinancialItem[];
+  fixedDeposits: FinancialItem[];
+  forex: FinancialItem[];
+  moneyMarket: FinancialItem[];
+  otherInvestments: FinancialItem[];
+}
+
 export interface KYCData {
   // Basic Info
   name: string;
@@ -51,12 +115,12 @@ export interface KYCData {
   // PDPA
   pdpaAccepted: boolean;
   
-  // Placholders for next steps
-  income: any;
-  assets: any;
-  liabilities: any;
-  expenses: any;
-  investments: any;
+  // Next steps
+  income: KYCIncomeData;
+  assets: KYCAssetsData;
+  liabilities: KYCLiabilitiesData;
+  expenses: KYCExpensesData;
+  investments: KYCInvestmentsData;
 }
 
 export const initialKYCData: KYCData = {
@@ -72,9 +136,45 @@ export const initialKYCData: KYCData = {
   taxStatus: '',
   occupation: '',
   pdpaAccepted: false,
-  income: {},
-  assets: {},
-  liabilities: {},
-  expenses: {},
-  investments: {}
+  income: {
+    monthlySalary: '',
+    annualBonus: '',
+    rentalIncome: [],
+    dividendIncome: [],
+    otherIncome: []
+  },
+  assets: {
+    savings: '',
+    epfSejahtera: '',
+    epfPersaraan: '',
+    properties: [],
+    vehicles: [],
+    otherAssets: [],
+  },
+  liabilities: {
+    mortgages: [],
+    carLoans: [],
+    studyLoans: [],
+    interestOnlyLoans: [],
+    renovationLoans: [],
+    otherLoans: [],
+  },
+  expenses: {
+    household: [],
+    transportation: [],
+    dependants: [],
+    personal: [],
+    miscellaneous: [],
+    otherExpenses: []
+  },
+  investments: {
+    etf: [],
+    bonds: [],
+    stocks: [],
+    unitTrusts: [],
+    fixedDeposits: [],
+    forex: [],
+    moneyMarket: [],
+    otherInvestments: []
+  }
 };
