@@ -36,6 +36,8 @@ export interface IncomeItem {
   id: string;
   amount: string;
   description: string;
+  month: string;
+  year: string;
 }
 
 export interface FinancialItem {
@@ -48,11 +50,17 @@ export interface ExpenseItem {
   id: string;
   type: string;
   amount: string;
+  month: string;
+  year: string;
 }
 
 export interface KYCIncomeData {
   monthlySalary: string;
+  salaryMonth: string;
+  salaryYear: string;
   annualBonus: string;
+  bonusMonth: string;
+  bonusYear: string;
   rentalIncome: IncomeItem[];
   dividendIncome: IncomeItem[];
   otherIncome: IncomeItem[];
@@ -141,7 +149,11 @@ export const initialKYCData: KYCData = {
   pdpaAccepted: false,
   income: {
     monthlySalary: '',
+    salaryMonth: new Date().getMonth().toString(),
+    salaryYear: new Date().getFullYear().toString(),
     annualBonus: '',
+    bonusMonth: '',
+    bonusYear: new Date().getFullYear().toString(),
     rentalIncome: [],
     dividendIncome: [],
     otherIncome: []

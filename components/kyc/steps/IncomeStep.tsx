@@ -11,11 +11,30 @@ interface IncomeStepProps {
     onPrev: () => void;
 }
 
+const currentMonth = new Date().getMonth().toString();
+const currentYear = new Date().getFullYear().toString();
+const MONTHS = [
+    { value: '0', en: 'January', zh: '1月' },
+    { value: '1', en: 'February', zh: '2月' },
+    { value: '2', en: 'March', zh: '3月' },
+    { value: '3', en: 'April', zh: '4月' },
+    { value: '4', en: 'May', zh: '5月' },
+    { value: '5', en: 'June', zh: '6月' },
+    { value: '6', en: 'July', zh: '7月' },
+    { value: '7', en: 'August', zh: '8月' },
+    { value: '8', en: 'September', zh: '9月' },
+    { value: '9', en: 'October', zh: '10月' },
+    { value: '10', en: 'November', zh: '11月' },
+    { value: '11', en: 'December', zh: '12月' }
+];
+const YEARS = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - 5 + i).toString());
+
 const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
+    const selectClasses = "px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer";
 
     // Accordion: which card is currently expanded
     const [expandedCard, setExpandedCard] = useState<string | null>(null);
@@ -23,7 +42,11 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
     // Safety check just in case formData.income is somehow missing
     const incomeData = formData.income || {
         monthlySalary: '',
+        salaryMonth: currentMonth,
+        salaryYear: currentYear,
         annualBonus: '',
+        bonusMonth: '',
+        bonusYear: currentYear,
         rentalIncome: [],
         dividendIncome: [],
         otherIncome: []
@@ -34,7 +57,7 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
     };
 
     const addIncomeItem = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>) => {
-        const newItems = [...incomeData[collectionPath], { id: Date.now().toString() + Math.random().toString(), amount: '', description: '' }];
+        const newItems = [...incomeData[collectionPath], { id: Date.now().toString() + Math.random().toString(), amount: '', description: '', month: currentMonth, year: currentYear }];
         updateIncome({ [collectionPath]: newItems });
         // Auto-expand this card
         setExpandedCard(collectionPath);
@@ -46,7 +69,7 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
         if (newItems.length === 0) setExpandedCard(null);
     };
 
-    const updateIncomeItemField = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>, idToUpdate: string, field: 'amount' | 'description', value: string) => {
+    const updateIncomeItemField = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>, idToUpdate: string, field: 'amount' | 'description' | 'month' | 'year', value: string) => {
         const newItems = incomeData[collectionPath].map(item => 
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
@@ -149,6 +172,33 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                                         />
                                         <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
                                     </div>
+
+                                    {/* Month & Year Selector */}
+                                    <div>
+                                        <label className={labelClasses}>
+                                            {isZh ? '所属月份' : 'Period (Month / Year)'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
+                                        </label>
+                                        <div className="flex gap-3 mt-1">
+                                            <select
+                                                className={selectClasses + ' flex-1'}
+                                                value={item.month}
+                                                onChange={(e) => updateIncomeItemField(collectionPath, item.id, 'month', e.target.value)}
+                                            >
+                                                {MONTHS.map(m => (
+                                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                                ))}
+                                            </select>
+                                            <select
+                                                className={selectClasses + ' w-28'}
+                                                value={item.year}
+                                                onChange={(e) => updateIncomeItemField(collectionPath, item.id, 'year', e.target.value)}
+                                            >
+                                                {YEARS.map(y => (
+                                                    <option key={y} value={y}>{y}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -199,6 +249,27 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                                 {t('common.perMonth')}
                             </div>
                         </div>
+                        {/* Salary Month/Year */}
+                        <div className="flex gap-3 mt-3">
+                            <select
+                                className={selectClasses + ' flex-1'}
+                                value={incomeData.salaryMonth || currentMonth}
+                                onChange={(e) => updateIncome({ salaryMonth: e.target.value })}
+                            >
+                                {MONTHS.map(m => (
+                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                ))}
+                            </select>
+                            <select
+                                className={selectClasses + ' w-28'}
+                                value={incomeData.salaryYear || currentYear}
+                                onChange={(e) => updateIncome({ salaryYear: e.target.value })}
+                            >
+                                {YEARS.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
 
                     <div>
@@ -216,6 +287,28 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                             <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium border-l border-gray-200 pl-3 my-2">
                                 {t('common.perYear')}
                             </div>
+                        </div>
+                        {/* Bonus Month/Year */}
+                        <div className="flex gap-3 mt-3">
+                            <select
+                                className={selectClasses + ' flex-1'}
+                                value={incomeData.bonusMonth || ''}
+                                onChange={(e) => updateIncome({ bonusMonth: e.target.value })}
+                            >
+                                <option value="" disabled>{isZh ? '选择月份...' : 'Select month...'}</option>
+                                {MONTHS.map(m => (
+                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                ))}
+                            </select>
+                            <select
+                                className={selectClasses + ' w-28'}
+                                value={incomeData.bonusYear || currentYear}
+                                onChange={(e) => updateIncome({ bonusYear: e.target.value })}
+                            >
+                                {YEARS.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
                         </div>
                     </div>
                 </div>

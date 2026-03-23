@@ -70,11 +70,30 @@ const getSuffixForType = (type: string) => {
     return '/month';
 };
 
+const currentMonth = new Date().getMonth().toString();
+const currentYear = new Date().getFullYear().toString();
+const MONTHS = [
+    { value: '0', en: 'January', zh: '1月' },
+    { value: '1', en: 'February', zh: '2月' },
+    { value: '2', en: 'March', zh: '3月' },
+    { value: '3', en: 'April', zh: '4月' },
+    { value: '4', en: 'May', zh: '5月' },
+    { value: '5', en: 'June', zh: '6月' },
+    { value: '6', en: 'July', zh: '7月' },
+    { value: '7', en: 'August', zh: '8月' },
+    { value: '8', en: 'September', zh: '9月' },
+    { value: '9', en: 'October', zh: '10月' },
+    { value: '10', en: 'November', zh: '11月' },
+    { value: '11', en: 'December', zh: '12月' }
+];
+const YEARS = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - 5 + i).toString());
+
 const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
     const [expandedCard, setExpandedCard] = useState<string | null>(null);
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
+    const selectClasses = "px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer";
     
     // Safety check just in case formData.expenses is missing due to older state
     const expensesData = formData.expenses || {
@@ -92,7 +111,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
 
     const addExpenseItem = (collectionPath: keyof KYCExpensesData, defaultType: string) => {
         const newArray = expensesData[collectionPath] || [];
-        const newItems = [...newArray, { id: Date.now().toString() + Math.random().toString(), type: defaultType, amount: '' }];
+        const newItems = [...newArray, { id: Date.now().toString() + Math.random().toString(), type: defaultType, amount: '', month: currentMonth, year: currentYear }];
         updateExpenses({ [collectionPath]: newItems });
         setExpandedCard(collectionPath as string);
     };
@@ -104,7 +123,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
         if (newItems.length === 0) setExpandedCard(null);
     };
 
-    const updateExpenseItemField = (collectionPath: keyof KYCExpensesData, idToUpdate: string, field: 'type' | 'amount', value: string) => {
+    const updateExpenseItemField = (collectionPath: keyof KYCExpensesData, idToUpdate: string, field: 'type' | 'amount' | 'month' | 'year', value: string) => {
         const newArray = expensesData[collectionPath] || [];
         const newItems = newArray.map(item => 
             item.id === idToUpdate ? { ...item, [field]: value } : item
@@ -171,25 +190,24 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                         </div>
 
                         {items.map((item, index) => (
-                            <div key={item.id} className="relative bg-white p-4 rounded-md border border-gray-200 shadow-sm flex flex-col md:flex-row md:items-start gap-4">
-                                
-                                {/* Type Dropdown */}
-                                <div className="w-full md:w-1/2">
-                                    <label className="block md:hidden text-sm font-semibold text-gray-700 mb-1">{t('common.type')}</label>
-                                    <select
-                                        className={inputClasses + " cursor-pointer !mt-0"}
-                                        value={item.type}
-                                        onChange={(e) => updateExpenseItemField(collectionPath, item.id, 'type', e.target.value)}
-                                    >
-                                        {options.map(opt => (
-                                            <option key={opt.value} value={opt.value}>{isZh ? opt.labelZh : opt.labelEn}</option>
-                                        ))}
-                                    </select>
-                                </div>
+                            <div key={item.id} className="relative bg-white p-4 rounded-md border border-gray-200 shadow-sm space-y-3">
+                                <div className="flex flex-col md:flex-row md:items-start gap-4">
+                                    {/* Type Dropdown */}
+                                    <div className="w-full md:w-5/12">
+                                        <label className="block md:hidden text-sm font-semibold text-gray-700 mb-1">{t('common.type')}</label>
+                                        <select
+                                            className={inputClasses + " cursor-pointer !mt-0"}
+                                            value={item.type}
+                                            onChange={(e) => updateExpenseItemField(collectionPath, item.id, 'type', e.target.value)}
+                                        >
+                                            {options.map(opt => (
+                                                <option key={opt.value} value={opt.value}>{isZh ? opt.labelZh : opt.labelEn}</option>
+                                            ))}
+                                        </select>
+                                    </div>
 
-                                {/* Amount Input & Delete */}
-                                <div className="w-full md:w-1/2 flex items-start gap-3">
-                                    <div className="w-full">
+                                    {/* Amount Input */}
+                                    <div className="w-full md:w-4/12">
                                         <label className="block md:hidden text-sm font-semibold text-gray-700 mb-1">{t('common.amount')}</label>
                                         <div className="relative">
                                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
@@ -205,15 +223,36 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                                             </div>
                                         </div>
                                     </div>
-                                    <button 
-                                        onClick={() => removeExpenseItem(collectionPath, item.id)} 
-                                        className="text-red-500 hover:text-red-700 p-2 mt-px bg-red-50 hover:bg-red-100 rounded-md transition-colors flex-shrink-0"
-                                        title={t('common.delete')}
-                                    >
-                                        <Trash2 size={20} />
-                                    </button>
-                                </div>
 
+                                    {/* Month/Year & Delete */}
+                                    <div className="w-full md:w-3/12 flex items-start gap-2">
+                                        <select
+                                            className={selectClasses + ' flex-1 !mt-0'}
+                                            value={item.month || currentMonth}
+                                            onChange={(e) => updateExpenseItemField(collectionPath, item.id, 'month', e.target.value)}
+                                        >
+                                            {MONTHS.map(m => (
+                                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                            ))}
+                                        </select>
+                                        <select
+                                            className={selectClasses + ' w-20 !mt-0'}
+                                            value={item.year || currentYear}
+                                            onChange={(e) => updateExpenseItemField(collectionPath, item.id, 'year', e.target.value)}
+                                        >
+                                            {YEARS.map(y => (
+                                                <option key={y} value={y}>{y}</option>
+                                            ))}
+                                        </select>
+                                        <button 
+                                            onClick={() => removeExpenseItem(collectionPath, item.id)} 
+                                            className="text-red-500 hover:text-red-700 p-2 mt-px bg-red-50 hover:bg-red-100 rounded-md transition-colors flex-shrink-0"
+                                            title={t('common.delete')}
+                                        >
+                                            <Trash2 size={20} />
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         ))}
                         
