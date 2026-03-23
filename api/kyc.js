@@ -10,8 +10,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const formData = req.body;
-  const { basic, income, assets, liabilities, expenses, investments } = formData;
+  const { income, assets, liabilities, expenses, investments, ...basic } = req.body;
 
   // 1. Env Var Check
   const appId = (process.env.LARK_APP_ID || "").trim();
@@ -74,7 +73,7 @@ export default async function handler(req, res) {
         "Employment Status": basic.employmentStatus || "",
         "Tax Status": basic.taxStatus || "",
         "Occupation": basic.occupation || "",
-        "PDPA Accepted": formData.pdpaAccepted ? "Yes" : "No",
+        "PDPA Accepted": basic.pdpaAccepted ? "Yes" : "No",
         "Submission Date": new Date().toISOString()
       }
     };
