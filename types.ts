@@ -99,7 +99,8 @@ export interface KYCInvestmentsData {
 
 export interface KYCData {
   // Basic Info
-  name: string;
+  familyName: string;
+  givenName: string;
   salutation: string;
   email: string;
   dateOfBirth: string;
@@ -125,7 +126,8 @@ export interface KYCData {
 }
 
 export const initialKYCData: KYCData = {
-  name: '',
+  familyName: '',
+  givenName: '',
   salutation: '',
   email: '',
   dateOfBirth: '',

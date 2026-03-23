@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { KYCData, FinancialItem, KYCInvestmentsData } from '../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Trash2, ChevronDown, ChevronUp, PlusCircle, TrendingUp, Briefcase, Landmark, DollarSign, Wallet, LineChart, Building2, FolderPlus } from 'lucide-react';
+import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
 
 interface InvestmentsStepProps {
     formData: KYCData;
@@ -55,16 +56,12 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
         updateInvestments({ [collectionPath]: newItems });
     };
 
-    // Reusable Expandable Card for Investments
-    const ExpandableInvestmentCard = ({ 
-        title, 
-        icon: Icon, 
-        collectionPath, 
-    }: { 
+    // Reusable render function for Investments (prevents input focus loss)
+    const renderExpandableInvestmentCard = ( 
         title: string, 
-        icon: React.ElementType, 
-        collectionPath: keyof KYCInvestmentsData,
-    }) => {
+        Icon: React.ElementType, 
+        collectionPath: keyof KYCInvestmentsData 
+    ) => {
         const items = investmentsData[collectionPath] || [];
         const hasItems = items.length > 0;
         const isOpen = expandedCard === (collectionPath as string);
@@ -130,15 +127,10 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                                 <span className="text-gray-500 font-medium">RM</span>
                                             </div>
-                                            <input 
-                                                type="text" 
+                                            <DebouncedNumberInput 
                                                 className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
                                                 value={item.amount}
-                                                onChange={(e) => {
-                                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                                    updateInvestmentItemField(collectionPath, item.id, 'amount', formattedValue);
-                                                }}
+                                                onChange={(val) => updateInvestmentItemField(collectionPath, item.id, 'amount', val)}
                                             />
                                         </div>
                                     </div>
@@ -147,12 +139,11 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                                         <label className={labelClasses}>
                                             {t('common.description')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
                                         </label>
-                                        <input 
-                                            type="text" 
+                                        <DebouncedTextInput 
                                             maxLength={100}
                                             className={inputClasses}
                                             value={item.description}
-                                            onChange={(e) => updateInvestmentItemField(collectionPath, item.id, 'description', e.target.value)}
+                                            onChange={(val) => updateInvestmentItemField(collectionPath, item.id, 'description', val)}
                                         />
                                         <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
                                     </div>
@@ -187,46 +178,14 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                 </div>
                 
                 <div className="space-y-4">
-                    <ExpandableInvestmentCard 
-                        title={t('investments.etf')}
-                        icon={TrendingUp}
-                        collectionPath="etf"
-                    />
-                    <ExpandableInvestmentCard 
-                        title={t('investments.bonds')}
-                        icon={Briefcase}
-                        collectionPath="bonds"
-                    />
-                    <ExpandableInvestmentCard 
-                        title={t('investments.stocks')}
-                        icon={LineChart}
-                        collectionPath="stocks"
-                    />
-                    <ExpandableInvestmentCard 
-                        title={t('investments.unitTrusts')}
-                        icon={Building2}
-                        collectionPath="unitTrusts"
-                    />
-                    <ExpandableInvestmentCard 
-                        title={t('investments.fixedDeposits')}
-                        icon={Landmark}
-                        collectionPath="fixedDeposits"
-                    />
-                    <ExpandableInvestmentCard 
-                        title={t('investments.forex')}
-                        icon={DollarSign}
-                        collectionPath="forex"
-                    />
-                    <ExpandableInvestmentCard 
-                        title={t('investments.money')}
-                        icon={Wallet}
-                        collectionPath="moneyMarket"
-                    />
-                    <ExpandableInvestmentCard 
-                        title={t('investments.others')}
-                        icon={FolderPlus}
-                        collectionPath="otherInvestments"
-                    />
+                    {renderExpandableInvestmentCard(t('investments.etf'), TrendingUp, "etf")}
+                    {renderExpandableInvestmentCard(t('investments.bonds'), Briefcase, "bonds")}
+                    {renderExpandableInvestmentCard(t('investments.stocks'), LineChart, "stocks")}
+                    {renderExpandableInvestmentCard(t('investments.unitTrusts'), Building2, "unitTrusts")}
+                    {renderExpandableInvestmentCard(t('investments.fixedDeposits'), Landmark, "fixedDeposits")}
+                    {renderExpandableInvestmentCard(t('investments.forex'), DollarSign, "forex")}
+                    {renderExpandableInvestmentCard(t('investments.money'), Wallet, "moneyMarket")}
+                    {renderExpandableInvestmentCard(t('investments.others'), FolderPlus, "otherInvestments")}
                 </div>
 
                 {/* Navigation Buttons bottom */}

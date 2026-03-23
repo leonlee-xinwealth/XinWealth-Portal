@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { KYCData, IncomeItem, KYCIncomeData } from '../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Wallet, Home, Landmark, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
+import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
 
 interface IncomeStepProps {
     formData: KYCData;
@@ -52,20 +53,14 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
         updateIncome({ [collectionPath]: newItems });
     };
 
-    // Reusable Expandable Card for Passive/Other Income
-    const ExpandableIncomeCard = ({ 
-        title, 
-        icon: Icon, 
-        collectionPath, 
-        itemLabel, 
-        periodSuffix 
-    }: { 
+    // Reusable render function for Passive/Other Income (prevents input focus loss)
+    const renderExpandableIncomeCard = (
         title: string, 
-        icon: React.ElementType, 
+        Icon: React.ElementType, 
         collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>,
         itemLabel: string,
         periodSuffix: string
-    }) => {
+    ) => {
         const items = incomeData[collectionPath];
         const hasItems = items.length > 0;
         const isOpen = expandedCard === collectionPath;
@@ -131,15 +126,10 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
                                                 <span className="text-gray-500 font-medium pb-0.5">RM</span>
                                             </div>
-                                            <input 
-                                                type="text" 
+                                            <DebouncedNumberInput 
                                                 className="w-full pl-12 pr-16 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
                                                 value={item.amount}
-                                                onChange={(e) => {
-                                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                                    updateIncomeItemField(collectionPath, item.id, 'amount', formattedValue);
-                                                }}
+                                                onChange={(val) => updateIncomeItemField(collectionPath, item.id, 'amount', val)}
                                             />
                                             <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium pb-0.5 border-l border-gray-200 pl-3 my-2">
                                                 {periodSuffix}
@@ -151,12 +141,11 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                                         <label className={labelClasses}>
                                             {t('common.description')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
                                         </label>
-                                        <input 
-                                            type="text" 
+                                        <DebouncedTextInput 
                                             maxLength={100}
                                             className={inputClasses}
                                             value={item.description}
-                                            onChange={(e) => updateIncomeItemField(collectionPath, item.id, 'description', e.target.value)}
+                                            onChange={(val) => updateIncomeItemField(collectionPath, item.id, 'description', val)}
                                         />
                                         <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
                                     </div>
@@ -200,16 +189,10 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
-                            <input 
-                                type="text" 
+                            <DebouncedNumberInput 
                                 className="w-full pl-16 pr-20 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
                                 value={incomeData.monthlySalary}
-                                onChange={(e) => {
-                                    // Strip non-numeric and format with commas
-                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                    updateIncome({ monthlySalary: formattedValue });
-                                }}
+                                onChange={(val) => updateIncome({ monthlySalary: val })}
                                 placeholder="10,000"
                             />
                             <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium border-l border-gray-200 pl-3 my-2">
@@ -224,16 +207,10 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
-                            <input 
-                                type="text" 
+                            <DebouncedNumberInput 
                                 className="w-full pl-16 pr-20 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
                                 value={incomeData.annualBonus}
-                                onChange={(e) => {
-                                    // Strip non-numeric and format with commas
-                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                    updateIncome({ annualBonus: formattedValue });
-                                }}
+                                onChange={(val) => updateIncome({ annualBonus: val })}
                                 placeholder="8,000"
                             />
                             <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium border-l border-gray-200 pl-3 my-2">
@@ -248,33 +225,33 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                 <p className="text-sm text-gray-600 mb-6 font-medium">{t('common.selectAll')}</p>
                 
                 <div className="space-y-4">
-                    <ExpandableIncomeCard 
-                        title={t('income.rentalOpt')}
-                        icon={Home}
-                        collectionPath="rentalIncome"
-                        itemLabel={isZh ? '每月租金收入' : 'monthly rental property income'}
-                        periodSuffix={t('common.perMonth')}
-                    />
-                    <ExpandableIncomeCard 
-                        title={t('income.dividendOpt')}
-                        icon={Landmark}
-                        collectionPath="dividendIncome"
-                        itemLabel={isZh ? '每年股息收入' : 'annual dividend income'}
-                        periodSuffix={t('common.perYear')}
-                    />
+                    {renderExpandableIncomeCard(
+                        t('income.rentalOpt'),
+                        Home,
+                        "rentalIncome",
+                        isZh ? '每月租金收入' : 'monthly rental property income',
+                        t('common.perMonth')
+                    )}
+                    {renderExpandableIncomeCard(
+                        t('income.dividendOpt'),
+                        Landmark,
+                        "dividendIncome",
+                        isZh ? '每年股息收入' : 'annual dividend income',
+                        t('common.perYear')
+                    )}
                 </div>
 
                 {/* Other Income Section */}
                 <h3 className="text-lg font-semibold text-gray-800 mt-12 mb-6 border-b border-gray-100 pb-2">{t('income.other')}</h3>
                 
                 <div className="space-y-4">
-                    <ExpandableIncomeCard 
-                        title={t('income.otherOpt')}
-                        icon={FolderPlus}
-                        collectionPath="otherIncome"
-                        itemLabel={isZh ? '其他收入' : 'other income'}
-                        periodSuffix={t('common.perMonth')}
-                    />
+                    {renderExpandableIncomeCard(
+                        t('income.otherOpt'),
+                        FolderPlus,
+                        "otherIncome",
+                        isZh ? '其他收入' : 'other income',
+                        t('common.perMonth')
+                    )}
                 </div>
 
                 {/* Navigation Buttons bottom */}

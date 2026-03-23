@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { KYCData, ExpenseItem, KYCExpensesData } from '../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Home, Car, Baby, Trash2, ChevronDown, ChevronUp, PlusCircle, Receipt, Info, User, Package, FolderPlus } from 'lucide-react';
+import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
 
 interface ExpensesStepProps {
     formData: KYCData;
@@ -111,20 +112,14 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
         updateExpenses({ [collectionPath]: newItems });
     };
 
-    // Reusable Expandable Card for Expenses
-    const ExpandableExpenseCard = ({ 
-        title, 
-        icon: Icon, 
-        collectionPath,
-        options,
-        defaultType
-    }: { 
+    // Reusable render function for Expenses (prevents input focus loss)
+    const renderExpandableExpenseCard = ( 
         title: string, 
-        icon: React.ElementType, 
+        Icon: React.ElementType, 
         collectionPath: keyof KYCExpensesData,
         options: { value: string, labelEn: string, labelZh: string }[],
-        defaultType: string
-    }) => {
+        defaultType: string 
+    ) => {
         const items = expensesData[collectionPath] || [];
         const hasItems = items.length > 0;
         const isOpen = expandedCard === (collectionPath as string);
@@ -200,15 +195,10 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                                 <span className="text-gray-500 font-medium">RM</span>
                                             </div>
-                                            <input 
-                                                type="text" 
+                                            <DebouncedNumberInput 
                                                 className="w-full pl-16 pr-20 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
                                                 value={item.amount}
-                                                onChange={(e) => {
-                                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                                    updateExpenseItemField(collectionPath, item.id, 'amount', formattedValue);
-                                                }}
+                                                onChange={(val) => updateExpenseItemField(collectionPath, item.id, 'amount', val)}
                                             />
                                             <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium border-l border-gray-200 pl-3 my-2">
                                                 {getSuffixForType(item.type) === '/month' ? t('common.perMonth') : t('common.perYear')}
@@ -262,48 +252,12 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                 </div>
                 
                 <div className="space-y-4">
-                    <ExpandableExpenseCard 
-                        title={t('expenses.household')}
-                        icon={Home}
-                        collectionPath="household"
-                        options={HOUSEHOLD_OPTIONS}
-                        defaultType="All - Household"
-                    />
-                    <ExpandableExpenseCard 
-                        title={t('expenses.transport')}
-                        icon={Car}
-                        collectionPath="transportation"
-                        options={TRANSPORT_OPTIONS}
-                        defaultType="All - Transport"
-                    />
-                    <ExpandableExpenseCard 
-                        title={t('expenses.dependants')}
-                        icon={Baby}
-                        collectionPath="dependants"
-                        options={DEPENDANTS_OPTIONS}
-                        defaultType="All - Dependants"
-                    />
-                    <ExpandableExpenseCard 
-                        title={t('expenses.personal')}
-                        icon={User}
-                        collectionPath="personal"
-                        options={PERSONAL_OPTIONS}
-                        defaultType="All - Personal"
-                    />
-                    <ExpandableExpenseCard 
-                        title={t('expenses.misc')}
-                        icon={Package}
-                        collectionPath="miscellaneous"
-                        options={MISC_OPTIONS}
-                        defaultType="All - Miscellaneous"
-                    />
-                    <ExpandableExpenseCard 
-                        title={t('expenses.others')}
-                        icon={FolderPlus}
-                        collectionPath="otherExpenses"
-                        options={OTHER_EXPENSES_OPTIONS}
-                        defaultType="Loan Repayment"
-                    />
+                    {renderExpandableExpenseCard(t('expenses.household'), Home, "household", HOUSEHOLD_OPTIONS, "All - Household")}
+                    {renderExpandableExpenseCard(t('expenses.transport'), Car, "transportation", TRANSPORT_OPTIONS, "All - Transport")}
+                    {renderExpandableExpenseCard(t('expenses.dependants'), Baby, "dependants", DEPENDANTS_OPTIONS, "All - Dependants")}
+                    {renderExpandableExpenseCard(t('expenses.personal'), User, "personal", PERSONAL_OPTIONS, "All - Personal")}
+                    {renderExpandableExpenseCard(t('expenses.misc'), Package, "miscellaneous", MISC_OPTIONS, "All - Miscellaneous")}
+                    {renderExpandableExpenseCard(t('expenses.others'), FolderPlus, "otherExpenses", OTHER_EXPENSES_OPTIONS, "Loan Repayment")}
                 </div>
 
                 {/* Navigation Buttons bottom */}

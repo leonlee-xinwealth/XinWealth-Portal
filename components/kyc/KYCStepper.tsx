@@ -10,6 +10,8 @@ import ExpensesStep from './steps/ExpensesStep';
 import InvestmentsStep from './steps/InvestmentsStep';
 import ReviewSummaryStep from './steps/ReviewSummaryStep';
 import { useLanguage } from '../../context/LanguageContext';
+import { submitKYC } from '../../services/larkService';
+import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 // Placeholder steps
 const PlaceholderStep = ({ title, onNext, onPrev }: { title: string, onNext: () => void, onPrev: () => void }) => (
@@ -35,10 +37,13 @@ export const STEPS = [
 ];
 
 const KYCStepper: React.FC = () => {
-    const { t } = useLanguage();
+    const { t, language } = useLanguage();
+    const isZh = language === 'zh';
     const [currentStepIndex, setCurrentStepIndex] = useState(0);
     const [formData, setFormData] = useState<KYCData>(initialKYCData);
     const [showPDPAModal, setShowPDPAModal] = useState(false);
+    const [status, setStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle');
+    const [error, setError] = useState<string | null>(null);
 
     const handleNext = () => {
         const currentStep = STEPS[currentStepIndex];
@@ -54,8 +59,21 @@ const KYCStepper: React.FC = () => {
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } else {
             // Submit form
-            console.log("Submitting:", formData);
-            alert("Form completely submitted! (Integration with Lark pending)");
+            submitForm();
+        }
+    };
+
+    const submitForm = async () => {
+        setStatus('submitting');
+        setError(null);
+        try {
+            await submitKYC(formData);
+            setStatus('success');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (err: any) {
+            setStatus('error');
+            setError(err.message || 'Failed to submit form. Please check your connection and try again.');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
     };
 
@@ -116,7 +134,47 @@ const KYCStepper: React.FC = () => {
             
             {/* Main Form Content */}
             <div className={`w-full ${currentStep.showNav ? 'lg:w-[70%]' : (currentStep.id === 'welcome' ? 'max-w-5xl mx-auto' : 'lg:w-full')} transition-all duration-300`}>
-                {renderStepContent()}
+                {status === 'success' ? (
+                    <div className="bg-white p-12 rounded-xl shadow-sm border border-gray-100 text-center animate-in zoom-in duration-500">
+                        <div className="flex justify-center mb-6">
+                            <div className="bg-green-50 p-4 rounded-full text-green-500">
+                                <CheckCircle2 size={64} />
+                            </div>
+                        </div>
+                        <h2 className="text-3xl font-serif text-gray-800 mb-4">{isZh ? '提交成功' : 'Submission Successful'}</h2>
+                        <p className="text-gray-600 mb-8 max-w-md mx-auto">
+                            {isZh ? '感謝您填寫 KYC 表格。我們的顧問將很快與您聯繫。' : 'Thank you for completing the KYC form. Our advisors will be in touch with you shortly.'}
+                        </p>
+                        <button 
+                            onClick={() => window.location.href = '/'}
+                            className="px-8 py-3 bg-xin-blue text-white rounded-md font-medium hover:bg-xin-dark transition-all shadow-md"
+                        >
+                            {isZh ? '返回主頁' : 'Return to Home'}
+                        </button>
+                    </div>
+                ) : status === 'submitting' ? (
+                    <div className="bg-white p-20 rounded-xl shadow-sm border border-gray-100 text-center">
+                        <div className="flex justify-center mb-6">
+                            <Loader2 size={48} className="text-xin-blue animate-spin" />
+                        </div>
+                        <h2 className="text-2xl font-serif text-gray-800 mb-2">{isZh ? '正在提交...' : 'Submitting...'}</h2>
+                        <p className="text-gray-500">{isZh ? '請稍候，我們正在將您的資料保存至數據庫。' : 'Please wait while we save your information to our database.'}</p>
+                    </div>
+                ) : (
+                    <>
+                        {status === 'error' && (
+                            <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-lg flex items-start gap-3 text-red-700 animate-in slide-in-from-top duration-300">
+                                <AlertCircle className="mt-0.5 shrink-0" size={20} />
+                                <div>
+                                    <p className="font-semibold">{isZh ? '提交失敗' : 'Submission Failed'}</p>
+                                    <p className="text-sm opacity-90">{error}</p>
+                                </div>
+                                <button onClick={() => setStatus('idle')} className="ml-auto text-xs font-bold uppercase tracking-wider">{isZh ? '關閉' : 'Close'}</button>
+                            </div>
+                        )}
+                        {renderStepContent()}
+                    </>
+                )}
             </div>
 
             {/* Right Sidebar Navigation (Only visible on certain steps) */}

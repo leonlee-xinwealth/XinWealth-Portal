@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { KYCData, FinancialItem, KYCAssetsData } from '../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Home, Car, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle, Building2 } from 'lucide-react';
+import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
 
 interface AssetsStepProps {
     formData: KYCData;
@@ -54,16 +55,12 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
         updateAssets({ [collectionPath]: newItems });
     };
 
-    // Reusable Expandable Card for Assets
-    const ExpandableAssetCard = ({
-        title,
-        icon: Icon,
-        collectionPath,
-    }: {
+    // Reusable render function for Assets (prevents input focus loss)
+    const renderExpandableAssetCard = (
         title: string,
-        icon: React.ElementType,
-        collectionPath: keyof Pick<KYCAssetsData, 'properties' | 'vehicles' | 'otherAssets'>,
-    }) => {
+        Icon: React.ElementType,
+        collectionPath: keyof Pick<KYCAssetsData, 'properties' | 'vehicles' | 'otherAssets'>
+    ) => {
         const items = assetsData[collectionPath];
         const hasItems = items.length > 0;
         const isOpen = expandedCard === collectionPath;
@@ -129,15 +126,10 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                                 <span className="text-gray-500 font-medium">RM</span>
                                             </div>
-                                            <input
-                                                type="text"
+                                            <DebouncedNumberInput
                                                 className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
                                                 value={item.amount}
-                                                onChange={(e) => {
-                                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                                    updateAssetItemField(collectionPath, item.id, 'amount', formattedValue);
-                                                }}
+                                                onChange={(val) => updateAssetItemField(collectionPath, item.id, 'amount', val)}
                                             />
                                         </div>
                                     </div>
@@ -146,12 +138,11 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                         <label className={labelClasses}>
                                             {t('common.description')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
                                         </label>
-                                        <input
-                                            type="text"
+                                        <DebouncedTextInput
                                             maxLength={100}
                                             className={inputClasses}
                                             value={item.description}
-                                            onChange={(e) => updateAssetItemField(collectionPath, item.id, 'description', e.target.value)}
+                                            onChange={(val) => updateAssetItemField(collectionPath, item.id, 'description', val)}
                                         />
                                         <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
                                     </div>
@@ -195,15 +186,10 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
-                            <input
-                                type="text"
+                            <DebouncedNumberInput
                                 className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
                                 value={assetsData.savings}
-                                onChange={(e) => {
-                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                    updateAssets({ savings: formattedValue });
-                                }}
+                                onChange={(val) => updateAssets({ savings: val })}
                             />
                         </div>
                     </div>
@@ -219,15 +205,10 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
-                            <input
-                                type="text"
+                            <DebouncedNumberInput
                                 className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
                                 value={assetsData.epfPersaraan}
-                                onChange={(e) => {
-                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                    updateAssets({ epfPersaraan: formattedValue });
-                                }}
+                                onChange={(val) => updateAssets({ epfPersaraan: val })}
                             />
                         </div>
                     </div>
@@ -238,15 +219,10 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
-                            <input
-                                type="text"
+                            <DebouncedNumberInput
                                 className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
                                 value={assetsData.epfSejahtera}
-                                onChange={(e) => {
-                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                    updateAssets({ epfSejahtera: formattedValue });
-                                }}
+                                onChange={(val) => updateAssets({ epfSejahtera: val })}
                             />
                         </div>
                     </div>
@@ -275,21 +251,9 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                 <h3 className="text-lg font-semibold text-gray-800 mt-12 mb-4 border-b border-gray-100 pb-2">{t('common.selectAll')}</h3>
 
                 <div className="space-y-2">
-                    <ExpandableAssetCard
-                        title={t('assets.properties')}
-                        icon={Home}
-                        collectionPath="properties"
-                    />
-                    <ExpandableAssetCard
-                        title={t('assets.vehicles')}
-                        icon={Car}
-                        collectionPath="vehicles"
-                    />
-                    <ExpandableAssetCard
-                        title={t('assets.others')}
-                        icon={FolderPlus}
-                        collectionPath="otherAssets"
-                    />
+                    {renderExpandableAssetCard(t('assets.properties'), Home, 'properties')}
+                    {renderExpandableAssetCard(t('assets.vehicles'), Car, 'vehicles')}
+                    {renderExpandableAssetCard(t('assets.others'), FolderPlus, 'otherAssets')}
                 </div>
 
                 {/* Navigation Buttons bottom */}

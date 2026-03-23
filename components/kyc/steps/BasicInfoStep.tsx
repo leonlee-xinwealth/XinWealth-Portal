@@ -1,6 +1,7 @@
 import React from 'react';
 import { KYCData } from '../../types';
 import { useLanguage } from '../../../context/LanguageContext';
+import { DebouncedTextInput } from '../FormInputs';
 
 interface BasicInfoStepProps {
     formData: KYCData;
@@ -78,15 +79,27 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
                 </h2>
                 
                 <div className="space-y-6">
-                    <div>
-                        <label className={labelClasses}>{t('basic.name')} {requiredSpan}</label>
-                        <input 
-                            type="text" 
-                            className={inputClasses}
-                            value={formData.name}
-                            onChange={(e) => updateData({ name: e.target.value })}
-                            placeholder="---"
-                        />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label className={labelClasses}>{t('basic.familyName')} {requiredSpan}</label>
+                            <DebouncedTextInput 
+                                type="text" 
+                                className={inputClasses}
+                                value={formData.familyName}
+                                onChange={(val) => updateData({ familyName: val })}
+                                placeholder="---"
+                            />
+                        </div>
+                        <div>
+                            <label className={labelClasses}>{t('basic.givenName')} {requiredSpan}</label>
+                            <DebouncedTextInput 
+                                type="text" 
+                                className={inputClasses}
+                                value={formData.givenName}
+                                onChange={(val) => updateData({ givenName: val })}
+                                placeholder="---"
+                            />
+                        </div>
                     </div>
 
                     <div>
@@ -96,11 +109,11 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
 
                     <div>
                         <label className={labelClasses}>{t('basic.email')} {requiredSpan}</label>
-                        <input 
+                        <DebouncedTextInput 
                             type="email" 
                             className={inputClasses}
                             value={formData.email}
-                            onChange={(e) => updateData({ email: e.target.value })}
+                            onChange={(val) => updateData({ email: val })}
                             placeholder="e.g. client@example.com"
                         />
                     </div>
@@ -174,11 +187,11 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
 
                     <div>
                         <label className={labelClasses}>{t('basic.retirement')} {requiredSpan}</label>
-                        <input 
+                        <DebouncedTextInput 
                             type="number" 
                             className={inputClasses}
                             value={formData.retirementAge}
-                            onChange={(e) => updateData({ retirementAge: e.target.value })}
+                            onChange={(val) => updateData({ retirementAge: val })}
                             placeholder="55"
                         />
                     </div>
@@ -202,11 +215,11 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
 
                     <div>
                         <label className={labelClasses}>{t('basic.occupation')} {optionalSpan}</label>
-                        <input 
+                        <DebouncedTextInput 
                             type="text" 
                             className={inputClasses}
                             value={formData.occupation}
-                            onChange={(e) => updateData({ occupation: e.target.value })}
+                            onChange={(val) => updateData({ occupation: val })}
                         />
                     </div>
                 </div>

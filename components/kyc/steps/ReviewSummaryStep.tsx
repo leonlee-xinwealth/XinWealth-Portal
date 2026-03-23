@@ -32,6 +32,7 @@ const calculateTotalAssets = (assets: any) => {
     total += parseAmount(assets.savings);
     total += parseAmount(assets.epfSejahtera);
     total += parseAmount(assets.epfPersaraan);
+    total += parseAmount(assets.epfFleksibel);
     
     ['properties', 'vehicles', 'otherAssets'].forEach(key => {
         assets[key]?.forEach((item: FinancialItem) => total += parseAmount(item.amount));
@@ -91,7 +92,12 @@ const SectionHeader = ({ icon: Icon, title, onEdit, totalLabel, totalValue, step
     </div>
 );
 
-const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditStep, onNext, onPrev }) => {
+const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ 
+    formData, 
+    onEditStep, 
+    onNext, 
+    onPrev 
+}: ReviewSummaryStepProps) => {
     const { t, language } = useLanguage();
     const isZh = language === 'zh';
     
@@ -118,6 +124,10 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({ formData, onEditS
                 <div className="mb-10">
                     <SectionHeader icon={User} title={t('review.profile')} onEdit={onEditStep} stepId="basic" />
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-y-6 gap-x-4">
+                        <div>
+                            <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.name')}</div>
+                            <div className="text-sm font-semibold">{`${formData.familyName || ''} ${formData.givenName || ''}`.trim() || '-'}</div>
+                        </div>
                         <div>
                             <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">{t('basic.email')}</div>
                             <div className="text-sm font-semibold">{formData.email || '-'}</div>

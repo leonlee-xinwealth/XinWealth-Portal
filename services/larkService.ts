@@ -1,4 +1,4 @@
-import { PortfolioDataPoint, Transaction, ClientProfile } from '../types';
+import { PortfolioDataPoint, Transaction, ClientProfile, KYCData } from '../types';
 
 /**
  * Connects to Vercel Serverless Functions in the /api folder.
@@ -265,4 +265,24 @@ export const fetchPortfolioHistory = async (): Promise<PortfolioDataPoint[]> => 
 
 export const fetchTransactions = async (): Promise<Transaction[]> => {
   return [];
+};
+
+export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; submissionId: string }> => {
+  try {
+    const response = await fetch('/api/kyc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(formData)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'KYC Submission failed');
+    }
+
+    return data;
+  } catch (error) {
+    console.error("KYC Submission Error:", error);
+    throw error;
+  }
 };

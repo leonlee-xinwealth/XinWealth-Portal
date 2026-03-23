@@ -28,6 +28,8 @@ const translations: Record<Language, Record<string, string>> = {
     'pdpa.accept': 'I Agree & Continue',
     
     'basic.title': 'About You',
+    'basic.familyName': 'Family Name',
+    'basic.givenName': 'Given Name',
     'basic.name': 'Full Name',
     'basic.salutation': 'Salutation',
     'basic.email': 'Email',
@@ -167,6 +169,8 @@ const translations: Record<Language, Record<string, string>> = {
     'pdpa.accept': '我同意并继续',
 
     'basic.title': '关于您',
+    'basic.familyName': '姓氏 (Family Name)',
+    'basic.givenName': '名字 (Given Name)',
     'basic.name': '姓名',
     'basic.salutation': '称呼',
     'basic.email': '邮箱地址',

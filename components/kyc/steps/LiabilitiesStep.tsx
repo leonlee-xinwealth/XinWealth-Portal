@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { KYCData, FinancialItem, KYCLiabilitiesData } from '../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Home, Car, GraduationCap, Percent, HardHat, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
+import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
 
 interface LiabilitiesStepProps {
     formData: KYCData;
@@ -50,16 +51,12 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
         updateLiabilities({ [collectionPath]: newItems });
     };
 
-    // Reusable Expandable Card for Loans
-    const ExpandableLoanCard = ({ 
-        title, 
-        icon: Icon, 
-        collectionPath, 
-    }: { 
+    // Reusable render function for Loans (prevents input focus loss)
+    const renderExpandableLoanCard = ( 
         title: string, 
-        icon: React.ElementType, 
-        collectionPath: keyof KYCLiabilitiesData,
-    }) => {
+        Icon: React.ElementType, 
+        collectionPath: keyof KYCLiabilitiesData 
+    ) => {
         const items = liabilitiesData[collectionPath];
         const hasItems = items.length > 0;
         const isOpen = expandedCard === (collectionPath as string);
@@ -125,15 +122,10 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                                 <span className="text-gray-500 font-medium">RM</span>
                                             </div>
-                                            <input 
-                                                type="text" 
+                                            <DebouncedNumberInput 
                                                 className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
                                                 value={item.amount}
-                                                onChange={(e) => {
-                                                    const rawValue = e.target.value.replace(/,/g, '').replace(/\D/g, '');
-                                                    const formattedValue = rawValue ? parseInt(rawValue).toLocaleString('en-US') : '';
-                                                    updateLoanItemField(collectionPath, item.id, 'amount', formattedValue);
-                                                }}
+                                                onChange={(val) => updateLoanItemField(collectionPath, item.id, 'amount', val)}
                                             />
                                         </div>
                                     </div>
@@ -179,36 +171,12 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                 </div>
                 
                 <div className="space-y-4">
-                    <ExpandableLoanCard 
-                        title={t('liabilities.mortgages')}
-                        icon={Home}
-                        collectionPath="mortgages"
-                    />
-                    <ExpandableLoanCard 
-                        title={t('liabilities.car')}
-                        icon={Car}
-                        collectionPath="carLoans"
-                    />
-                    <ExpandableLoanCard 
-                        title={t('liabilities.study')}
-                        icon={GraduationCap}
-                        collectionPath="studyLoans"
-                    />
-                    <ExpandableLoanCard 
-                        title={t('liabilities.interest')}
-                        icon={Percent}
-                        collectionPath="interestOnlyLoans"
-                    />
-                    <ExpandableLoanCard 
-                        title={t('liabilities.renovation')}
-                        icon={HardHat}
-                        collectionPath="renovationLoans"
-                    />
-                    <ExpandableLoanCard 
-                        title={t('liabilities.others')}
-                        icon={FolderPlus}
-                        collectionPath="otherLoans"
-                    />
+                    {renderExpandableLoanCard(t('liabilities.mortgages'), Home, "mortgages")}
+                    {renderExpandableLoanCard(t('liabilities.car'), Car, "carLoans")}
+                    {renderExpandableLoanCard(t('liabilities.study'), GraduationCap, "studyLoans")}
+                    {renderExpandableLoanCard(t('liabilities.interest'), Percent, "interestOnlyLoans")}
+                    {renderExpandableLoanCard(t('liabilities.renovation'), HardHat, "renovationLoans")}
+                    {renderExpandableLoanCard(t('liabilities.others'), FolderPlus, "otherLoans")}
                 </div>
 
                 {/* Navigation Buttons bottom */}
