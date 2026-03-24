@@ -95,7 +95,7 @@ export default async function handler(req, res) {
       const records = items.map(item => ({
         fields: {
           ...fieldMapper(item),
-          "Client ID": submissionId
+          "Client": [submissionId]
         }
       }));
 
@@ -116,8 +116,8 @@ export default async function handler(req, res) {
         category: "Monthly Salary",
         description: "Monthly Salary",
         amount: income.monthlySalary,
-        period: getPeriod(income.salaryMonth, income.salaryYear),
-        frequency: "Monthly"
+        month: income.salaryMonth,
+        year: income.salaryYear
       });
     }
     if (income.annualBonus) {
@@ -125,8 +125,8 @@ export default async function handler(req, res) {
         category: "Annual Bonus",
         description: "Annual Bonus",
         amount: income.annualBonus,
-        period: getPeriod(income.bonusMonth, income.bonusYear),
-        frequency: "Yearly"
+        month: income.bonusMonth,
+        year: income.bonusYear
       });
     }
     // Dynamic income items
@@ -138,20 +138,23 @@ export default async function handler(req, res) {
             category,
             description: item.description || "",
             amount: item.amount,
-            period: getPeriod(item.month, item.year),
-            frequency: key === 'dividendIncome' ? 'Yearly' : 'Monthly'
+            month: item.month,
+            year: item.year
           });
         });
       }
     }
 
-    await createSubRecords(tableIncomes, allIncomes, item => ({
-      "Category": item.category,
-      "Description": item.description,
-      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      "Period": item.period,
-      "Frequency": item.frequency
-    }));
+    await createSubRecords(tableIncomes, allIncomes, item => {
+      const fieldData = {
+        "Category": item.category,
+        "Description": item.description,
+        "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+      };
+      if (item.month != null) fieldData["Month"] = getMonthName(item.month);
+      if (item.year) fieldData["Year"] = String(item.year);
+      return fieldData;
+    });
 
     // 5. Create Asset Records
     const allAssets = [
@@ -214,13 +217,16 @@ export default async function handler(req, res) {
       ...(expenses.otherExpenses || []).map(e => ({ ...e, category: "Other" }))
     ];
 
-    await createSubRecords(tableExpenses, allExpenses, item => ({
-      "Category": item.category,
-      "Type": item.type || "",
-      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      "Period": getPeriod(item.month, item.year),
-      "Frequency": (item.type === 'Vacation/ Travel' || item.type === 'Income Tax Expense') ? 'Yearly' : 'Monthly'
-    }));
+    await createSubRecords(tableExpenses, allExpenses, item => {
+      const fieldData = {
+        "Category": item.category,
+        "Type": item.type || "",
+        "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+      };
+      if (item.month != null) fieldData["Month"] = getMonthName(item.month);
+      if (item.year) fieldData["Year"] = String(item.year);
+      return fieldData;
+    });
 
     return res.status(200).json({ success: true, submissionId });
 
