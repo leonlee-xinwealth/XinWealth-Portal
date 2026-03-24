@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Sidebar from './Sidebar';
 import Investment from './Investment';
 import Insurance from './Insurance';
+import FinancialHealthCheck from './FinancialHealthCheck';
 import Login from './Login';
 import { ViewState } from '../types';
 import { clearSession } from '../services/larkService';
@@ -28,6 +29,8 @@ const PortalLayout: React.FC = () => {
         return <Investment />;
       case ViewState.INSURANCE:
         return <Insurance />;
+      case ViewState.HEALTH_CHECK:
+        return <FinancialHealthCheck />;
       default:
         return <Investment />;
     }

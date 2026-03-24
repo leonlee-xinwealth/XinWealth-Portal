@@ -1,4 +1,4 @@
-import { PortfolioDataPoint, Transaction, ClientProfile, KYCData } from '../types';
+import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData } from '../types';
 
 /**
  * Connects to Vercel Serverless Functions in the /api folder.
@@ -285,4 +285,138 @@ export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; 
     console.error("KYC Submission Error:", error);
     throw error;
   }
+};
+
+export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
+  const user = getSession();
+  if (!user || !user.name) throw new Error("No user session found");
+
+  const timestamp = new Date().getTime();
+  const response = await fetch(`/api/health?name=${encodeURIComponent(user.name)}&_t=${timestamp}`);
+  
+  if (!response.ok) {
+     throw new Error("Failed to fetch health data");
+  }
+
+  const data = await response.json();
+
+  // Helper to extract value safely
+  const getValue = (item: any, fieldNames: string[]): number => {
+    for (const field of fieldNames) {
+      if (item.fields[field] !== undefined) {
+         return safeFloat(item.fields[field]);
+      }
+    }
+    return 0;
+  };
+
+  // 1. Calculate components
+  let cashAndFD = 0;
+  let totalAssets = 0;
+  let investmentAssets = 0;
+  
+  (data.assets || []).forEach((item: any) => {
+    const val = getValue(item, ["Value", "value", "Amount", "amount"]);
+    const cat = item.fields["Category"] || "";
+    totalAssets += val;
+    if (cat === "Cash/Savings") {
+      cashAndFD += val;
+    }
+  });
+
+  (data.investments || []).forEach((item: any) => {
+    const val = getValue(item, ["Amount", "amount", "Value", "value", "End Value"]);
+    const cat = item.fields["Category"] || "";
+    totalAssets += val;
+    investmentAssets += val;
+    if (cat === "Fixed Deposit" || cat === "Money Market") {
+      cashAndFD += val;
+    }
+  });
+
+  let totalLiabilities = 0;
+  (data.liabilities || []).forEach((item: any) => {
+    const val = getValue(item, ["Outstanding Amount", "outstanding amount", "Amount", "amount"]);
+    totalLiabilities += val;
+  });
+
+  const netWorth = totalAssets - totalLiabilities;
+
+  let monthlyExpenses = 0;
+  let annualExpenses = 0;
+  let totalMonthlyDebtRepayment = 0;
+  let consumerDebtRepayment = 0; // assuming non-mortgage loans
+
+  (data.expenses || []).forEach((item: any) => {
+    let val = getValue(item, ["Amount", "amount"]);
+    const type = item.fields["Type"] || "";
+
+    // Convert yearly to monthly if applicable
+    if (type === 'Vacation/ Travel' || type === 'Income Tax Expense') {
+       annualExpenses += val;
+       val = val / 12;
+    } else {
+       annualExpenses += val * 12;
+    }
+    monthlyExpenses += val;
+
+    if (type === 'Loan Repayment' || type.includes('Loan')) {
+       totalMonthlyDebtRepayment += val;
+       // Try to guess if consumer debt. In expenses we only have 'Loan Repayment' usually.
+       // Let's assume all loan repayments in expenses are consumer unless specified as mortgage.
+       // A simplistic approach:
+       consumerDebtRepayment += val; 
+    }
+  });
+
+  let monthlyGrossIncome = 0;
+  let annualPassiveIncome = 0;
+
+  (data.incomes || []).forEach((item: any) => {
+    let val = getValue(item, ["Amount", "amount"]);
+    const cat = item.fields["Category"] || "";
+
+    if (cat === 'Annual Bonus') {
+      monthlyGrossIncome += val / 12;
+    } else {
+      monthlyGrossIncome += val;
+    }
+
+    if (cat === 'Rental Income' || cat === 'Dividend Income') {
+      // Assuming entered as monthly or yearly?
+      // KYC form allows month/year but it's just amount. Let's assume amount is monthly unless it's a known annual thing.
+      // Usually rental is monthly, dividend can be annual. We will just multiply by 12 for simplicity.
+      annualPassiveIncome += val * 12;
+    }
+  });
+
+  const monthlyNetIncome = monthlyGrossIncome; // Approximate if tax isn't detailed
+  const monthlySavings = monthlyNetIncome - monthlyExpenses;
+  const annualIncome = monthlyGrossIncome * 12;
+  
+  // Total Sum Assured - hardcoded to 0 for now as no insurance table
+  const totalSumAssured = 0;
+
+  // 2. Calculate Ratios
+  const basicLiquidityRatio = monthlyExpenses > 0 ? cashAndFD / monthlyExpenses : 0;
+  const liquidAssetToNetWorth = netWorth > 0 ? cashAndFD / netWorth : 0;
+  const solvencyRatio = totalAssets > 0 ? netWorth / totalAssets : 0;
+  const debtServiceRatio = monthlyNetIncome > 0 ? totalMonthlyDebtRepayment / monthlyNetIncome : 0;
+  const nonMortgageDSR = monthlyNetIncome > 0 ? consumerDebtRepayment / monthlyNetIncome : 0;
+  const lifeInsuranceCoverage = annualIncome > 0 ? totalSumAssured / annualIncome : 0;
+  const savingsRatio = monthlyGrossIncome > 0 ? monthlySavings / monthlyGrossIncome : 0;
+  const investAssetsToNetWorth = netWorth > 0 ? investmentAssets / netWorth : 0;
+  const passiveIncomeCoverage = annualExpenses > 0 ? annualPassiveIncome / annualExpenses : 0;
+
+  return {
+    basicLiquidityRatio,
+    liquidAssetToNetWorth,
+    solvencyRatio,
+    debtServiceRatio,
+    nonMortgageDSR,
+    lifeInsuranceCoverage,
+    savingsRatio,
+    investAssetsToNetWorth,
+    passiveIncomeCoverage
+  };
 };

@@ -1,6 +1,7 @@
 export enum ViewState {
   INVESTMENT = 'INVESTMENT',
   INSURANCE = 'INSURANCE',
+  HEALTH_CHECK = 'HEALTH_CHECK',
   SETTINGS = 'SETTINGS'
 }
 
@@ -17,6 +18,18 @@ export interface PortfolioDataPoint {
   date: string;
   portfolioValue: number;
   fdValue: number; // The value if invested in Fixed Deposit (Calculated at 3%)
+}
+
+export interface FinancialHealthData {
+  basicLiquidityRatio: number;
+  liquidAssetToNetWorth: number;
+  solvencyRatio: number;
+  debtServiceRatio: number;
+  nonMortgageDSR: number;
+  lifeInsuranceCoverage: number;
+  savingsRatio: number;
+  investAssetsToNetWorth: number;
+  passiveIncomeCoverage: number;
 }
 
 export interface ClientProfile {
