@@ -30,6 +30,23 @@ export interface FinancialHealthData {
   savingsRatio: number;
   investAssetsToNetWorth: number;
   passiveIncomeCoverage: number;
+  // Raw values for calculation display
+  raw: {
+    cashAndFD: number;
+    monthlyExpenses: number;
+    netWorth: number;
+    totalAssets: number;
+    totalMonthlyDebtRepayment: number;
+    monthlyNetIncome: number;
+    consumerDebtRepayment: number;
+    totalSumAssured: number;
+    annualIncome: number;
+    monthlySavings: number;
+    monthlyGrossIncome: number;
+    investmentAssets: number;
+    annualPassiveIncome: number;
+    annualExpenses: number;
+  }
 }
 
 export interface ClientProfile {

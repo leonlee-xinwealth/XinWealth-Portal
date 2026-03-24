@@ -1,7 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth } from '../services/larkService';
 import { FinancialHealthData } from '../types';
-import { Activity, AlertCircle, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { Activity, AlertCircle, CheckCircle2, AlertTriangle, Loader2, Info } from 'lucide-react';
+
+const Tooltip: React.FC<{ title: string; content: React.ReactNode }> = ({ title, content }) => {
+  const [isVisible, setIsVisible] = useState(false);
+
+  return (
+    <div 
+      className="relative inline-flex items-center gap-1 cursor-help group"
+      onMouseEnter={() => setIsVisible(true)}
+      onMouseLeave={() => setIsVisible(false)}
+    >
+      <span className="font-medium text-slate-700 underline decoration-slate-300 decoration-dashed underline-offset-4">{title}</span>
+      <Info size={14} className="text-slate-400 group-hover:text-xin-blue transition-colors" />
+      
+      {isVisible && (
+        <div className="absolute z-50 w-80 p-4 bg-white rounded-xl shadow-xl border border-slate-100 text-sm left-0 bottom-full mb-2 animate-fade-in-up">
+          {content}
+          <div className="absolute -bottom-2 left-4 w-4 h-4 bg-white border-b border-r border-slate-100 transform rotate-45"></div>
+        </div>
+      )}
+    </div>
+  );
+};
 
 const FinancialHealthCheck: React.FC = () => {
   const [data, setData] = useState<FinancialHealthData | null>(null);
@@ -70,6 +92,90 @@ const FinancialHealthCheck: React.FC = () => {
       return value.toFixed(1) + ' 倍';
     }
     return (value * 100).toFixed(1) + '%';
+  };
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('en-MY', {
+      style: 'currency',
+      currency: 'MYR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value);
+  };
+
+  const getCalculationDetail = (id: string, raw?: FinancialHealthData['raw']) => {
+    if (!raw) return null;
+    
+    switch (id) {
+      case 'basicLiquidityRatio':
+        return `(${formatCurrency(raw.cashAndFD)}) / ${formatCurrency(raw.monthlyExpenses)}`;
+      case 'liquidAssetToNetWorth':
+        return `(${formatCurrency(raw.cashAndFD)}) / ${formatCurrency(raw.netWorth)}`;
+      case 'solvencyRatio':
+        return `${formatCurrency(raw.netWorth)} / ${formatCurrency(raw.totalAssets)}`;
+      case 'debtServiceRatio':
+        return `${formatCurrency(raw.totalMonthlyDebtRepayment)} / ${formatCurrency(raw.monthlyNetIncome)}`;
+      case 'nonMortgageDSR':
+        return `${formatCurrency(raw.consumerDebtRepayment)} / ${formatCurrency(raw.monthlyNetIncome)}`;
+      case 'lifeInsuranceCoverage':
+        return `${formatCurrency(raw.totalSumAssured)} / ${formatCurrency(raw.annualIncome)}`;
+      case 'savingsRatio':
+        return `${formatCurrency(raw.monthlySavings)} / ${formatCurrency(raw.monthlyGrossIncome)}`;
+      case 'investAssetsToNetWorth':
+        return `${formatCurrency(raw.investmentAssets)} / ${formatCurrency(raw.netWorth)}`;
+      case 'passiveIncomeCoverage':
+        return `${formatCurrency(raw.annualPassiveIncome)} / ${formatCurrency(raw.annualExpenses)}`;
+      default:
+        return '';
+    }
+  };
+
+  const tooltips: Record<string, React.ReactNode> = {
+    'basicLiquidityRatio': (
+      <div className="space-y-2">
+        <p><strong className="text-xin-blue">指标含义：</strong> 衡量您手头的现金和定存，能够支撑家庭几个月的日常开销。</p>
+        <p><strong className="text-xin-blue">为何重要：</strong> 它最重要的作用，是在突发事件发生时维持基本生活，避免因为短期现金流断裂而陷入财务危机。</p>
+        <p className="text-slate-500 text-xs">没有足够备用金时，人往往会被迫借贷，或者在不理想的时点卖出股票、基金等长期投资，从而扩大损失或陷入债务循环。<br/><br/>反过来，足够的备用金会把“意外支出”和“长期投资计划”隔开，让你的投资更稳定、更能坚持下去。<br/><br/>同时，作为企业家，保持6至12个月的充足备用金，能让您在面对生意寒冬、客户拖欠账款等突发状况时，无需为了应付个人生活费而做出仓促、妥协的商业决策。</p>
+      </div>
+    ),
+    'liquidAssetToNetWorth': (
+      <div className="space-y-2">
+        <p><strong className="text-xin-blue">指标含义：</strong> 检查您的个人总净值中，有多少是可以随时变现的“活钱”。</p>
+        <p><strong className="text-xin-blue">为何重要：</strong></p>
+        <ul className="list-disc pl-4 text-xs text-slate-500 space-y-1">
+          <li>第一，它反映你应付短期财务义务和突发开支的能力；这个比率越高，通常代表短期财务安全垫越强。</li>
+          <li>第二，它能减少你在紧急时刻被迫借高息债务，或在不合适的时间卖出长期投资的概率。</li>
+          <li>第三，它能帮助你识别自己是否处于“富有的穷人”（asset rich, cash poor）的状态，也就是账面上有钱，但实际可用现金不足。</li>
+        </ul>
+        <p className="text-slate-500 text-xs mt-2">尤其是会把资金全压在公司库存、厂房或名下的房地产上的企业家，保持 15% - 20% 的流动比例，能确保您在急需资金时，不必忍痛“贱卖”资产。</p>
+      </div>
+    ),
+    'solvencyRatio': (
+      <div className="space-y-2">
+        <p><strong className="text-xin-blue">指标含义：</strong> 衡量如果变卖所有个人资产并还清所有债务后，您真正拥有的财富比例。</p>
+        <p><strong className="text-xin-blue">为何重要：</strong></p>
+        <ul className="list-disc pl-4 text-xs text-slate-500 space-y-1">
+          <li>第一，它能帮助你判断自己是否借太多钱，因为负债占资产越高，越容易出现偿付问题。</li>
+          <li>第二，它能反映长期财务安全性；如果你已经有房贷，再继续增加车贷或个人贷款，负债会上升，偿付压力也会变大。</li>
+          <li>第三，它能作为人生不同阶段的财务体检指标，帮助你安排有限资源，到底该先还债、留现金，还是再投资。</li>
+        </ul>
+        <p className="text-slate-500 text-xs mt-2">中小企业老板通常需要为公司贷款签署“个人担保 (Personal Guarantee)”。这个指标能检视您的个人财务护城河有多深。如果比率太低（低于 50%），意味着一旦公司出现债务危机，极容易波及个人和家庭资产。</p>
+      </div>
+    ),
+    'debtServiceRatio': (
+      <div className="space-y-2">
+        <p><strong className="text-xin-blue">指标含义：</strong> 衡量您每个月的个人净收入中，有多少比例被拿去还银行贷款。</p>
+        <p><strong className="text-xin-blue">为何重要：</strong></p>
+        <ul className="list-disc pl-4 text-xs text-slate-500 space-y-1">
+          <li>第一、贷款申请的关键门槛：马来西亚银行以 DSR 作为评估贷款资格的核心因素，多数要求 DSR 低于 60%。</li>
+          <li>第二、反映财务健康状态：DSR 越低，代表可支配收入越多，财务缓冲能力越强；过高则现金流紧绷。</li>
+          <li>第三、破产风险预警：面临利率上升或失业时，高 DSR 借款人破产风险极高。</li>
+          <li>第四、影响退休规划：长期高 DSR 会压缩投资与储蓄空间。</li>
+          <li>第五、影响信用评分：DSR 越高，贷款被拒概率越大。</li>
+        </ul>
+        <p className="text-slate-500 text-xs mt-2">哪怕身为企业家的您是为了公司垫资而增加的个人贷款，银行看 CCRIS 记录时一视同仁。过高的个人 DSR 会导致您未来想要为公司扩张融资时被卡死。</p>
+      </div>
+    )
   };
 
   const categories = [
@@ -161,11 +267,23 @@ const FinancialHealthCheck: React.FC = () => {
                           </td>
                         )}
                         <td className="p-4">
-                          <span className="font-medium text-slate-700 block">{item.name.split('(')[0]}</span>
+                          {tooltips[item.id] ? (
+                            <Tooltip 
+                              title={item.name.split('(')[0]} 
+                              content={tooltips[item.id]} 
+                            />
+                          ) : (
+                            <span className="font-medium text-slate-700 block">{item.name.split('(')[0]}</span>
+                          )}
                           <span className="text-xs text-slate-500 block">({item.name.split('(')[1]}</span>
                         </td>
                         <td className="p-4 text-sm text-slate-600 font-mono bg-slate-50/30">
-                          {item.formula}
+                          <div>{item.formula}</div>
+                          {data?.raw && getCalculationDetail(item.id, data.raw) && (
+                            <div className="text-xs text-slate-400 mt-1">
+                              = {getCalculationDetail(item.id, data.raw)}
+                            </div>
+                          )}
                         </td>
                         <td className="p-4 text-sm text-slate-600">
                           {item.benchmark}

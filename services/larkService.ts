@@ -419,6 +419,22 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
     lifeInsuranceCoverage,
     savingsRatio,
     investAssetsToNetWorth,
-    passiveIncomeCoverage
+    passiveIncomeCoverage,
+    raw: {
+      cashAndFD,
+      monthlyExpenses,
+      netWorth,
+      totalAssets,
+      totalMonthlyDebtRepayment,
+      monthlyNetIncome,
+      consumerDebtRepayment,
+      totalSumAssured,
+      annualIncome,
+      monthlySavings,
+      monthlyGrossIncome,
+      investmentAssets,
+      annualPassiveIncome,
+      annualExpenses
+    }
   };
 };
