@@ -64,17 +64,17 @@ export default async function handler(req, res) {
         "Family Name": basic.familyName || "",
         "Given Name": basic.givenName || "",
         "Salutation": basic.salutation || "",
-        "Email": basic.email || "",
-        "Date of Birth": basic.dateOfBirth || "",
+        "Email Address": basic.email || "",
+        "DOB": basic.dateOfBirth ? new Date(basic.dateOfBirth).getTime() : null,
         "Nationality": basic.nationality || "",
         "Residency": basic.residency || "",
         "Marital Status": basic.maritalStatus || "",
         "Retirement Age": parseInt(basic.retirementAge) || 0,
-        "Employment Status": basic.employmentStatus || "",
+        "Employment": basic.employmentStatus || "",
         "Tax Status": basic.taxStatus || "",
         "Occupation": basic.occupation || "",
         "PDPA Accepted": basic.pdpaAccepted ? "Yes" : "No",
-        "Submission Date": new Date().toISOString()
+        "Submission Date": new Date().getTime()
       }
     };
 
