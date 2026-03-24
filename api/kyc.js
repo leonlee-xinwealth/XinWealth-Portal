@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     // 3. Create Main Client Record
     const mainRecordData = {
       fields: {
-        "Full Name": `${basic.givenName || ''} ${basic.familyName || ''}`.trim(),
+        "Client": `${basic.givenName || ''} ${basic.familyName || ''}`.trim(),
         "Family Name": basic.familyName || "",
         "Given Name": basic.givenName || "",
         "Salutation": basic.salutation || "",
