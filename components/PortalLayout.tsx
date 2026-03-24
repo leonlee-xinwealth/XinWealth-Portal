@@ -3,6 +3,7 @@ import Sidebar from './Sidebar';
 import Investment from './Investment';
 import Insurance from './Insurance';
 import FinancialHealthCheck from './FinancialHealthCheck';
+import Tax from './Tax';
 import Login from './Login';
 import { ViewState } from '../types';
 import { clearSession } from '../services/larkService';
@@ -31,6 +32,8 @@ const PortalLayout: React.FC = () => {
         return <Insurance />;
       case ViewState.HEALTH_CHECK:
         return <FinancialHealthCheck />;
+      case ViewState.TAX:
+        return <Tax />;
       default:
         return <Investment />;
     }

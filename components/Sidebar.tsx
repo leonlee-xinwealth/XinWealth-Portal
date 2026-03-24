@@ -1,6 +1,6 @@
 import React from 'react';
 import { ViewState } from '../types';
-import { LayoutDashboard, ShieldCheck, Activity, LogOut, Menu, X } from 'lucide-react';
+import { LayoutDashboard, ShieldCheck, Activity, LogOut, Menu, X, Calculator } from 'lucide-react';
 
 interface SidebarProps {
   currentView: ViewState;
@@ -16,6 +16,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isOpen, setIsOp
     { id: ViewState.INVESTMENT, label: 'Investments', icon: LayoutDashboard },
     { id: ViewState.INSURANCE, label: 'Insurance', icon: ShieldCheck },
     { id: ViewState.HEALTH_CHECK, label: 'Health Check', icon: Activity },
+    { id: ViewState.TAX, label: 'Tax', icon: Calculator },
   ];
 
   return (

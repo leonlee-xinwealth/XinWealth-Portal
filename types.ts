@@ -2,6 +2,7 @@ export enum ViewState {
   INVESTMENT = 'INVESTMENT',
   INSURANCE = 'INSURANCE',
   HEALTH_CHECK = 'HEALTH_CHECK',
+  TAX = 'TAX',
   SETTINGS = 'SETTINGS'
 }
 
