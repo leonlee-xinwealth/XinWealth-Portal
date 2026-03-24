@@ -57,11 +57,15 @@ export default async function handler(req, res) {
         const data = await res.json();
         if (!data.data || !data.data.items) return [];
         
-        // Filter by Client name
+        // Filter by Client name or email
         return data.data.items.filter(item => {
             const rawName = item.fields["Client"] || item.fields["Full Name"] || item.fields["Name"] || item.fields["Client Name"];
+            const rawEmail = item.fields["Email Address"] || item.fields["Email"] || item.fields["email"];
             const rowName = extractLarkValue(rawName);
-            return rowName.trim() === String(name).trim();
+            const rowEmail = extractLarkValue(rawEmail);
+            
+            return rowName.trim() === String(name).trim() || 
+                   (rowEmail && rowEmail.trim().toLowerCase() === String(name).trim().toLowerCase());
         });
     };
 

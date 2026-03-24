@@ -105,12 +105,13 @@ export default async function handler(req, res) {
     
     // 5. Verify Password
     const storedPassword = extractLarkValue(userRecord.fields["Password"] || userRecord.fields["password"] || userRecord.fields["Pass"]);
-    const userName = extractLarkValue(userRecord.fields["Full Name"] || userRecord.fields["Name"]);
+    const userName = extractLarkValue(userRecord.fields["Client"] || userRecord.fields["Full Name"] || userRecord.fields["Name"]);
     
     if (storedPassword.trim() === String(password).trim()) {
       return res.status(200).json({ 
         success: true, 
         name: userName,
+        email: email,
         recordId: userRecord.record_id
       });
     } else {

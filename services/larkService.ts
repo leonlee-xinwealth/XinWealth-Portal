@@ -76,11 +76,12 @@ export const authenticateUser = async (email: string, pass: string): Promise<boo
 
 const fetchData = async () => {
   const user = getSession();
-  if (!user || !user.name) throw new Error("No user session found");
+  if (!user || (!user.name && !user.email)) throw new Error("No user session found. Please sign out and sign in again.");
 
   // ADDED TIMESTAMP TO PREVENT CACHING
+  const queryName = user.name || user.email;
   const timestamp = new Date().getTime();
-  const response = await fetch(`/api/data?name=${encodeURIComponent(user.name)}&_t=${timestamp}`);
+  const response = await fetch(`/api/data?name=${encodeURIComponent(queryName)}&_t=${timestamp}`);
 
   const contentType = response.headers.get("content-type");
   if (contentType && contentType.indexOf("application/json") !== -1) {
@@ -289,10 +290,11 @@ export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; 
 
 export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
   const user = getSession();
-  if (!user || !user.name) throw new Error("No user session found");
+  if (!user || (!user.name && !user.email)) throw new Error("No user session found. Please sign out and sign in again.");
 
+  const queryName = user.name || user.email;
   const timestamp = new Date().getTime();
-  const response = await fetch(`/api/health?name=${encodeURIComponent(user.name)}&_t=${timestamp}`);
+  const response = await fetch(`/api/health?name=${encodeURIComponent(queryName)}&_t=${timestamp}`);
   
   if (!response.ok) {
      throw new Error("Failed to fetch health data");

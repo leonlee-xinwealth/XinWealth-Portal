@@ -70,12 +70,15 @@ export default async function handler(req, res) {
        return res.status(200).json({ records: [] });
     }
 
-    // 4. Filter by Name in memory using Robust Extraction
+    // 4. Filter by Name or Email in memory using Robust Extraction
     const userRecords = recordsData.data.items.filter(item => {
-        const rawName = item.fields["Full Name"] || item.fields["Name"] || item.fields["Client Name"];
+        const rawName = item.fields["Full Name"] || item.fields["Name"] || item.fields["Client Name"] || item.fields["Client"];
+        const rawEmail = item.fields["Email Address"] || item.fields["Email"] || item.fields["email"];
         const rowName = extractLarkValue(rawName);
+        const rowEmail = extractLarkValue(rawEmail);
         
-        return rowName.trim() === String(name).trim();
+        return rowName.trim() === String(name).trim() || 
+               (rowEmail && rowEmail.trim().toLowerCase() === String(name).trim().toLowerCase());
     });
 
     // 5. Sort Logic
