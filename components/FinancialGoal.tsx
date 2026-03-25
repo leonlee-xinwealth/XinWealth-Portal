@@ -55,6 +55,21 @@ const FinancialGoal: React.FC = () => {
     }).format(value);
   };
 
+  // Helper function to handle number input changes smoothly
+  const handleNumberChange = (value: string, setter: (val: number | '') => void) => {
+    if (value === '') {
+      setter('');
+    } else {
+      // Remove leading zeros but allow 0 itself. 
+      // Also allow decimal points to pass through properly for interest rates.
+      let cleanValue = value;
+      if (value !== '0' && value !== '0.') {
+        cleanValue = value.replace(/^0+(?=\d)/, '');
+      }
+      setter(Number(cleanValue));
+    }
+  };
+
   // Car Calculations
   const calculateCar = () => {
     const price = Number(carPrice) || 0;
@@ -80,6 +95,7 @@ const FinancialGoal: React.FC = () => {
       monthlyInstallment = loanAmount / totalMonths;
     }
 
+    // Required funds should include downpayment AND fees
     const requiredFunds = dpAmount + fees;
     const shortfall = Math.max(0, requiredFunds - savings);
     const monthlySavingsNeeded = years > 0 ? shortfall / (years * 12) : 0;
@@ -130,6 +146,7 @@ const FinancialGoal: React.FC = () => {
       monthlyInstallment = loanAmount / totalMonths;
     }
 
+    // Required funds should include downpayment AND fees
     const requiredFunds = dpAmount + fees;
     const shortfall = Math.max(0, requiredFunds - savings);
     const monthlySavingsNeeded = years > 0 ? shortfall / (years * 12) : 0;
@@ -235,20 +252,24 @@ const FinancialGoal: React.FC = () => {
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">售价 (Price) RM</label>
                 <input
-                  type="number"
-                  className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue transition-all"
-                  value={activeTab === 'car' ? carPrice : housePrice}
-                  onChange={(e) => activeTab === 'car' ? setCarPrice(Number(e.target.value)) : setHousePrice(Number(e.target.value))}
-                  placeholder="0"
-                />
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue transition-all"
+                value={activeTab === 'car' ? (carPrice === '' ? '' : carPrice) : (housePrice === '' ? '' : housePrice)}
+                onChange={(e) => activeTab === 'car' ? handleNumberChange(e.target.value, setCarPrice) : handleNumberChange(e.target.value, setHousePrice)}
+                placeholder="0"
+              />
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">首付比例 (Downpayment) %</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue transition-all"
-                  value={activeTab === 'car' ? carDownpaymentPercent : houseDownpaymentPercent}
-                  onChange={(e) => activeTab === 'car' ? setCarDownpaymentPercent(Number(e.target.value)) : setHouseDownpaymentPercent(Number(e.target.value))}
+                  value={activeTab === 'car' ? (carDownpaymentPercent === '' ? '' : carDownpaymentPercent) : (houseDownpaymentPercent === '' ? '' : houseDownpaymentPercent)}
+                  onChange={(e) => activeTab === 'car' ? handleNumberChange(e.target.value, setCarDownpaymentPercent) : handleNumberChange(e.target.value, setHouseDownpaymentPercent)}
                   placeholder="10"
                 />
               </div>
@@ -260,21 +281,24 @@ const FinancialGoal: React.FC = () => {
                   {activeTab === 'car' ? '年实际利率 (EIR) %' : '贷款利率 (Interest Rate) %'}
                 </label>
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
+                  pattern="[0-9]*\.?[0-9]*"
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue transition-all"
-                  value={activeTab === 'car' ? carInterestRate : houseInterestRate}
-                  onChange={(e) => activeTab === 'car' ? setCarInterestRate(Number(e.target.value)) : setHouseInterestRate(Number(e.target.value))}
+                  value={activeTab === 'car' ? (carInterestRate === '' ? '' : carInterestRate) : (houseInterestRate === '' ? '' : houseInterestRate)}
+                  onChange={(e) => activeTab === 'car' ? handleNumberChange(e.target.value, setCarInterestRate) : handleNumberChange(e.target.value, setHouseInterestRate)}
                   placeholder={activeTab === 'car' ? "3.0" : "4.0"}
                 />
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">贷款年限 (Tenure) 年</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue transition-all"
-                  value={activeTab === 'car' ? carLoanTenure : houseLoanTenure}
-                  onChange={(e) => activeTab === 'car' ? setCarLoanTenure(Number(e.target.value)) : setHouseLoanTenure(Number(e.target.value))}
+                  value={activeTab === 'car' ? (carLoanTenure === '' ? '' : carLoanTenure) : (houseLoanTenure === '' ? '' : houseLoanTenure)}
+                  onChange={(e) => activeTab === 'car' ? handleNumberChange(e.target.value, setCarLoanTenure) : handleNumberChange(e.target.value, setHouseLoanTenure)}
                   placeholder={activeTab === 'car' ? "9" : "35"}
                 />
               </div>
@@ -285,10 +309,12 @@ const FinancialGoal: React.FC = () => {
                 {activeTab === 'car' ? '其他费用 (车险/车牌/隔热膜等) RM' : '其他费用 (MRTA/房屋保险/装修等) RM'}
               </label>
               <input
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue transition-all"
-                value={activeTab === 'car' ? carOtherFees : houseOtherFees}
-                onChange={(e) => activeTab === 'car' ? setCarOtherFees(Number(e.target.value)) : setHouseOtherFees(Number(e.target.value))}
+                value={activeTab === 'car' ? (carOtherFees === '' ? '' : carOtherFees) : (houseOtherFees === '' ? '' : houseOtherFees)}
+                onChange={(e) => activeTab === 'car' ? handleNumberChange(e.target.value, setCarOtherFees) : handleNumberChange(e.target.value, setHouseOtherFees)}
                 placeholder="0"
               />
             </div>
@@ -297,20 +323,24 @@ const FinancialGoal: React.FC = () => {
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">准备多少年达成目标？ (Years)</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue transition-all"
-                  value={activeTab === 'car' ? carYearsToGoal : houseYearsToGoal}
-                  onChange={(e) => activeTab === 'car' ? setCarYearsToGoal(Number(e.target.value)) : setHouseYearsToGoal(Number(e.target.value))}
+                  value={activeTab === 'car' ? (carYearsToGoal === '' ? '' : carYearsToGoal) : (houseYearsToGoal === '' ? '' : houseYearsToGoal)}
+                  onChange={(e) => activeTab === 'car' ? handleNumberChange(e.target.value, setCarYearsToGoal) : handleNumberChange(e.target.value, setHouseYearsToGoal)}
                   placeholder="1"
                 />
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">已准备资金 (Current Savings) RM</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue transition-all"
-                  value={activeTab === 'car' ? carCurrentSavings : houseCurrentSavings}
-                  onChange={(e) => activeTab === 'car' ? setCarCurrentSavings(Number(e.target.value)) : setHouseCurrentSavings(Number(e.target.value))}
+                  value={activeTab === 'car' ? (carCurrentSavings === '' ? '' : carCurrentSavings) : (houseCurrentSavings === '' ? '' : houseCurrentSavings)}
+                  onChange={(e) => activeTab === 'car' ? handleNumberChange(e.target.value, setCarCurrentSavings) : handleNumberChange(e.target.value, setHouseCurrentSavings)}
                   placeholder="0"
                 />
               </div>
