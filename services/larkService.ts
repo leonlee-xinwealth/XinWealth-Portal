@@ -288,7 +288,7 @@ export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; 
   }
 };
 
-export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
+export const fetchRawHealthData = async (): Promise<any> => {
   const user = getSession();
   if (!user || (!user.name && !user.email)) throw new Error("No user session found. Please sign out and sign in again.");
 
@@ -300,7 +300,11 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
      throw new Error("Failed to fetch health data");
   }
 
-  const data = await response.json();
+  return await response.json();
+};
+
+export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
+  const data = await fetchRawHealthData();
 
   // Helper to extract value safely
   const getValue = (item: any, fieldNames: string[]): number => {
