@@ -1,6 +1,15 @@
 import React from 'react';
 import { ViewState } from '../types';
-import { LayoutDashboard, ShieldCheck, Activity, LogOut, Menu, X, Calculator } from 'lucide-react';
+import { 
+  PieChart, 
+  ShieldCheck, 
+  Activity, 
+  LogOut, 
+  Menu, 
+  X, 
+  Calculator,
+  Target
+} from 'lucide-react';
 
 interface SidebarProps {
   currentView: ViewState;
@@ -13,10 +22,11 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isOpen, setIsOpen, onLogout }) => {
   
   const navItems = [
-    { id: ViewState.INVESTMENT, label: 'Investments', icon: LayoutDashboard },
+    { id: ViewState.INVESTMENT, label: 'Portfolio', icon: PieChart },
     { id: ViewState.INSURANCE, label: 'Insurance', icon: ShieldCheck },
-    { id: ViewState.HEALTH_CHECK, label: 'Health Check', icon: Activity },
+    { id: ViewState.HEALTH_CHECK, label: 'Financial Health', icon: Activity },
     { id: ViewState.TAX, label: 'Tax', icon: Calculator },
+    { id: ViewState.FINANCIAL_GOAL, label: 'Financial Goal', icon: Target },
   ];
 
   return (

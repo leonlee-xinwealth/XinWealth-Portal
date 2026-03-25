@@ -4,6 +4,7 @@ import Investment from './Investment';
 import Insurance from './Insurance';
 import FinancialHealthCheck from './FinancialHealthCheck';
 import Tax from './Tax';
+import FinancialGoal from './FinancialGoal';
 import Login from './Login';
 import { ViewState } from '../types';
 import { clearSession } from '../services/larkService';
@@ -34,6 +35,8 @@ const PortalLayout: React.FC = () => {
         return <FinancialHealthCheck />;
       case ViewState.TAX:
         return <Tax />;
+      case ViewState.FINANCIAL_GOAL:
+        return <FinancialGoal />;
       default:
         return <Investment />;
     }
