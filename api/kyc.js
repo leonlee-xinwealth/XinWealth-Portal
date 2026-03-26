@@ -162,16 +162,23 @@ export default async function handler(req, res) {
       ...(assets.vehicles || []).map(v => ({ ...v, category: "Vehicle" })),
       ...(assets.otherAssets || []).map(o => ({ ...o, category: "Other" }))
     ];
-    if (assets.savings) allAssets.push({ description: "Cash & Savings", amount: assets.savings, category: "Cash/Savings" });
-    if (assets.epfPersaraan) allAssets.push({ description: "EPF Account 1 (Akaun Persaraan)", amount: assets.epfPersaraan, category: "EPF" });
-    if (assets.epfSejahtera) allAssets.push({ description: "EPF Account 2 (Akaun Sejahtera)", amount: assets.epfSejahtera, category: "EPF" });
-    if (assets.epfFleksibel) allAssets.push({ description: "EPF Account 3 (Akaun Fleksibel)", amount: assets.epfFleksibel, category: "EPF" });
+    if (assets.savingsAccount) allAssets.push({ description: "Savings/Current Account", amount: assets.savingsAccount, category: "Savings", month: assets.savingsAccountMonth, year: assets.savingsAccountYear });
+    if (assets.fixedDeposit) allAssets.push({ description: "Fixed Deposit", amount: assets.fixedDeposit, category: "Savings", month: assets.fixedDepositMonth, year: assets.fixedDepositYear });
+    if (assets.moneyMarketFund) allAssets.push({ description: "Money Market Fund For Savings", amount: assets.moneyMarketFund, category: "Savings", month: assets.moneyMarketFundMonth, year: assets.moneyMarketFundYear });
+    if (assets.epfPersaraan) allAssets.push({ description: "EPF Account 1 (Akaun Persaraan)", amount: assets.epfPersaraan, category: "EPF", month: assets.epfPersaraanMonth, year: assets.epfPersaraanYear });
+    if (assets.epfSejahtera) allAssets.push({ description: "EPF Account 2 (Akaun Sejahtera)", amount: assets.epfSejahtera, category: "EPF", month: assets.epfSejahteraMonth, year: assets.epfSejahteraYear });
+    if (assets.epfFleksibel) allAssets.push({ description: "EPF Account 3 (Akaun Fleksibel)", amount: assets.epfFleksibel, category: "EPF", month: assets.epfFleksibelMonth, year: assets.epfFleksibelYear });
 
-    await createSubRecords(tableAssets, allAssets, item => ({
-      "Category": item.category,
-      "Description": item.description || "",
-      "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
-    }));
+    await createSubRecords(tableAssets, allAssets, item => {
+      const fieldData = {
+        "Category": item.category,
+        "Description": item.description || "",
+        "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+      };
+      if (item.month != null) fieldData["Month"] = getMonthName(item.month);
+      if (item.year) fieldData["Year"] = String(item.year);
+      return fieldData;
+    });
 
     // 6. Create Investment Records
     const allInvestments = [
@@ -201,11 +208,16 @@ export default async function handler(req, res) {
       ...(liabilities.otherLoans || []).map(l => ({ ...l, category: "Other Loan" }))
     ];
 
-    await createSubRecords(tableLiabilities, allLiabilities, item => ({
-      "Category": item.category,
-      "Description": item.description || "",
-      "Outstanding Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
-    }));
+    await createSubRecords(tableLiabilities, allLiabilities, item => {
+      const fieldData = {
+        "Category": item.category,
+        "Description": item.description || "",
+        "Outstanding Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+      };
+      if (item.month != null) fieldData["Month"] = getMonthName(item.month);
+      if (item.year) fieldData["Year"] = String(item.year);
+      return fieldData;
+    });
 
     // 8. Create Expense Records (with month/year period)
     const allExpenses = [

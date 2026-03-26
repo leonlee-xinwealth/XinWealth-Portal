@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart
+  Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart
 } from 'recharts';
-import { ArrowUpRight, TrendingUp, DollarSign, Percent, BarChart3, Clock } from 'lucide-react';
+import { DollarSign, Percent, BarChart3 } from 'lucide-react';
 import { fetchPortfolioHistory, fetchClientProfile } from '../services/larkService';
 import { PortfolioDataPoint, ClientProfile } from '../types';
 

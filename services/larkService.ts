@@ -325,19 +325,15 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
     const val = getValue(item, ["Value", "value", "Amount", "amount"]);
     const cat = item.fields["Category"] || "";
     totalAssets += val;
-    if (cat === "Cash/Savings") {
+    if (cat === "Cash/Savings" || cat === "Savings" || cat === "Savings/Current Account" || cat === "Fixed Deposit" || cat === "Money Market Fund For Savings") {
       cashAndFD += val;
     }
   });
 
   (data.investments || []).forEach((item: any) => {
     const val = getValue(item, ["Amount", "amount", "Value", "value", "End Value"]);
-    const cat = item.fields["Category"] || "";
     totalAssets += val;
     investmentAssets += val;
-    if (cat === "Fixed Deposit" || cat === "Money Market") {
-      cashAndFD += val;
-    }
   });
 
   let totalLiabilities = 0;

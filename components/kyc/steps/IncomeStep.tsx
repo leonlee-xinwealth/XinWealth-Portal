@@ -292,10 +292,9 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                         <div className="flex gap-3 mt-3">
                             <select
                                 className={selectClasses + ' flex-1'}
-                                value={incomeData.bonusMonth || ''}
+                                value={incomeData.bonusMonth || currentMonth}
                                 onChange={(e) => updateIncome({ bonusMonth: e.target.value })}
                             >
-                                <option value="" disabled>{isZh ? '选择月份...' : 'Select month...'}</option>
                                 {MONTHS.map(m => (
                                     <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
                                 ))}

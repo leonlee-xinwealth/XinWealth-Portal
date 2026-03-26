@@ -299,8 +299,8 @@ const FinancialHealthCheck: React.FC = () => {
     {
       name: '流动性 (Liquidity)',
       items: [
-        { id: 'basicLiquidityRatio', name: 'Basic Liquidity Ratio (基本流动比率/紧急备用金)', formula: '(Cash + FD) / Monthly Expenses', benchmark: '3 - 6 个月(自雇人士建议 6-12 个月)' },
-        { id: 'liquidAssetToNetWorth', name: 'Liquid Asset to Net Worth (流动资产净值比)', formula: '(Cash + FD) / Net Worth', benchmark: '15% - 20%(过低风险大，过高则资金闲置)' }
+        { id: 'basicLiquidityRatio', name: 'Basic Liquidity Ratio (基本流动比率/紧急备用金)', formula: '(Cash + FD + MMF) / Monthly Expenses', benchmark: '3 - 6 个月(自雇人士建议 6-12 个月)' },
+        { id: 'liquidAssetToNetWorth', name: 'Liquid Asset to Net Worth (流动资产净值比)', formula: '(Cash + FD + MMF) / Net Worth', benchmark: '15% - 20%(过低风险大，过高则资金闲置)' }
       ]
     },
     {
@@ -369,7 +369,7 @@ const FinancialHealthCheck: React.FC = () => {
               {categories.map((category, catIndex) => (
                 <React.Fragment key={catIndex}>
                   {category.items.map((item, itemIndex) => {
-                    const val = data ? data[item.id as keyof FinancialHealthData] : 0;
+                    const val = (data ? data[item.id as keyof Omit<FinancialHealthData, 'raw'>] : 0) as number;
                     const status = getStatus(item.id, val);
                     const StatusIcon = status.icon;
 

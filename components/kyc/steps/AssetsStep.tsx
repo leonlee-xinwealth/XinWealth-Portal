@@ -11,20 +11,53 @@ interface AssetsStepProps {
     onPrev: () => void;
 }
 
+const currentMonth = new Date().getMonth().toString();
+const currentYear = new Date().getFullYear().toString();
+const MONTHS = [
+    { value: '0', en: 'January', zh: '1月' },
+    { value: '1', en: 'February', zh: '2月' },
+    { value: '2', en: 'March', zh: '3月' },
+    { value: '3', en: 'April', zh: '4月' },
+    { value: '4', en: 'May', zh: '5月' },
+    { value: '5', en: 'June', zh: '6月' },
+    { value: '6', en: 'July', zh: '7月' },
+    { value: '7', en: 'August', zh: '8月' },
+    { value: '8', en: 'September', zh: '9月' },
+    { value: '9', en: 'October', zh: '10月' },
+    { value: '10', en: 'November', zh: '11月' },
+    { value: '11', en: 'December', zh: '12月' }
+];
+const YEARS = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - 5 + i).toString());
+
 const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
+    const selectClasses = "px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer";
 
     // Accordion: which card is currently expanded (null = all collapsed)
     const [expandedCard, setExpandedCard] = useState<string | null>(null);
 
     const assetsData = formData.assets || {
-        savings: '',
+        savingsAccount: '',
+        savingsAccountMonth: new Date().getMonth().toString(),
+        savingsAccountYear: new Date().getFullYear().toString(),
+        fixedDeposit: '',
+        fixedDepositMonth: new Date().getMonth().toString(),
+        fixedDepositYear: new Date().getFullYear().toString(),
+        moneyMarketFund: '',
+        moneyMarketFundMonth: new Date().getMonth().toString(),
+        moneyMarketFundYear: new Date().getFullYear().toString(),
         epfPersaraan: '',
+        epfPersaraanMonth: new Date().getMonth().toString(),
+        epfPersaraanYear: new Date().getFullYear().toString(),
         epfSejahtera: '',
+        epfSejahteraMonth: new Date().getMonth().toString(),
+        epfSejahteraYear: new Date().getFullYear().toString(),
         epfFleksibel: '',
+        epfFleksibelMonth: new Date().getMonth().toString(),
+        epfFleksibelYear: new Date().getFullYear().toString(),
         properties: [],
         vehicles: [],
         otherAssets: []
@@ -35,7 +68,13 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
     };
 
     const addAssetItem = (collectionPath: keyof Pick<KYCAssetsData, 'properties' | 'vehicles' | 'otherAssets'>) => {
-        const newItems = [...assetsData[collectionPath], { id: Date.now().toString() + Math.random().toString(), amount: '', description: '' }];
+        const newItems = [...assetsData[collectionPath], { 
+            id: Date.now().toString() + Math.random().toString(), 
+            amount: '', 
+            description: '',
+            month: new Date().getMonth().toString(),
+            year: new Date().getFullYear().toString()
+        }];
         updateAssets({ [collectionPath]: newItems });
         // Auto-expand this card when first item is added (or when "Add Asset" is clicked from collapsed)
         setExpandedCard(collectionPath);
@@ -48,7 +87,7 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
         if (newItems.length === 0) setExpandedCard(null);
     };
 
-    const updateAssetItemField = (collectionPath: keyof Pick<KYCAssetsData, 'properties' | 'vehicles' | 'otherAssets'>, idToUpdate: string, field: 'amount' | 'description', value: string) => {
+    const updateAssetItemField = (collectionPath: keyof Pick<KYCAssetsData, 'properties' | 'vehicles' | 'otherAssets'>, idToUpdate: string, field: 'amount' | 'description' | 'month' | 'year', value: string) => {
         const newItems = assetsData[collectionPath].map((item: FinancialItem) =>
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
@@ -146,6 +185,33 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                         />
                                         <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
                                     </div>
+
+                                    {/* Month & Year Selector */}
+                                    <div>
+                                        <label className={labelClasses}>
+                                            {isZh ? '所属月份' : 'Period (Month / Year)'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
+                                        </label>
+                                        <div className="flex gap-3 mt-1">
+                                            <select
+                                                className={selectClasses + ' flex-1'}
+                                                value={item.month}
+                                                onChange={(e) => updateAssetItemField(collectionPath, item.id, 'month', e.target.value)}
+                                            >
+                                                {MONTHS.map(m => (
+                                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                                ))}
+                                            </select>
+                                            <select
+                                                className={selectClasses + ' w-28'}
+                                                value={item.year}
+                                                onChange={(e) => updateAssetItemField(collectionPath, item.id, 'year', e.target.value)}
+                                            >
+                                                {YEARS.map(y => (
+                                                    <option key={y} value={y}>{y}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -181,16 +247,107 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
 
                 <div className="space-y-6">
                     <div>
-                        <label className={`${labelClasses} text-xin-blue`}>{t('assets.savings')}</label>
+                        <label className={`${labelClasses} text-xin-blue`}>{t('assets.savingsAccount')}</label>
                         <div className="relative mt-2">
                             <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
                                 <span className="text-gray-500 font-medium">RM</span>
                             </div>
                             <DebouncedNumberInput
                                 className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
-                                value={assetsData.savings}
-                                onChange={(val) => updateAssets({ savings: val })}
+                                value={assetsData.savingsAccount}
+                                onChange={(val) => updateAssets({ savingsAccount: val })}
                             />
+                        </div>
+                        {/* Month/Year */}
+                        <div className="flex gap-3 mt-3">
+                            <select
+                                className={selectClasses + ' flex-1'}
+                                value={assetsData.savingsAccountMonth}
+                                onChange={(e) => updateAssets({ savingsAccountMonth: e.target.value })}
+                            >
+                                {MONTHS.map(m => (
+                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                ))}
+                            </select>
+                            <select
+                                className={selectClasses + ' w-28'}
+                                value={assetsData.savingsAccountYear}
+                                onChange={(e) => updateAssets({ savingsAccountYear: e.target.value })}
+                            >
+                                {YEARS.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <label className={`${labelClasses} text-xin-blue`}>{t('assets.fixedDeposit')}</label>
+                        <div className="relative mt-2">
+                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                <span className="text-gray-500 font-medium">RM</span>
+                            </div>
+                            <DebouncedNumberInput
+                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
+                                value={assetsData.fixedDeposit}
+                                onChange={(val) => updateAssets({ fixedDeposit: val })}
+                            />
+                        </div>
+                        {/* Month/Year */}
+                        <div className="flex gap-3 mt-3">
+                            <select
+                                className={selectClasses + ' flex-1'}
+                                value={assetsData.fixedDepositMonth}
+                                onChange={(e) => updateAssets({ fixedDepositMonth: e.target.value })}
+                            >
+                                {MONTHS.map(m => (
+                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                ))}
+                            </select>
+                            <select
+                                className={selectClasses + ' w-28'}
+                                value={assetsData.fixedDepositYear}
+                                onChange={(e) => updateAssets({ fixedDepositYear: e.target.value })}
+                            >
+                                {YEARS.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label className={`${labelClasses} text-xin-blue`}>{t('assets.moneyMarketFund')}</label>
+                        <div className="relative mt-2">
+                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                <span className="text-gray-500 font-medium">RM</span>
+                            </div>
+                            <DebouncedNumberInput
+                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
+                                value={assetsData.moneyMarketFund}
+                                onChange={(val) => updateAssets({ moneyMarketFund: val })}
+                            />
+                        </div>
+                        {/* Month/Year */}
+                        <div className="flex gap-3 mt-3">
+                            <select
+                                className={selectClasses + ' flex-1'}
+                                value={assetsData.moneyMarketFundMonth}
+                                onChange={(e) => updateAssets({ moneyMarketFundMonth: e.target.value })}
+                            >
+                                {MONTHS.map(m => (
+                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                ))}
+                            </select>
+                            <select
+                                className={selectClasses + ' w-28'}
+                                value={assetsData.moneyMarketFundYear}
+                                onChange={(e) => updateAssets({ moneyMarketFundYear: e.target.value })}
+                            >
+                                {YEARS.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -211,6 +368,27 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                 onChange={(val) => updateAssets({ epfPersaraan: val })}
                             />
                         </div>
+                        {/* Month/Year */}
+                        <div className="flex gap-3 mt-3">
+                            <select
+                                className={selectClasses + ' flex-1'}
+                                value={assetsData.epfPersaraanMonth}
+                                onChange={(e) => updateAssets({ epfPersaraanMonth: e.target.value })}
+                            >
+                                {MONTHS.map(m => (
+                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                ))}
+                            </select>
+                            <select
+                                className={selectClasses + ' w-28'}
+                                value={assetsData.epfPersaraanYear}
+                                onChange={(e) => updateAssets({ epfPersaraanYear: e.target.value })}
+                            >
+                                {YEARS.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
 
                     <div>
@@ -224,6 +402,27 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                 value={assetsData.epfSejahtera}
                                 onChange={(val) => updateAssets({ epfSejahtera: val })}
                             />
+                        </div>
+                        {/* Month/Year */}
+                        <div className="flex gap-3 mt-3">
+                            <select
+                                className={selectClasses + ' flex-1'}
+                                value={assetsData.epfSejahteraMonth}
+                                onChange={(e) => updateAssets({ epfSejahteraMonth: e.target.value })}
+                            >
+                                {MONTHS.map(m => (
+                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                ))}
+                            </select>
+                            <select
+                                className={selectClasses + ' w-28'}
+                                value={assetsData.epfSejahteraYear}
+                                onChange={(e) => updateAssets({ epfSejahteraYear: e.target.value })}
+                            >
+                                {YEARS.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
                         </div>
                     </div>
 
@@ -243,6 +442,27 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                     updateAssets({ epfFleksibel: formattedValue });
                                 }}
                             />
+                        </div>
+                        {/* Month/Year */}
+                        <div className="flex gap-3 mt-3">
+                            <select
+                                className={selectClasses + ' flex-1'}
+                                value={assetsData.epfFleksibelMonth}
+                                onChange={(e) => updateAssets({ epfFleksibelMonth: e.target.value })}
+                            >
+                                {MONTHS.map(m => (
+                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                ))}
+                            </select>
+                            <select
+                                className={selectClasses + ' w-28'}
+                                value={assetsData.epfFleksibelYear}
+                                onChange={(e) => updateAssets({ epfFleksibelYear: e.target.value })}
+                            >
+                                {YEARS.map(y => (
+                                    <option key={y} value={y}>{y}</option>
+                                ))}
+                            </select>
                         </div>
                     </div>
                 </div>

@@ -72,12 +72,22 @@ const formatCurrency = (value: number) => {
 interface RecordItem {
   id: string;
   year: string;
-  month: string;
+  quarter: string; // 'Q1', 'Q2', 'Q3', 'Q4'
+  month: string;   // Keeping month for potential internal sorting/logic if needed
   timestamp: number;
   category: string;
   description: string;
   value: number;
 }
+
+const getQuarter = (monthStr: string): string => {
+    const m = parseInt(monthStr, 10);
+    if (m >= 1 && m <= 3) return 'Q1';
+    if (m >= 4 && m <= 6) return 'Q2';
+    if (m >= 7 && m <= 9) return 'Q3';
+    if (m >= 10 && m <= 12) return 'Q4';
+    return 'N/A';
+};
 
 const mapRecords = (rawArray: any[], valueFields: string[]): RecordItem[] => {
   return (rawArray || []).map(item => {
@@ -86,6 +96,7 @@ const mapRecords = (rawArray: any[], valueFields: string[]): RecordItem[] => {
       id: item.id || Math.random().toString(),
       year: d.year,
       month: d.month,
+      quarter: getQuarter(d.month),
       timestamp: d.timestamp,
       category: extractString(item, ["Category", "category", "Type", "type"]),
       description: extractString(item, ["Description", "description", "Name", "name", "Item", "item"]),
@@ -103,7 +114,7 @@ const NetWorth: React.FC = () => {
   const [liabilities, setLiabilities] = useState<RecordItem[]>([]);
 
   const [selectedYear, setSelectedYear] = useState<string>('');
-  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [selectedQuarter, setSelectedQuarter] = useState<string>('');
 
   useEffect(() => {
     const loadData = async () => {
@@ -122,20 +133,20 @@ const NetWorth: React.FC = () => {
         
         // Find latest date for default selection
         let latestYear = '';
-        let latestMonth = '';
+        let latestQuarter = '';
         let maxTime = 0;
         
         [...combinedAssets, ...parsedLiabilities].forEach(item => {
             if (item.timestamp > maxTime) {
                 maxTime = item.timestamp;
                 latestYear = item.year;
-                latestMonth = item.month;
+                latestQuarter = item.quarter;
             }
         });
         
-        if (latestYear && latestMonth) {
+        if (latestYear && latestQuarter) {
             setSelectedYear(latestYear);
-            setSelectedMonth(latestMonth);
+            setSelectedQuarter(latestQuarter);
         }
 
       } catch (err: any) {
@@ -155,29 +166,29 @@ const NetWorth: React.FC = () => {
       return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [assets, liabilities, activeTab]);
 
-  const availableMonths = useMemo(() => {
-      const months = new Set<string>();
+  const availableQuarters = useMemo(() => {
+      const quarters = new Set<string>();
       const currentList = activeTab === 'assets' ? assets : liabilities;
       currentList.forEach(item => { 
-          if (item.year === selectedYear && item.month !== 'N/A') {
-              months.add(item.month);
+          if (item.year === selectedYear && item.quarter !== 'N/A') {
+              quarters.add(item.quarter);
           }
       });
-      return Array.from(months).sort();
+      return Array.from(quarters).sort();
   }, [assets, liabilities, activeTab, selectedYear]);
 
-  // Ensure selected month is valid when year changes
+  // Ensure selected quarter is valid when year changes
   useEffect(() => {
-      if (availableMonths.length > 0 && !availableMonths.includes(selectedMonth)) {
-          setSelectedMonth(availableMonths[availableMonths.length - 1]);
+      if (availableQuarters.length > 0 && !availableQuarters.includes(selectedQuarter)) {
+          setSelectedQuarter(availableQuarters[availableQuarters.length - 1]);
       }
-  }, [availableMonths, selectedMonth]);
+  }, [availableQuarters, selectedQuarter]);
 
 
   // Tab 1 & 2: Assets / Liabilities
   const renderAssetsOrLiabilities = () => {
       const list = activeTab === 'assets' ? assets : liabilities;
-      const filteredList = list.filter(item => item.year === selectedYear && item.month === selectedMonth);
+      const filteredList = list.filter(item => item.year === selectedYear && item.quarter === selectedQuarter);
       
       // Group by category
       const categoryMap = new Map<string, { value: number, items: RecordItem[] }>();
@@ -272,14 +283,19 @@ const NetWorth: React.FC = () => {
 
   // Tab 3: Net Worth
   const renderNetWorth = () => {
-      // Group all data by Year-Month
+      // Group all data by Year-Quarter
       const timeMap = new Map<string, { time: string, timestamp: number, assets: number, liabilities: number, netWorth: number }>();
       
       const addToMap = (item: RecordItem, type: 'assets' | 'liabilities') => {
-          if (item.year === 'N/A') return;
-          const key = `${item.year}-${item.month}`;
+          if (item.year === 'N/A' || item.quarter === 'N/A') return;
+          const key = `${item.year} ${item.quarter}`;
           if (!timeMap.has(key)) {
-              timeMap.set(key, { time: key, timestamp: item.timestamp, assets: 0, liabilities: 0, netWorth: 0 });
+              // Create a consistent timestamp for sorting based on year and quarter
+              const qNum = parseInt(item.quarter.replace('Q', ''));
+              const mockMonth = (qNum - 1) * 3 + 1; // Q1 -> 1, Q2 -> 4, etc.
+              const timestamp = new Date(`${item.year}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
+              
+              timeMap.set(key, { time: key, timestamp, assets: 0, liabilities: 0, netWorth: 0 });
           }
           const group = timeMap.get(key)!;
           if (type === 'assets') group.assets += item.value;
@@ -319,6 +335,7 @@ const NetWorth: React.FC = () => {
                               />
                               <Tooltip 
                                   formatter={(value: number) => formatCurrency(value)}
+                                  labelFormatter={(label) => `Quarter: ${label}`}
                                   cursor={{ fill: '#f1f5f9' }}
                                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                               />
@@ -350,6 +367,7 @@ const NetWorth: React.FC = () => {
                               />
                               <Tooltip 
                                   formatter={(value: number) => formatCurrency(value)}
+                                  labelFormatter={(label) => `Quarter: ${label}`}
                                   contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
                               />
                               <Legend wrapperStyle={{ paddingTop: '20px' }} />
@@ -408,11 +426,11 @@ const NetWorth: React.FC = () => {
                     {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
                 <select 
-                    value={selectedMonth} 
-                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    value={selectedQuarter} 
+                    onChange={(e) => setSelectedQuarter(e.target.value)}
                     className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue"
                 >
-                    {availableMonths.map(m => <option key={m} value={m}>{m}</option>)}
+                    {availableQuarters.map(q => <option key={q} value={q}>{q}</option>)}
                 </select>
             </div>
         )}

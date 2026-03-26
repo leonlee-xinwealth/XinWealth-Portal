@@ -11,12 +11,31 @@ interface LiabilitiesStepProps {
     onPrev: () => void;
 }
 
+const currentMonth = new Date().getMonth().toString();
+const currentYear = new Date().getFullYear().toString();
+const MONTHS = [
+    { value: '0', en: 'January', zh: '1月' },
+    { value: '1', en: 'February', zh: '2月' },
+    { value: '2', en: 'March', zh: '3月' },
+    { value: '3', en: 'April', zh: '4月' },
+    { value: '4', en: 'May', zh: '5月' },
+    { value: '5', en: 'June', zh: '6月' },
+    { value: '6', en: 'July', zh: '7月' },
+    { value: '7', en: 'August', zh: '8月' },
+    { value: '8', en: 'September', zh: '9月' },
+    { value: '9', en: 'October', zh: '10月' },
+    { value: '10', en: 'November', zh: '11月' },
+    { value: '11', en: 'December', zh: '12月' }
+];
+const YEARS = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - 5 + i).toString());
+
 const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
     const [expandedCard, setExpandedCard] = useState<string | null>(null);
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
+    const selectClasses = "px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer";
     
     // Safety check just in case formData.liabilities is somehow missing
     const liabilitiesData = formData.liabilities || {
@@ -33,7 +52,13 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
     };
 
     const addLoanItem = (collectionPath: keyof KYCLiabilitiesData) => {
-        const newItems = [...liabilitiesData[collectionPath], { id: Date.now().toString() + Math.random().toString(), amount: '', description: '' }];
+        const newItems = [...liabilitiesData[collectionPath], { 
+            id: Date.now().toString() + Math.random().toString(), 
+            amount: '', 
+            description: '',
+            month: new Date().getMonth().toString(),
+            year: new Date().getFullYear().toString()
+        }];
         updateLiabilities({ [collectionPath]: newItems });
         setExpandedCard(collectionPath as string);
     };
@@ -44,7 +69,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
         if (newItems.length === 0) setExpandedCard(null);
     };
 
-    const updateLoanItemField = (collectionPath: keyof KYCLiabilitiesData, idToUpdate: string, field: 'amount' | 'description', value: string) => {
+    const updateLoanItemField = (collectionPath: keyof KYCLiabilitiesData, idToUpdate: string, field: 'amount' | 'description' | 'month' | 'year', value: string) => {
         const newItems = liabilitiesData[collectionPath].map(item => 
             item.id === idToUpdate ? { ...item, [field]: value } : item
         );
@@ -142,6 +167,33 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                                             onChange={(e) => updateLoanItemField(collectionPath, item.id, 'description', e.target.value)}
                                         />
                                         <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
+                                    </div>
+
+                                    {/* Month & Year Selector */}
+                                    <div>
+                                        <label className={labelClasses}>
+                                            {isZh ? '所属月份' : 'Period (Month / Year)'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
+                                        </label>
+                                        <div className="flex gap-3 mt-1">
+                                            <select
+                                                className={selectClasses + ' flex-1'}
+                                                value={item.month}
+                                                onChange={(e) => updateLoanItemField(collectionPath, item.id, 'month', e.target.value)}
+                                            >
+                                                {MONTHS.map(m => (
+                                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                                ))}
+                                            </select>
+                                            <select
+                                                className={selectClasses + ' w-28'}
+                                                value={item.year}
+                                                onChange={(e) => updateLoanItemField(collectionPath, item.id, 'year', e.target.value)}
+                                            >
+                                                {YEARS.map(y => (
+                                                    <option key={y} value={y}>{y}</option>
+                                                ))}
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
                             </div>

@@ -77,6 +77,8 @@ export interface FinancialItem {
   id: string;
   amount: string;
   description: string;
+  month?: string;
+  year?: string;
 }
 
 export interface ExpenseItem {
@@ -100,10 +102,24 @@ export interface KYCIncomeData {
 }
 
 export interface KYCAssetsData {
-  savings: string;
+  savingsAccount: string;
+  savingsAccountMonth: string;
+  savingsAccountYear: string;
+  fixedDeposit: string;
+  fixedDepositMonth: string;
+  fixedDepositYear: string;
+  moneyMarketFund: string;
+  moneyMarketFundMonth: string;
+  moneyMarketFundYear: string;
   epfSejahtera: string;
+  epfSejahteraMonth: string;
+  epfSejahteraYear: string;
   epfPersaraan: string;
+  epfPersaraanMonth: string;
+  epfPersaraanYear: string;
   epfFleksibel: string;
+  epfFleksibelMonth: string;
+  epfFleksibelYear: string;
   properties: FinancialItem[];
   vehicles: FinancialItem[];
   otherAssets: FinancialItem[];
@@ -185,17 +201,31 @@ export const initialKYCData: KYCData = {
     salaryMonth: new Date().getMonth().toString(),
     salaryYear: new Date().getFullYear().toString(),
     annualBonus: '',
-    bonusMonth: '',
+    bonusMonth: new Date().getMonth().toString(),
     bonusYear: new Date().getFullYear().toString(),
     rentalIncome: [],
     dividendIncome: [],
     otherIncome: []
   },
   assets: {
-    savings: '',
+    savingsAccount: '',
+    savingsAccountMonth: new Date().getMonth().toString(),
+    savingsAccountYear: new Date().getFullYear().toString(),
+    fixedDeposit: '',
+    fixedDepositMonth: new Date().getMonth().toString(),
+    fixedDepositYear: new Date().getFullYear().toString(),
+    moneyMarketFund: '',
+    moneyMarketFundMonth: new Date().getMonth().toString(),
+    moneyMarketFundYear: new Date().getFullYear().toString(),
     epfSejahtera: '',
+    epfSejahteraMonth: new Date().getMonth().toString(),
+    epfSejahteraYear: new Date().getFullYear().toString(),
     epfPersaraan: '',
+    epfPersaraanMonth: new Date().getMonth().toString(),
+    epfPersaraanYear: new Date().getFullYear().toString(),
     epfFleksibel: '',
+    epfFleksibelMonth: new Date().getMonth().toString(),
+    epfFleksibelYear: new Date().getFullYear().toString(),
     properties: [],
     vehicles: [],
     otherAssets: [],

@@ -65,7 +65,9 @@ const translations: Record<Language, Record<string, string>> = {
     
     'assets.title': 'Our Assets',
     'assets.liquid': 'My Savings',
-    'assets.savings': 'My Savings is valued at',
+    'assets.savingsAccount': 'Savings/Current Account',
+    'assets.fixedDeposit': 'Fixed Deposit',
+    'assets.moneyMarketFund': 'Money Market Fund For Savings',
     'assets.epf': 'EPF',
     'assets.epf.account1': 'Account 1 (Akaun Persaraan)',
     'assets.epf.account2': 'Account 2 (Akaun Sejahtera)',
@@ -206,7 +208,9 @@ const translations: Record<Language, Record<string, string>> = {
     
     'assets.title': '我们的资产',
     'assets.liquid': '我的储蓄',
-    'assets.savings': '我的储蓄价值为',
+    'assets.savingsAccount': '储蓄/往来账户',
+    'assets.fixedDeposit': '定期存款',
+    'assets.moneyMarketFund': '货币市场基金（储蓄用途）',
     'assets.epf': '公积金 (EPF)',
     'assets.epf.account1': 'Account 1 (Akaun Persaraan)',
     'assets.epf.account2': 'Account 2 (Akaun Sejahtera)',

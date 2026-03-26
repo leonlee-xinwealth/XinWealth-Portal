@@ -29,7 +29,9 @@ const calculateAnnualIncome = (income: any) => {
 
 const calculateTotalAssets = (assets: any) => {
     let total = 0;
-    total += parseAmount(assets.savings);
+    total += parseAmount(assets.savingsAccount);
+    total += parseAmount(assets.fixedDeposit);
+    total += parseAmount(assets.moneyMarketFund);
     total += parseAmount(assets.epfSejahtera);
     total += parseAmount(assets.epfPersaraan);
     total += parseAmount(assets.epfFleksibel);
