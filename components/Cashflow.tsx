@@ -9,36 +9,40 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'
 
 // Helpers
 const extractValue = (item: any, fields: string[]): number => {
+  if (!item || !item.fields) return 0;
   for (const field of fields) {
-    if (item.fields[field] !== undefined) {
+    if (item.fields[field] !== undefined && item.fields[field] !== null) {
        let val = item.fields[field];
        
        if (Array.isArray(val) && val.length > 0) {
            val = val[0];
-           if (typeof val === 'object' && val.text) val = val.text;
+           if (val && typeof val === 'object' && val.text) val = val.text;
        }
-       else if (typeof val === 'object' && val !== null && val.text) {
+       else if (val && typeof val === 'object' && val !== null && val.text) {
            val = val.text;
        }
 
        if (typeof val === 'string') {
          val = parseFloat(val.replace(/RM/g, '').replace(/,/g, '').trim());
        }
-       return Number(val) || 0;
+       
+       const num = Number(val);
+       if (!isNaN(num)) return num;
     }
   }
   return 0;
 };
 
 const extractString = (item: any, fields: string[], defaultValue: string = 'Unknown'): string => {
+  if (!item || !item.fields) return defaultValue;
   for (const field of fields) {
-    if (item.fields[field] !== undefined) {
+    if (item.fields[field] !== undefined && item.fields[field] !== null) {
        let val = item.fields[field];
        if (Array.isArray(val) && val.length > 0) {
-           if (typeof val[0] === 'object' && val[0].text) return val[0].text;
+           if (val[0] && typeof val[0] === 'object' && val[0].text) return val[0].text;
            return String(val[0]);
        }
-       if (typeof val === 'object' && val.text) return val.text;
+       if (val && typeof val === 'object' && val.text) return val.text;
        return String(val);
     }
   }
@@ -46,12 +50,17 @@ const extractString = (item: any, fields: string[], defaultValue: string = 'Unkn
 };
 
 const parseDate = (item: any) => {
+    if (!item || !item.fields) {
+        return { year: 'N/A', month: 'N/A', timestamp: 0 };
+    }
     const yearStr = extractString(item, ["Year", "year"], "");
     const monthStr = extractString(item, ["Month", "month"], "");
-    const rawDate = item.fields["Date"] || item.fields["date"];
+    let rawDate = item.fields["Date"] || item.fields["date"];
 
     if (rawDate) {
-        const d = new Date(typeof rawDate === 'number' ? rawDate : rawDate);
+        if (Array.isArray(rawDate)) rawDate = rawDate[0];
+        const isNumeric = typeof rawDate === 'string' && /^\d+$/.test(rawDate);
+        const d = new Date(isNumeric ? parseInt(rawDate, 10) : rawDate);
         if (!isNaN(d.getTime())) {
             return {
                 year: d.getFullYear().toString(),
@@ -114,13 +123,25 @@ interface RecordItem {
 
 const mapRecords = (rawArray: any[], valueFields: string[], categoryFields: string[], descFields: string[]): RecordItem[] => {
   return (rawArray || []).map(item => {
+    if (!item || !item.fields) {
+        return {
+          id: Math.random().toString(),
+          year: 'N/A',
+          month: 'N/A',
+          timestamp: 0,
+          category: 'Unknown',
+          description: 'Unknown',
+          value: 0
+        };
+    }
+    
     const d = parseDate(item);
     
     return {
       id: item.id || Math.random().toString(),
-      year: d.year,
-      month: d.month,
-      timestamp: d.timestamp,
+      year: d.year || 'N/A',
+      month: d.month || 'N/A',
+      timestamp: d.timestamp || 0,
       category: extractString(item, categoryFields),
       description: extractString(item, descFields, 'General'),
       value: extractValue(item, valueFields)
@@ -161,6 +182,10 @@ const Cashflow: React.FC = () => {
         setLoading(true);
         const data = await fetchRawHealthData();
         
+        if (!data) {
+            throw new Error("No data returned from API");
+        }
+        
         const parsedIncomes = mapRecords(
             data.incomes || [], 
             ["Amount", "amount", "Value", "value"], 
@@ -175,13 +200,13 @@ const Cashflow: React.FC = () => {
             ["Description", "description", "Name", "name", "Item", "item"]
         );
         
-        setIncomes(parsedIncomes);
-        setExpenses(parsedExpenses);
+        setIncomes(parsedIncomes || []);
+        setExpenses(parsedExpenses || []);
         
         let latestYear = '';
         
-        [...parsedIncomes, ...parsedExpenses].forEach(item => {
-            if (!item.year || item.year === 'N/A') return;
+        [...(parsedIncomes || []), ...(parsedExpenses || [])].forEach(item => {
+            if (!item || !item.year || item.year === 'N/A') return;
             if (item.year > latestYear) {
                 latestYear = item.year;
             }
@@ -194,6 +219,7 @@ const Cashflow: React.FC = () => {
         }
 
       } catch (err: any) {
+        console.error("Cashflow data load error:", err);
         setError(err.message || 'Failed to load cashflow data');
       } finally {
         setLoading(false);
@@ -203,68 +229,86 @@ const Cashflow: React.FC = () => {
   }, []);
 
   const availableYears = useMemo(() => {
-      const years = new Set<string>();
-      
-      incomes.forEach(item => { 
-          if (item.year && item.year !== 'N/A') years.add(item.year); 
-      });
-      expenses.forEach(item => { 
-          if (item.year && item.year !== 'N/A') years.add(item.year); 
-      });
-      
-      if (years.size === 0) {
-          years.add(new Date().getFullYear().toString());
+      try {
+          const years = new Set<string>();
+          
+          (incomes || []).forEach(item => { 
+              if (item && item.year && item.year !== 'N/A') years.add(item.year); 
+          });
+          (expenses || []).forEach(item => { 
+              if (item && item.year && item.year !== 'N/A') years.add(item.year); 
+          });
+          
+          if (years.size === 0) {
+              years.add(new Date().getFullYear().toString());
+          }
+          
+          return Array.from(years).sort((a, b) => b.localeCompare(a));
+      } catch (err) {
+          console.error("Error in availableYears useMemo:", err);
+          return [new Date().getFullYear().toString()];
       }
-      
-      return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [incomes, expenses]);
 
   useEffect(() => {
-      if (!selectedYear || !availableYears.includes(selectedYear)) {
-          if (availableYears.length > 0) {
-              setSelectedYear(availableYears[0]);
-          } else {
-              setSelectedYear(new Date().getFullYear().toString());
+      try {
+          if (!selectedYear || (availableYears && !availableYears.includes(selectedYear))) {
+              if (availableYears && availableYears.length > 0) {
+                  setSelectedYear(availableYears[0]);
+              } else {
+                  setSelectedYear(new Date().getFullYear().toString());
+              }
           }
+      } catch (err) {
+          console.error("Error in selection effect:", err);
       }
   }, [selectedYear, availableYears]);
 
   const renderContent = () => {
-      const { pieData, categoryMap, totalValue } = useMemo(() => {
-          const list = activeTab === 'inflow' ? incomes : expenses;
-          const filteredList = list.filter(item => {
-              if (!item.year || item.year === 'N/A') return false; 
+      const dataValues = useMemo(() => {
+          try {
+              const list = activeTab === 'inflow' ? (incomes || []) : (expenses || []);
+              const filteredList = list.filter(item => {
+                  if (!item || !item.year || item.year === 'N/A') return false; 
+                  
+                  if (viewMode === 'annual') {
+                      return String(item.year) === String(selectedYear);
+                  } else {
+                      const itemMonth = item.month || '01';
+                      return String(item.year) === String(selectedYear) && String(itemMonth) === String(selectedMonth);
+                  }
+              });
+
+              const catMap = new Map<string, { value: number, items: RecordItem[] }>();
               
-              if (viewMode === 'annual') {
-                  return String(item.year) === String(selectedYear);
-              } else {
-                  const itemMonth = item.month || '01';
-                  return String(item.year) === String(selectedYear) && String(itemMonth) === String(selectedMonth);
-              }
-          });
-
-          const catMap = new Map<string, { value: number, items: RecordItem[] }>();
-          
-          filteredList.forEach(item => {
-              if (item.value === undefined || item.value === 0) return;
+              (filteredList || []).forEach(item => {
+                  if (!item || item.value === undefined || item.value === 0) return;
+                  
+                  if (!catMap.has(item.category)) {
+                      catMap.set(item.category, { value: 0, items: [] });
+                  }
+                  const group = catMap.get(item.category)!;
+                  group.value += item.value;
+                  group.items.push(item);
+              });
               
-              if (!catMap.has(item.category)) {
-                  catMap.set(item.category, { value: 0, items: [] });
-              }
-              const group = catMap.get(item.category)!;
-              group.value += item.value;
-              group.items.push(item);
-          });
-          
-          const pData = Array.from(catMap.entries()).map(([name, data]) => ({
-              name,
-              value: data.value
-          })).filter(d => d.value > 0);
+              const pData = Array.from(catMap.entries()).map(([name, data]) => ({
+                  name,
+                  value: data.value
+              })).filter(d => d.value > 0);
 
-          const tValue = pData.reduce((sum, item) => sum + item.value, 0);
+              const tValue = pData.reduce((sum, item) => sum + item.value, 0);
 
-          return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+              return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+          } catch (err) {
+              console.error("Error in useMemo for Cashflow:", err);
+              return { pieData: [], categoryMap: new Map(), totalValue: 0 };
+          }
       }, [activeTab, incomes, expenses, viewMode, selectedYear, selectedMonth]);
+      
+      const pieData = dataValues?.pieData || [];
+      const categoryMap = dataValues?.categoryMap || new Map();
+      const totalValue = dataValues?.totalValue || 0;
 
       return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -419,20 +463,20 @@ const Cashflow: React.FC = () => {
             {/* Dropdowns */}
             <div className="flex gap-3">
                 <select 
-                    value={selectedYear} 
+                    value={selectedYear || ''} 
                     onChange={(e) => setSelectedYear(e.target.value)}
                     className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue min-w-[100px]"
                 >
-                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                    {(availableYears || []).map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
 
                 {viewMode === 'monthly' && (
                     <select 
-                        value={selectedMonth} 
+                        value={selectedMonth || ''} 
                         onChange={(e) => setSelectedMonth(e.target.value)}
                         className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue min-w-[100px]"
                     >
-                        {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                        {(MONTHS || []).map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                     </select>
                 )}
             </div>

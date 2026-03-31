@@ -112,6 +112,12 @@ export default async function handler(req, res) {
     const ageStr = extractLarkValue(userRecord.fields["Age"]);
     const retirementAgeStr = extractLarkValue(userRecord.fields["Retirement Age"]);
     
+    // Extract new fields
+    const familyName = extractLarkValue(userRecord.fields["Family Name"]);
+    const givenName = extractLarkValue(userRecord.fields["Given Name"]);
+    const advisor = extractLarkValue(userRecord.fields["Advisor"]);
+
+    
     let currentAge = 30; // Default
     if (ageStr) {
       const parsedAge = parseInt(ageStr, 10);
@@ -136,7 +142,10 @@ export default async function handler(req, res) {
         email: email,
         recordId: userRecord.record_id,
         currentAge,
-        retirementAge
+        retirementAge,
+        familyName,
+        givenName,
+        advisor
       });
     } else {
       return res.status(401).json({ error: 'Invalid password' });

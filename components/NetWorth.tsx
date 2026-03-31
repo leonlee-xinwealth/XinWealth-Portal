@@ -8,68 +8,72 @@ type TabType = 'assets' | 'liabilities' | 'networth';
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#d0ed57', '#a4de6c', '#f4a261', '#d9ed92'];
 
 // Helpers
-const extractValue = (item: any, fields: string[]): number => {
-  if (!item || !item.fields) return 0;
-  for (const field of fields) {
-    if (item.fields[field] !== undefined) {
-       let val = item.fields[field];
-       
-       // Handle arrays (e.g., lookup or formula fields returning arrays)
-       if (Array.isArray(val) && val.length > 0) {
-           val = val[0];
-           if (val && typeof val === 'object' && val.text) val = val.text;
-       }
-       // Handle objects
-       else if (val && typeof val === 'object' && val !== null && val.text) {
-           val = val.text;
-       }
-
-       if (typeof val === 'string') {
-         val = parseFloat(val.replace(/RM/g, '').replace(/,/g, '').trim());
-       }
-       return Number(val) || 0;
+  const extractValue = (item: any, fields: string[]): number => {
+    if (!item || !item.fields) return 0;
+    for (const field of fields) {
+      if (item.fields[field] !== undefined && item.fields[field] !== null) {
+         let val = item.fields[field];
+         
+         // Handle arrays (e.g., lookup or formula fields returning arrays)
+         if (Array.isArray(val) && val.length > 0) {
+             val = val[0];
+             if (val && typeof val === 'object' && val.text) val = val.text;
+         }
+         // Handle objects
+         else if (val && typeof val === 'object' && val !== null && val.text) {
+             val = val.text;
+         }
+  
+         if (typeof val === 'string') {
+           val = parseFloat(val.replace(/RM/g, '').replace(/,/g, '').trim());
+         }
+         
+         const num = Number(val);
+         if (!isNaN(num)) return num;
+      }
     }
-  }
-  return 0;
-};
-
-const extractString = (item: any, fields: string[], defaultValue: string = 'Unknown'): string => {
-  if (!item || !item.fields) return defaultValue;
-  for (const field of fields) {
-    if (item.fields[field] !== undefined) {
-       let val = item.fields[field];
-       if (Array.isArray(val) && val.length > 0) {
-           if (val[0] && typeof val[0] === 'object' && val[0].text) return val[0].text;
-           return String(val[0]);
-       }
-       if (val && typeof val === 'object' && val.text) return val.text;
-       return String(val);
+    return 0;
+  };
+  
+  const extractString = (item: any, fields: string[], defaultValue: string = 'Unknown'): string => {
+    if (!item || !item.fields) return defaultValue;
+    for (const field of fields) {
+      if (item.fields[field] !== undefined && item.fields[field] !== null) {
+         let val = item.fields[field];
+         if (Array.isArray(val) && val.length > 0) {
+             if (val[0] && typeof val[0] === 'object' && val[0].text) return val[0].text;
+             return String(val[0]);
+         }
+         if (val && typeof val === 'object' && val.text) return val.text;
+         return String(val);
+      }
     }
-  }
-  return defaultValue;
-};
-
-const parseDate = (item: any) => {
-    if (!item || !item.fields) {
-        return { year: 'N/A', month: 'N/A', timestamp: 0 };
-    }
-    // First check specific Quarter/Year fields if any are present from the API or custom logic
-    const quarterStr = extractString(item, ["Quarter", "quarter"], "");
-    const yearStr = extractString(item, ["Year", "year"], "");
-    
-    // Then check Date
-    const rawDate = item.fields["Date"] || item.fields["date"];
-
-    if (rawDate) {
-        const d = new Date(typeof rawDate === 'number' ? rawDate : rawDate);
-        if (!isNaN(d.getTime())) {
-            return {
-                year: d.getFullYear().toString(),
-                month: (d.getMonth() + 1).toString().padStart(2, '0'),
-                timestamp: d.getTime()
-            };
-        }
-    }
+    return defaultValue;
+  };
+  
+  const parseDate = (item: any) => {
+      if (!item || !item.fields) {
+          return { year: 'N/A', month: 'N/A', timestamp: 0 };
+      }
+      // First check specific Quarter/Year fields if any are present from the API or custom logic
+      const quarterStr = extractString(item, ["Quarter", "quarter"], "");
+      const yearStr = extractString(item, ["Year", "year"], "");
+      
+      // Then check Date
+      let rawDate = item.fields["Date"] || item.fields["date"];
+  
+      if (rawDate) {
+          if (Array.isArray(rawDate)) rawDate = rawDate[0];
+          const isNumeric = typeof rawDate === 'string' && /^\d+$/.test(rawDate);
+          const d = new Date(isNumeric ? parseInt(rawDate, 10) : rawDate);
+          if (!isNaN(d.getTime())) {
+              return {
+                  year: d.getFullYear().toString(),
+                  month: (d.getMonth() + 1).toString().padStart(2, '0'),
+                  timestamp: d.getTime()
+              };
+          }
+      }
 
     // If no raw Date, use Year and Month/Quarter
     const monthStr = extractString(item, ["Month", "month"], "");
@@ -206,6 +210,10 @@ const NetWorth: React.FC = () => {
         setLoading(true);
         const data = await fetchRawHealthData();
         
+        if (!data) {
+            throw new Error("No data returned from API");
+        }
+        
         const combinedAssets = [
             ...mapRecords(data.assets || [], ["Value", "value", "Amount", "amount"]),
             ...mapRecords(data.investments || [], ["Amount", "amount", "Value", "value", "End Value", "end value"], 'Investment')
@@ -216,8 +224,8 @@ const NetWorth: React.FC = () => {
         console.log("Combined Assets:", combinedAssets);
         console.log("Parsed Liabilities:", parsedLiabilities);
         
-        setAssets(combinedAssets);
-        setLiabilities(parsedLiabilities);
+        setAssets(combinedAssets || []);
+        setLiabilities(parsedLiabilities || []);
         
         // Find latest date for default selection
         let latestYear = '';
@@ -246,6 +254,7 @@ const NetWorth: React.FC = () => {
 
 
       } catch (err: any) {
+        console.error("NetWorth data load error:", err);
         setError(err.message || 'Failed to load net worth data');
       } finally {
         setLoading(false);
@@ -313,7 +322,7 @@ const NetWorth: React.FC = () => {
       // Tab 1 & 2: Assets / Liabilities
   const renderAssetsOrLiabilities = () => {
       // Add default values to prevent destructuring errors if useMemo fails or returns undefined somehow
-      const { pieData = [], categoryMap = new Map(), totalValue = 0 } = useMemo(() => {
+      const dataValues = useMemo(() => {
           try {
               const list = activeTab === 'assets' ? (assets || []) : (liabilities || []);
               const filteredList = list.filter(item => {
@@ -348,6 +357,10 @@ const NetWorth: React.FC = () => {
               return { pieData: [], categoryMap: new Map(), totalValue: 0 };
           }
       }, [activeTab, assets, liabilities, selectedYear, selectedQuarter]);
+      
+      const pieData = dataValues?.pieData || [];
+      const categoryMap = dataValues?.categoryMap || new Map();
+      const totalValue = dataValues?.totalValue || 0;
 
       return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

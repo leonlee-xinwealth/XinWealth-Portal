@@ -1,13 +1,13 @@
-import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData } from '../types';
+import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession } from '../types';
 
 /**
  * Connects to Vercel Serverless Functions in the /api folder.
  */
 
 const setSession = (data: any) => localStorage.setItem('xinwealth_user', JSON.stringify(data));
-const getSession = () => {
+export const getSession = (): UserSession | null => {
   const s = localStorage.getItem('xinwealth_user');
-  return s ? JSON.parse(s) : null;
+  return s ? JSON.parse(s) as UserSession : null;
 };
 export const clearSession = () => localStorage.removeItem('xinwealth_user');
 
@@ -163,8 +163,13 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
   let rawRecords = data.records;
 
   if (!rawRecords || rawRecords.length === 0) {
+    const session = getSession();
+    const displayName = session?.familyName || session?.givenName 
+      ? `${session?.familyName || ''} ${session?.givenName || ''}`.trim() 
+      : session?.name || 'Client';
+
     return {
-      name: getSession()?.name || 'Client',
+      name: displayName,
       totalValue: 0,
       totalInvested: 0,
       totalReturn: 0,
@@ -227,7 +232,9 @@ export const fetchClientProfile = async (): Promise<ClientProfile> => {
   }
 
   return {
-    name: getSession()?.name,
+    name: getSession()?.familyName || getSession()?.givenName 
+      ? `${getSession()?.familyName || ''} ${getSession()?.givenName || ''}`.trim() 
+      : getSession()?.name || 'Client',
     totalValue: currentVal,
     totalInvested: totalInvested,
     totalReturn: totalRet,

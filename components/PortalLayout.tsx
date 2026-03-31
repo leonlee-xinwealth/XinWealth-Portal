@@ -2,7 +2,7 @@ import React, { useState, Suspense, lazy } from 'react';
 import Sidebar from './Sidebar';
 import Login from './Login';
 import { ViewState } from '../types';
-import { clearSession } from '../services/larkService';
+import { clearSession, getSession } from '../services/larkService';
 import { Menu, Loader2 } from 'lucide-react';
 
 const Investment = lazy(() => import('./Investment'));
@@ -56,6 +56,11 @@ const PortalLayout: React.FC = () => {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
+  const session = getSession();
+  const userName = session?.familyName || session?.givenName 
+    ? `${session?.familyName || ''} ${session?.givenName || ''}`.trim() 
+    : session?.name || 'Client';
+
   return (
     <div className="flex min-h-screen bg-xin-bg font-sans selection:bg-xin-gold selection:text-white">
       {/* Sidebar Navigation */}
@@ -88,6 +93,11 @@ const PortalLayout: React.FC = () => {
 
         {/* Dynamic View Content */}
         <div className="max-w-7xl mx-auto">
+          {/* Global Welcome Message */}
+          <div className="mb-8 flex items-center justify-between">
+              <h2 className="text-2xl lg:text-3xl font-serif font-bold text-xin-blue">Welcome, {userName}</h2>
+          </div>
+
           <Suspense fallback={
             <div className="flex items-center justify-center min-h-[50vh]">
               <Loader2 className="w-8 h-8 animate-spin text-xin-blue" />

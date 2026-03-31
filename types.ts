@@ -67,6 +67,18 @@ export interface ClientProfile {
   lastUpdated: string;
 }
 
+export interface UserSession {
+  success: boolean;
+  name: string;
+  email: string;
+  recordId: string;
+  currentAge: number;
+  retirementAge: number;
+  familyName?: string;
+  givenName?: string;
+  advisor?: string;
+}
+
 export interface IncomeItem {
   id: string;
   amount: string;

@@ -1,5 +1,6 @@
 import React from 'react';
 import { ViewState } from '../types';
+import { getSession } from '../services/larkService';
 import { 
   PieChart, 
   ShieldCheck, 
@@ -23,7 +24,10 @@ interface SidebarProps {
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isOpen, setIsOpen, onLogout }) => {
-  
+  const session = getSession();
+  const advisorName = session?.advisor || 'Advisor';
+  const advisorInitials = advisorName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() || 'AD';
+
   const navItems = [
     { id: ViewState.INVESTMENT, label: 'Portfolio', icon: PieChart },
     { id: ViewState.NET_WORTH, label: 'Net Worth', icon: Wallet },
@@ -104,10 +108,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isOpen, setIsOp
               <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-2">My Advisor</p>
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-full bg-xin-gold flex items-center justify-center text-xin-blue font-bold font-serif">
-                  JD
+                  {advisorInitials}
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-xin-blue">John Doe</p>
+                  <p className="text-sm font-bold text-xin-blue">{advisorName}</p>
                   <p className="text-xs text-slate-500">Wealth Manager</p>
                 </div>
               </div>
