@@ -107,12 +107,36 @@ export default async function handler(req, res) {
     const storedPassword = extractLarkValue(userRecord.fields["Password"] || userRecord.fields["password"] || userRecord.fields["Pass"]);
     const userName = extractLarkValue(userRecord.fields["Client"] || userRecord.fields["Full Name"] || userRecord.fields["Name"]);
     
+    // Extract optional fields for projection
+    const dob = extractLarkValue(userRecord.fields["Date of Birth"] || userRecord.fields["DOB"]);
+    const ageStr = extractLarkValue(userRecord.fields["Age"]);
+    const retirementAgeStr = extractLarkValue(userRecord.fields["Retirement Age"]);
+    
+    let currentAge = 30; // Default
+    if (ageStr) {
+      const parsedAge = parseInt(ageStr, 10);
+      if (!isNaN(parsedAge)) currentAge = parsedAge;
+    } else if (dob) {
+      const birthYear = new Date(dob).getFullYear();
+      if (!isNaN(birthYear)) {
+         currentAge = new Date().getFullYear() - birthYear;
+      }
+    }
+    
+    let retirementAge = 55; // Default
+    if (retirementAgeStr) {
+      const parsedRetAge = parseInt(retirementAgeStr, 10);
+      if (!isNaN(parsedRetAge)) retirementAge = parsedRetAge;
+    }
+    
     if (storedPassword.trim() === String(password).trim()) {
       return res.status(200).json({ 
         success: true, 
         name: userName,
         email: email,
-        recordId: userRecord.record_id
+        recordId: userRecord.record_id,
+        currentAge,
+        retirementAge
       });
     } else {
       return res.status(401).json({ error: 'Invalid password' });

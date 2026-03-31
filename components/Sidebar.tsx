@@ -10,7 +10,8 @@ import {
   Calculator,
   Target,
   Wallet,
-  ArrowRightLeft
+  ArrowRightLeft,
+  TrendingUp
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -27,6 +28,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isOpen, setIsOp
     { id: ViewState.INVESTMENT, label: 'Portfolio', icon: PieChart },
     { id: ViewState.NET_WORTH, label: 'Net Worth', icon: Wallet },
     { id: ViewState.CASHFLOW, label: 'Cashflow', icon: ArrowRightLeft },
+    { id: ViewState.RETIREMENT, label: 'Retirement', icon: TrendingUp },
     { id: ViewState.INSURANCE, label: 'Insurance', icon: ShieldCheck },
     { id: ViewState.HEALTH_CHECK, label: 'Financial Health', icon: Activity },
     { id: ViewState.TAX, label: 'Tax', icon: Calculator },

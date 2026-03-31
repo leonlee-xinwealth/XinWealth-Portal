@@ -1,16 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense, lazy } from 'react';
 import Sidebar from './Sidebar';
-import Investment from './Investment';
-import Insurance from './Insurance';
-import FinancialHealthCheck from './FinancialHealthCheck';
-import Tax from './Tax';
-import FinancialGoal from './FinancialGoal';
-import NetWorth from './NetWorth';
-import Cashflow from './Cashflow';
 import Login from './Login';
 import { ViewState } from '../types';
 import { clearSession } from '../services/larkService';
-import { Menu } from 'lucide-react';
+import { Menu, Loader2 } from 'lucide-react';
+
+const Investment = lazy(() => import('./Investment'));
+const Insurance = lazy(() => import('./Insurance'));
+const FinancialHealthCheck = lazy(() => import('./FinancialHealthCheck'));
+const Tax = lazy(() => import('./Tax'));
+const FinancialGoal = lazy(() => import('./FinancialGoal'));
+const NetWorth = lazy(() => import('./NetWorth'));
+const Cashflow = lazy(() => import('./Cashflow'));
+const Retirement = lazy(() => import('./Retirement'));
 
 const PortalLayout: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -43,6 +45,8 @@ const PortalLayout: React.FC = () => {
         return <NetWorth />;
       case ViewState.CASHFLOW:
         return <Cashflow />;
+      case ViewState.RETIREMENT:
+        return <Retirement />;
       default:
         return <Investment />;
     }
@@ -84,7 +88,13 @@ const PortalLayout: React.FC = () => {
 
         {/* Dynamic View Content */}
         <div className="max-w-7xl mx-auto">
+          <Suspense fallback={
+            <div className="flex items-center justify-center min-h-[50vh]">
+              <Loader2 className="w-8 h-8 animate-spin text-xin-blue" />
+            </div>
+          }>
             {renderContent()}
+          </Suspense>
         </div>
 
       </main>

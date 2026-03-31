@@ -130,6 +130,7 @@ const mapRecords = (rawArray: any[], valueFields: string[], categoryFields: stri
 
 const Cashflow: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('inflow');
+  const [viewMode, setViewMode] = useState<'annual' | 'monthly'>('annual');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -137,6 +138,22 @@ const Cashflow: React.FC = () => {
   const [expenses, setExpenses] = useState<RecordItem[]>([]);
 
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+  const [selectedMonth, setSelectedMonth] = useState<string>((new Date().getMonth() + 1).toString().padStart(2, '0'));
+
+  const MONTHS = [
+    { value: '01', label: 'Jan' },
+    { value: '02', label: 'Feb' },
+    { value: '03', label: 'Mar' },
+    { value: '04', label: 'Apr' },
+    { value: '05', label: 'May' },
+    { value: '06', label: 'Jun' },
+    { value: '07', label: 'Jul' },
+    { value: '08', label: 'Aug' },
+    { value: '09', label: 'Sep' },
+    { value: '10', label: 'Oct' },
+    { value: '11', label: 'Nov' },
+    { value: '12', label: 'Dec' }
+  ];
 
   useEffect(() => {
     const loadData = async () => {
@@ -213,32 +230,41 @@ const Cashflow: React.FC = () => {
   }, [selectedYear, availableYears]);
 
   const renderContent = () => {
-      const list = activeTab === 'inflow' ? incomes : expenses;
-      const filteredList = list.filter(item => {
-          if (!item.year || item.year === 'N/A') return true; // Show items without year if needed, or false? Let's say false to filter strictly.
-          // Let's show all if 'All' is selected, but we don't have 'All' yet. Let's filter strictly.
-          return String(item.year) === String(selectedYear);
-      });
+      const { pieData, categoryMap, totalValue } = useMemo(() => {
+          const list = activeTab === 'inflow' ? incomes : expenses;
+          const filteredList = list.filter(item => {
+              if (!item.year || item.year === 'N/A') return false; 
+              
+              if (viewMode === 'annual') {
+                  return String(item.year) === String(selectedYear);
+              } else {
+                  const itemMonth = item.month || '01';
+                  return String(item.year) === String(selectedYear) && String(itemMonth) === String(selectedMonth);
+              }
+          });
 
-      const categoryMap = new Map<string, { value: number, items: RecordItem[] }>();
-      
-      filteredList.forEach(item => {
-          if (item.value === undefined || item.value === 0) return;
+          const catMap = new Map<string, { value: number, items: RecordItem[] }>();
           
-          if (!categoryMap.has(item.category)) {
-              categoryMap.set(item.category, { value: 0, items: [] });
-          }
-          const group = categoryMap.get(item.category)!;
-          group.value += item.value;
-          group.items.push(item);
-      });
-      
-      const pieData = Array.from(categoryMap.entries()).map(([name, data]) => ({
-          name,
-          value: data.value
-      })).filter(d => d.value > 0);
+          filteredList.forEach(item => {
+              if (item.value === undefined || item.value === 0) return;
+              
+              if (!catMap.has(item.category)) {
+                  catMap.set(item.category, { value: 0, items: [] });
+              }
+              const group = catMap.get(item.category)!;
+              group.value += item.value;
+              group.items.push(item);
+          });
+          
+          const pData = Array.from(catMap.entries()).map(([name, data]) => ({
+              name,
+              value: data.value
+          })).filter(d => d.value > 0);
 
-      const totalValue = pieData.reduce((sum, item) => sum + item.value, 0);
+          const tValue = pData.reduce((sum, item) => sum + item.value, 0);
+
+          return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+      }, [activeTab, incomes, expenses, viewMode, selectedYear, selectedMonth]);
 
       return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -258,20 +284,28 @@ const Cashflow: React.FC = () => {
                                           outerRadius={100}
                                           paddingAngle={5}
                                           dataKey="value"
-                                          label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+                                          label={({ cx, cy, midAngle, outerRadius, percent }: any) => {
                                               const RADIAN = Math.PI / 180;
-                                              const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                                              const radius = outerRadius + 15;
                                               const x = cx + radius * Math.cos(-midAngle * RADIAN);
                                               const y = cy + radius * Math.sin(-midAngle * RADIAN);
                                               return percent >= 0.01 ? (
-                                                  <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight="bold">
+                                                  <text 
+                                                      x={x} 
+                                                      y={y} 
+                                                      fill="#475569" 
+                                                      textAnchor={x > cx ? 'start' : 'end'} 
+                                                      dominantBaseline="central" 
+                                                      fontSize={12} 
+                                                      fontWeight="bold"
+                                                  >
                                                       {`${(percent * 100).toFixed(0)}%`}
                                                   </text>
                                               ) : null;
                                           }}
-                                          labelLine={false}
+                                          labelLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}
                                       >
-                                          {pieData.map((entry, index) => (
+                                          {pieData.map((_, index) => (
                                               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                           ))}
                                       </Pie>
@@ -300,7 +334,12 @@ const Cashflow: React.FC = () => {
                               return (
                                   <div key={idx} className="space-y-3">
                                       <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                                          <span className="font-bold text-slate-700">{cat}</span>
+                                          <div className="flex items-center gap-2">
+                                              <span className="font-bold text-slate-700">{cat}</span>
+                                              <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">
+                                                  {((data.value / totalValue) * 100).toFixed(0)}%
+                                              </span>
+                                          </div>
                                           <span className="font-bold text-xin-blue">{formatCurrency(data.value)}</span>
                                       </div>
                                       <div className="space-y-2 pl-4 border-l-2 border-slate-100">
@@ -352,14 +391,51 @@ const Cashflow: React.FC = () => {
             <p className="text-slate-500">Track your cash inflows and outflows.</p>
         </div>
         
-        <div className="flex gap-3">
-            <select 
-                value={selectedYear} 
-                onChange={(e) => setSelectedYear(e.target.value)}
-                className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue"
-            >
-                {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
-            </select>
+        <div className="flex flex-col gap-3 items-end">
+            {/* Toggle Switch */}
+            <div className="flex bg-slate-100 p-1 rounded-xl w-fit">
+                <button
+                    onClick={() => setViewMode('annual')}
+                    className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition-all ${
+                        viewMode === 'annual' 
+                            ? 'bg-white text-xin-blue shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                >
+                    Annual
+                </button>
+                <button
+                    onClick={() => setViewMode('monthly')}
+                    className={`px-4 py-1.5 text-sm font-semibold rounded-lg transition-all ${
+                        viewMode === 'monthly' 
+                            ? 'bg-white text-xin-blue shadow-sm' 
+                            : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                >
+                    Monthly
+                </button>
+            </div>
+
+            {/* Dropdowns */}
+            <div className="flex gap-3">
+                <select 
+                    value={selectedYear} 
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue min-w-[100px]"
+                >
+                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+
+                {viewMode === 'monthly' && (
+                    <select 
+                        value={selectedMonth} 
+                        onChange={(e) => setSelectedMonth(e.target.value)}
+                        className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue min-w-[100px]"
+                    >
+                        {MONTHS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </select>
+                )}
+            </div>
         </div>
       </div>
 

@@ -1,0 +1,40 @@
+components/Cashflow.tsx(274,57): error TS6133: 'entry' is declared but its value is never read.
+components/kyc/KYCStepper.tsx(17,7): error TS6133: 'PlaceholderStep' is declared but its value is never read.
+components/kyc/KYCStepper.tsx(188,66): error TS6133: 'idx' is declared but its value is never read.
+components/kyc/steps/AssetsStep.tsx(2,55): error TS2307: Cannot find module '../../types' or its corresponding type declarations.
+components/kyc/steps/AssetsStep.tsx(14,7): error TS6133: 'currentMonth' is declared but its value is never read.
+components/kyc/steps/AssetsStep.tsx(15,7): error TS6133: 'currentYear' is declared but its value is never read.
+components/kyc/steps/BasicInfoStep.tsx(2,25): error TS2307: Cannot find module '../../types' or its corresponding type declarations.
+components/kyc/steps/BasicInfoStep.tsx(24,32): error TS6133: 'idx' is declared but its value is never read.
+components/kyc/steps/ExpensesStep.tsx(2,19): error TS6133: 'ExpenseItem' is declared but its value is never read.
+components/kyc/steps/ExpensesStep.tsx(2,55): error TS2307: Cannot find module '../../types' or its corresponding type declarations.
+components/kyc/steps/ExpensesStep.tsx(5,10): error TS6133: 'DebouncedTextInput' is declared but its value is never read.
+components/kyc/steps/ExpensesStep.tsx(121,42): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/ExpensesStep.tsx(128,39): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/ExpensesStep.tsx(192,37): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/ExpensesStep.tsx(192,43): error TS6133: 'index' is declared but its value is never read.
+components/kyc/steps/ExpensesStep.tsx(192,43): error TS7006: Parameter 'index' implicitly has an 'any' type.
+components/kyc/steps/IncomeStep.tsx(2,19): error TS6133: 'IncomeItem' is declared but its value is never read.
+components/kyc/steps/IncomeStep.tsx(2,52): error TS2307: Cannot find module '../../types' or its corresponding type declarations.
+components/kyc/steps/IncomeStep.tsx(67,60): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/IncomeStep.tsx(73,57): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/IncomeStep.tsx(132,37): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/IncomeStep.tsx(132,43): error TS6133: 'index' is declared but its value is never read.
+components/kyc/steps/IncomeStep.tsx(132,43): error TS7006: Parameter 'index' implicitly has an 'any' type.
+components/kyc/steps/InvestmentsStep.tsx(2,60): error TS2307: Cannot find module '../../types' or its corresponding type declarations.
+components/kyc/steps/InvestmentsStep.tsx(110,58): error TS6133: 'index' is declared but its value is never read.
+components/kyc/steps/LiabilitiesStep.tsx(2,19): error TS6133: 'FinancialItem' is declared but its value is never read.
+components/kyc/steps/LiabilitiesStep.tsx(2,60): error TS2307: Cannot find module '../../types' or its corresponding type declarations.
+components/kyc/steps/LiabilitiesStep.tsx(5,10): error TS6133: 'DebouncedTextInput' is declared but its value is never read.
+components/kyc/steps/LiabilitiesStep.tsx(14,7): error TS6133: 'currentMonth' is declared but its value is never read.
+components/kyc/steps/LiabilitiesStep.tsx(15,7): error TS6133: 'currentYear' is declared but its value is never read.
+components/kyc/steps/LiabilitiesStep.tsx(67,65): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/LiabilitiesStep.tsx(73,62): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/LiabilitiesStep.tsx(130,37): error TS7006: Parameter 'item' implicitly has an 'any' type.
+components/kyc/steps/LiabilitiesStep.tsx(130,43): error TS6133: 'index' is declared but its value is never read.
+components/kyc/steps/LiabilitiesStep.tsx(130,43): error TS7006: Parameter 'index' implicitly has an 'any' type.
+components/kyc/steps/PDPAStep.tsx(12,46): error TS6133: 'pdpaAccepted' is declared but its value is never read.
+components/kyc/steps/PDPAStep.tsx(13,13): error TS6133: 't' is declared but its value is never read.
+components/kyc/steps/ReviewSummaryStep.tsx(2,53): error TS2307: Cannot find module '../../types' or its corresponding type declarations.
+components/NetWorth.tsx(354,57): error TS6133: 'entry' is declared but its value is never read.
+components/Sidebar.tsx(8,3): error TS6133: 'Menu' is declared but its value is never read.

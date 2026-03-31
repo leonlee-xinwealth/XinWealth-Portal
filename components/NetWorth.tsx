@@ -285,39 +285,36 @@ const NetWorth: React.FC = () => {
 
       // Tab 1 & 2: Assets / Liabilities
   const renderAssetsOrLiabilities = () => {
-      const list = activeTab === 'assets' ? assets : liabilities;
-      // Filter strictly by year, and fallback to Q1 if item quarter is N/A to allow seeing data
-      const filteredList = list.filter(item => {
-          if (!item.year || item.year === 'N/A') return false;
-          const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
-          return String(item.year) === String(selectedYear) && String(itemQuarter) === String(selectedQuarter);
-      });
-      
-      console.log(`Filtered ${activeTab} for ${selectedYear} ${selectedQuarter}:`, filteredList);
-
-      // Group by category
-      const categoryMap = new Map<string, { value: number, items: RecordItem[] }>();
-      
-      const dataToMap = filteredList;
-
-      dataToMap.forEach(item => {
-          // Only exclude items that literally have 0 or are undefined
-          if (item.value === undefined || item.value === 0) return;
+      const { pieData, categoryMap, totalValue } = useMemo(() => {
+          const list = activeTab === 'assets' ? assets : liabilities;
+          const filteredList = list.filter(item => {
+              if (!item.year || item.year === 'N/A') return false;
+              const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
+              return String(item.year) === String(selectedYear) && String(itemQuarter) === String(selectedQuarter);
+          });
           
-          if (!categoryMap.has(item.category)) {
-              categoryMap.set(item.category, { value: 0, items: [] });
-          }
-          const group = categoryMap.get(item.category)!;
-          group.value += item.value;
-          group.items.push(item);
-      });
-      
-      const pieData = Array.from(categoryMap.entries()).map(([name, data]) => ({
-          name,
-          value: data.value
-      })).filter(d => d.value > 0);
+          const catMap = new Map<string, { value: number, items: RecordItem[] }>();
+          
+          filteredList.forEach(item => {
+              if (item.value === undefined || item.value === 0) return;
+              
+              if (!catMap.has(item.category)) {
+                  catMap.set(item.category, { value: 0, items: [] });
+              }
+              const group = catMap.get(item.category)!;
+              group.value += item.value;
+              group.items.push(item);
+          });
+          
+          const pData = Array.from(catMap.entries()).map(([name, data]) => ({
+              name,
+              value: data.value
+          })).filter(d => d.value > 0);
 
-      const totalValue = pieData.reduce((sum, item) => sum + item.value, 0);
+          const tValue = pData.reduce((sum, item) => sum + item.value, 0);
+
+          return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+      }, [activeTab, assets, liabilities, selectedYear, selectedQuarter]);
 
       return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -337,21 +334,28 @@ const NetWorth: React.FC = () => {
                                           outerRadius={100}
                                           paddingAngle={5}
                                           dataKey="value"
-                                          label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+                                          label={({ cx, cy, midAngle, outerRadius, percent }: any) => {
                                               const RADIAN = Math.PI / 180;
-                                              const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                                              const radius = outerRadius + 15;
                                               const x = cx + radius * Math.cos(-midAngle * RADIAN);
                                               const y = cy + radius * Math.sin(-midAngle * RADIAN);
-                                              // Show label for anything >= 1% to ensure most get displayed
                                               return percent >= 0.01 ? (
-                                                  <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight="bold">
+                                                  <text 
+                                                      x={x} 
+                                                      y={y} 
+                                                      fill="#475569" 
+                                                      textAnchor={x > cx ? 'start' : 'end'} 
+                                                      dominantBaseline="central" 
+                                                      fontSize={12} 
+                                                      fontWeight="bold"
+                                                  >
                                                       {`${(percent * 100).toFixed(0)}%`}
                                                   </text>
                                               ) : null;
                                           }}
-                                          labelLine={false}
+                                          labelLine={{ stroke: '#cbd5e1', strokeWidth: 1 }}
                                       >
-                                          {pieData.map((entry, index) => (
+                                          {pieData.map((_, index) => (
                                               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                                           ))}
                                       </Pie>
@@ -380,7 +384,12 @@ const NetWorth: React.FC = () => {
                               return (
                                   <div key={idx} className="space-y-3">
                                       <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                                          <span className="font-bold text-slate-700">{cat}</span>
+                                          <div className="flex items-center gap-2">
+                                              <span className="font-bold text-slate-700">{cat}</span>
+                                              <span className="text-xs font-semibold px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">
+                                                  {((data.value / totalValue) * 100).toFixed(0)}%
+                                              </span>
+                                          </div>
                                           <span className="font-bold text-xin-blue">{formatCurrency(data.value)}</span>
                                       </div>
                                       <div className="space-y-2 pl-4 border-l-2 border-slate-100">
@@ -407,49 +416,43 @@ const NetWorth: React.FC = () => {
 
   // Tab 3: Net Worth
   const renderNetWorth = () => {
-      // Group all data by Year-Quarter
-      const timeMap = new Map<string, { time: string, timestamp: number, assets: number, liabilities: number, netWorth: number }>();
-      
-      const addToMap = (item: RecordItem, type: 'assets' | 'liabilities') => {
-          // Skip if year is N/A
-          if (!item.year || item.year === 'N/A') return;
+      const finalChartData = useMemo(() => {
+          const timeMap = new Map<string, { time: string, timestamp: number, assets: number, liabilities: number, netWorth: number }>();
+          
+          const addToMap = (item: RecordItem, type: 'assets' | 'liabilities') => {
+              if (!item.year || item.year === 'N/A') return;
 
-          const itemYear = item.year;
-          
-          // Fallback to Q1 if quarter is missing or 'N/A'
-          const quarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
-          
-          const key = `${itemYear} ${quarter}`;
-          if (!timeMap.has(key)) {
-              // Create a consistent timestamp for sorting based on year and quarter
-              const qStr = String(quarter).replace(/[^0-9]/g, '');
-              const qNum = parseInt(qStr, 10) || 1;
-              const mockMonth = (qNum - 1) * 3 + 1; // Q1 -> 1, Q2 -> 4, etc.
-              const timestamp = new Date(`${itemYear}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
+              const itemYear = item.year;
+              const quarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
               
-              timeMap.set(key, { time: key, timestamp, assets: 0, liabilities: 0, netWorth: 0 });
-          }
-          const group = timeMap.get(key)!;
-          // Important: Handle empty values safely
-          const val = Number(item.value) || 0;
-          if (type === 'assets') group.assets += val;
-          if (type === 'liabilities') group.liabilities += val;
-      };
+              const key = `${itemYear} ${quarter}`;
+              if (!timeMap.has(key)) {
+                  const qStr = String(quarter).replace(/[^0-9]/g, '');
+                  const qNum = parseInt(qStr, 10) || 1;
+                  const mockMonth = (qNum - 1) * 3 + 1;
+                  const timestamp = new Date(`${itemYear}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
+                  
+                  timeMap.set(key, { time: key, timestamp, assets: 0, liabilities: 0, netWorth: 0 });
+              }
+              const group = timeMap.get(key)!;
+              const val = Number(item.value) || 0;
+              if (type === 'assets') group.assets += val;
+              if (type === 'liabilities') group.liabilities += val;
+          };
 
-      assets.forEach(item => addToMap(item, 'assets'));
-      liabilities.forEach(item => addToMap(item, 'liabilities'));
+          assets.forEach(item => addToMap(item, 'assets'));
+          liabilities.forEach(item => addToMap(item, 'liabilities'));
 
-      const chartData = Array.from(timeMap.values());
-      
-      // Calculate Net Worth for each quarter after both assets and liabilities are accumulated
-      chartData.forEach(group => {
-          group.netWorth = group.assets - group.liabilities;
-      });
+          const chartData = Array.from(timeMap.values());
+          
+          chartData.forEach(group => {
+              group.netWorth = group.assets - group.liabilities;
+          });
 
-      chartData.sort((a, b) => a.timestamp - b.timestamp);
+          chartData.sort((a, b) => a.timestamp - b.timestamp);
 
-      // Force to array for recharts
-      const finalChartData = [...chartData];
+          return [...chartData];
+      }, [assets, liabilities]);
 
       if (finalChartData.length === 0) {
           return (
