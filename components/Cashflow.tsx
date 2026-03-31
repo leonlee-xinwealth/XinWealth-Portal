@@ -264,50 +264,50 @@ const Cashflow: React.FC = () => {
       }
   }, [selectedYear, availableYears]);
 
+  const dataValues = useMemo(() => {
+      try {
+          const list = activeTab === 'inflow' ? (incomes || []) : (expenses || []);
+          const filteredList = list.filter(item => {
+              if (!item || !item.year || item.year === 'N/A') return false; 
+              
+              if (viewMode === 'annual') {
+                  return String(item.year) === String(selectedYear);
+              } else {
+                  const itemMonth = item.month || '01';
+                  return String(item.year) === String(selectedYear) && String(itemMonth) === String(selectedMonth);
+              }
+          });
+
+          const catMap = new Map<string, { value: number, items: RecordItem[] }>();
+          
+          (filteredList || []).forEach(item => {
+              if (!item || item.value === undefined || item.value === 0) return;
+              
+              if (!catMap.has(item.category)) {
+                  catMap.set(item.category, { value: 0, items: [] });
+              }
+              const group = catMap.get(item.category)!;
+              group.value += item.value;
+              group.items.push(item);
+          });
+          
+          const pData = Array.from(catMap.entries()).map(([name, data]) => ({
+              name,
+              value: data.value
+          })).filter(d => d.value > 0);
+
+          const tValue = pData.reduce((sum, item) => sum + item.value, 0);
+
+          return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+      } catch (err) {
+          console.error("Error in useMemo for Cashflow:", err);
+          return { pieData: [], categoryMap: new Map(), totalValue: 0 };
+      }
+  }, [activeTab, incomes, expenses, viewMode, selectedYear, selectedMonth]);
+
   const renderContent = () => {
-      const dataValues = useMemo(() => {
-          try {
-              const list = activeTab === 'inflow' ? (incomes || []) : (expenses || []);
-              const filteredList = list.filter(item => {
-                  if (!item || !item.year || item.year === 'N/A') return false; 
-                  
-                  if (viewMode === 'annual') {
-                      return String(item.year) === String(selectedYear);
-                  } else {
-                      const itemMonth = item.month || '01';
-                      return String(item.year) === String(selectedYear) && String(itemMonth) === String(selectedMonth);
-                  }
-              });
-
-              const catMap = new Map<string, { value: number, items: RecordItem[] }>();
-              
-              (filteredList || []).forEach(item => {
-                  if (!item || item.value === undefined || item.value === 0) return;
-                  
-                  if (!catMap.has(item.category)) {
-                      catMap.set(item.category, { value: 0, items: [] });
-                  }
-                  const group = catMap.get(item.category)!;
-                  group.value += item.value;
-                  group.items.push(item);
-              });
-              
-              const pData = Array.from(catMap.entries()).map(([name, data]) => ({
-                  name,
-                  value: data.value
-              })).filter(d => d.value > 0);
-
-              const tValue = pData.reduce((sum, item) => sum + item.value, 0);
-
-              return { pieData: pData, categoryMap: catMap, totalValue: tValue };
-          } catch (err) {
-              console.error("Error in useMemo for Cashflow:", err);
-              return { pieData: [], categoryMap: new Map(), totalValue: 0 };
-          }
-      }, [activeTab, incomes, expenses, viewMode, selectedYear, selectedMonth]);
-      
       const pieData = dataValues?.pieData || [];
-      const categoryMap = dataValues?.categoryMap || new Map();
+      const categoryMap = dataValues?.categoryMap || new Map<string, { value: number, items: RecordItem[] }>();
       const totalValue = dataValues?.totalValue || 0;
 
       return (
@@ -387,7 +387,7 @@ const Cashflow: React.FC = () => {
                                           <span className="font-bold text-xin-blue">{formatCurrency(data.value)}</span>
                                       </div>
                                       <div className="space-y-2 pl-4 border-l-2 border-slate-100">
-                                          {data.items.map(item => (
+                                          {data.items.map((item: any) => (
                                               <div key={item.id} className="flex justify-between text-sm">
                                                   <span className="text-slate-500">{item.description}</span>
                                                   <span className="text-slate-700 font-medium">{formatCurrency(item.value)}</span>

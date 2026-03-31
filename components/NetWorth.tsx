@@ -319,45 +319,89 @@ const NetWorth: React.FC = () => {
   }, [selectedQuarter, selectedYear, availableYears]);
 
 
-      // Tab 1 & 2: Assets / Liabilities
-  const renderAssetsOrLiabilities = () => {
-      // Add default values to prevent destructuring errors if useMemo fails or returns undefined somehow
-      const dataValues = useMemo(() => {
-          try {
-              const list = activeTab === 'assets' ? (assets || []) : (liabilities || []);
-              const filteredList = list.filter(item => {
-                  if (!item || !item.year || item.year === 'N/A') return false;
-                  const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
-                  return String(item.year) === String(selectedYear) && String(itemQuarter) === String(selectedQuarter);
-              });
+  // Pre-calculate data for Tabs 1 & 2 (Assets/Liabilities)
+  const dataValues = useMemo(() => {
+      try {
+          const list = activeTab === 'assets' ? (assets || []) : (liabilities || []);
+          const filteredList = list.filter(item => {
+              if (!item || !item.year || item.year === 'N/A') return false;
+              const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
+              return String(item.year) === String(selectedYear) && String(itemQuarter) === String(selectedQuarter);
+          });
+          
+          const catMap = new Map<string, { value: number, items: RecordItem[] }>();
+          
+          filteredList.forEach(item => {
+              if (!item || item.value === undefined || item.value === 0) return;
               
-              const catMap = new Map<string, { value: number, items: RecordItem[] }>();
+              if (!catMap.has(item.category)) {
+                  catMap.set(item.category, { value: 0, items: [] });
+              }
+              const group = catMap.get(item.category)!;
+              group.value += item.value;
+              group.items.push(item);
+          });
+          
+          const pData = Array.from(catMap.entries()).map(([name, data]) => ({
+              name,
+              value: data.value
+          })).filter(d => d.value > 0);
+
+          const tValue = pData.reduce((sum, item) => sum + item.value, 0);
+
+          return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+      } catch (err) {
+          console.error("Error in useMemo for Assets/Liabilities:", err);
+          return { pieData: [], categoryMap: new Map(), totalValue: 0 };
+      }
+  }, [activeTab, assets, liabilities, selectedYear, selectedQuarter]);
+
+  // Pre-calculate data for Tab 3 (Net Worth)
+  const finalChartData = useMemo(() => {
+      try {
+          const timeMap = new Map<string, { time: string, timestamp: number, assets: number, liabilities: number, netWorth: number }>();
+          
+          const addToMap = (item: RecordItem, type: 'assets' | 'liabilities') => {
+              if (!item || !item.year || item.year === 'N/A') return;
+
+              const itemYear = item.year;
+              const quarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
               
-              filteredList.forEach(item => {
-                  if (!item || item.value === undefined || item.value === 0) return;
+              const key = `${itemYear} ${quarter}`;
+              if (!timeMap.has(key)) {
+                  const qStr = String(quarter).replace(/[^0-9]/g, '');
+                  const qNum = parseInt(qStr, 10) || 1;
+                  const mockMonth = (qNum - 1) * 3 + 1;
+                  const timestamp = new Date(`${itemYear}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
                   
-                  if (!catMap.has(item.category)) {
-                      catMap.set(item.category, { value: 0, items: [] });
-                  }
-                  const group = catMap.get(item.category)!;
-                  group.value += item.value;
-                  group.items.push(item);
-              });
-              
-              const pData = Array.from(catMap.entries()).map(([name, data]) => ({
-                  name,
-                  value: data.value
-              })).filter(d => d.value > 0);
+                  timeMap.set(key, { time: key, timestamp, assets: 0, liabilities: 0, netWorth: 0 });
+              }
+              const group = timeMap.get(key)!;
+              const val = Number(item.value) || 0;
+              if (type === 'assets') group.assets += val;
+              if (type === 'liabilities') group.liabilities += val;
+          };
 
-              const tValue = pData.reduce((sum, item) => sum + item.value, 0);
+          (assets || []).forEach(item => addToMap(item, 'assets'));
+          (liabilities || []).forEach(item => addToMap(item, 'liabilities'));
 
-              return { pieData: pData, categoryMap: catMap, totalValue: tValue };
-          } catch (err) {
-              console.error("Error in useMemo for Assets/Liabilities:", err);
-              return { pieData: [], categoryMap: new Map(), totalValue: 0 };
-          }
-      }, [activeTab, assets, liabilities, selectedYear, selectedQuarter]);
-      
+          const chartData = Array.from(timeMap.values());
+          
+          chartData.forEach(group => {
+              group.netWorth = group.assets - group.liabilities;
+          });
+
+          chartData.sort((a, b) => a.timestamp - b.timestamp);
+
+          return [...chartData];
+      } catch (err) {
+          console.error("Error in useMemo for NetWorth:", err);
+          return [];
+      }
+  }, [assets, liabilities]);
+
+  // Tab 1 & 2: Assets / Liabilities
+  const renderAssetsOrLiabilities = () => {
       const pieData = dataValues?.pieData || [];
       const categoryMap = dataValues?.categoryMap || new Map();
       const totalValue = dataValues?.totalValue || 0;
@@ -439,7 +483,7 @@ const NetWorth: React.FC = () => {
                                           <span className="font-bold text-xin-blue">{formatCurrency(data.value)}</span>
                                       </div>
                                       <div className="space-y-2 pl-4 border-l-2 border-slate-100">
-                                          {data.items.map(item => (
+                                          {data.items.map((item: any) => (
                                               <div key={item.id} className="flex justify-between text-sm">
                                                   <span className="text-slate-500">{item.description}</span>
                                                   <span className="text-slate-700 font-medium">{formatCurrency(item.value)}</span>
@@ -462,48 +506,6 @@ const NetWorth: React.FC = () => {
 
   // Tab 3: Net Worth
   const renderNetWorth = () => {
-      const finalChartData = useMemo(() => {
-          try {
-              const timeMap = new Map<string, { time: string, timestamp: number, assets: number, liabilities: number, netWorth: number }>();
-              
-              const addToMap = (item: RecordItem, type: 'assets' | 'liabilities') => {
-                  if (!item || !item.year || item.year === 'N/A') return;
-
-                  const itemYear = item.year;
-                  const quarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
-                  
-                  const key = `${itemYear} ${quarter}`;
-                  if (!timeMap.has(key)) {
-                      const qStr = String(quarter).replace(/[^0-9]/g, '');
-                      const qNum = parseInt(qStr, 10) || 1;
-                      const mockMonth = (qNum - 1) * 3 + 1;
-                      const timestamp = new Date(`${itemYear}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
-                      
-                      timeMap.set(key, { time: key, timestamp, assets: 0, liabilities: 0, netWorth: 0 });
-                  }
-                  const group = timeMap.get(key)!;
-                  const val = Number(item.value) || 0;
-                  if (type === 'assets') group.assets += val;
-                  if (type === 'liabilities') group.liabilities += val;
-              };
-
-              (assets || []).forEach(item => addToMap(item, 'assets'));
-              (liabilities || []).forEach(item => addToMap(item, 'liabilities'));
-
-              const chartData = Array.from(timeMap.values());
-              
-              chartData.forEach(group => {
-                  group.netWorth = group.assets - group.liabilities;
-              });
-
-              chartData.sort((a, b) => a.timestamp - b.timestamp);
-
-              return [...chartData];
-          } catch (err) {
-              console.error("Error in useMemo for NetWorth:", err);
-              return [];
-          }
-      }, [assets, liabilities]);
 
       if (!finalChartData || finalChartData.length === 0) {
           return (
