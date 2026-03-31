@@ -55,11 +55,15 @@ const Retirement: React.FC = () => {
 
   // User profile defaults
   const [currentAge, setCurrentAge] = useState<number>(30);
-  const [retirementAge, setRetirementAge] = useState<number>(55);
+  const [retirementAge, setRetirementAge] = useState<number | string>(55);
   
   // Projection assumptions
-  const [salaryGrowthRate, setSalaryGrowthRate] = useState<number>(5); // 5%
-  const [inflationRate, setInflationRate] = useState<number>(4); // 4%
+  const [salaryGrowthRate, setSalaryGrowthRate] = useState<number | string>(5); // 5%
+  const [inflationRate, setInflationRate] = useState<number | string>(4); // 4%
+
+  // We need to keep track of the initial loaded values to avoid infinite loops if we re-fetch
+  const [hasLoadedBaseData, setHasLoadedBaseData] = useState(false);
+  const [rawData, setRawData] = useState<any>(null);
 
   // Base financial data
   const [chartData, setChartData] = useState<any[]>([]);
@@ -83,174 +87,9 @@ const Retirement: React.FC = () => {
         setCurrentAge(cAge);
         setRetirementAge(rAge);
 
-        const rawData = await fetchRawHealthData();
-        
-        // Find oldest year from incomes and expenses
-        let oldestYear = new Date().getFullYear();
-        const currentYear = new Date().getFullYear();
-        
-        const processYear = (item: any) => {
-           const yearStr = extractString(item, ["Year", "year"], "");
-           if (yearStr) {
-              const y = parseInt(yearStr, 10);
-              if (!isNaN(y) && y > 1900 && y <= currentYear) {
-                 if (y < oldestYear) oldestYear = y;
-              }
-           }
-        };
-
-        (rawData.incomes || []).forEach(processYear);
-        (rawData.expenses || []).forEach(processYear);
-
-        // Group data by year
-        const yearlyData = new Map<number, { activeInc: number, passiveInc: number, expenses: number }>();
-        
-        for (let y = oldestYear; y <= currentYear; y++) {
-           yearlyData.set(y, { activeInc: 0, passiveInc: 0, expenses: 0 });
-        }
-
-        (rawData.incomes || []).forEach((item: any) => {
-           const yearStr = extractString(item, ["Year", "year"], "");
-           let y = parseInt(yearStr, 10);
-           if (isNaN(y) || y > currentYear || y < oldestYear) y = currentYear;
-           
-           let val = extractValue(item, ["Amount", "amount"]);
-           const cat = extractString(item, ["Category", "category"]);
-           
-           if (!yearlyData.has(y)) yearlyData.set(y, { activeInc: 0, passiveInc: 0, expenses: 0 });
-           const data = yearlyData.get(y)!;
-
-           if (cat === 'Annual Bonus') {
-             data.activeInc += val;
-           } else if (cat === 'Rental Income' || cat === 'Dividend Income') {
-             data.passiveInc += (val * 12); // Assuming monthly input
-           } else {
-             data.activeInc += (val * 12); // Assuming monthly salary
-           }
-        });
-
-        (rawData.expenses || []).forEach((item: any) => {
-           const yearStr = extractString(item, ["Year", "year"], "");
-           let y = parseInt(yearStr, 10);
-           if (isNaN(y) || y > currentYear || y < oldestYear) y = currentYear;
-           
-           let val = extractValue(item, ["Amount", "amount"]);
-           const type = extractString(item, ["Type", "type"]);
-           
-           if (!yearlyData.has(y)) yearlyData.set(y, { activeInc: 0, passiveInc: 0, expenses: 0 });
-           const data = yearlyData.get(y)!;
-
-           if (type === 'Vacation/ Travel' || type === 'Income Tax Expense') {
-              data.expenses += val;
-           } else {
-              data.expenses += (val * 12);
-           }
-        });
-
-        // We also need starting savings. The prompt says "从客户填写的最旧的数据开始展示，每一年的收入减掉开销，所剩下的钱为储蓄".
-        // Let's assume starting savings before oldestYear is 0, and we accumulate.
-        // But what about existing assets? The prompt says "所剩下的钱为储蓄（savings）".
-        // If they have existing Cash/FD, maybe we add it to the first year? Or just purely calculate from cashflow?
-        // Let's add current assets to the current year's savings to be accurate, or just add all cash/FD to the oldest year?
-        // Safest: Initial Savings at oldestYear = 0. We accumulate.
-        // Wait, what if they have millions in FD but no income data? It will show shortfall.
-        // Let's get current Cash/FD.
-        let totalCashFD = 0;
-        (rawData.assets || []).forEach((item: any) => {
-          const val = extractValue(item, ["Value", "value", "Amount", "amount"]);
-          const cat = extractString(item, ["Category", "category"]);
-          if (cat === "Cash/Savings" || cat === "Savings" || cat === "Savings/Current Account" || cat === "Fixed Deposit" || cat === "Money Market Fund For Savings") {
-            totalCashFD += val;
-          }
-        });
-
-        // Calculate age at oldest year
-        const startAge = cAge - (currentYear - oldestYear);
-        
-        // Prepare projection data
-        const data = [];
-        let currentSavings = 0; // We'll add totalCashFD to the current year later to sync with reality, or just add to start. Let's add to start year to ensure it's available.
-        currentSavings += totalCashFD; // Add existing assets to start
-        
-        // We will project from oldestYear up to when age is 100
-        const endYear = oldestYear + (100 - startAge);
-        
-        let lastKnownActiveInc = 0;
-        let lastKnownPassiveInc = 0;
-        let lastKnownExpenses = 0;
-
-        for (let y = oldestYear; y <= endYear; y++) {
-           const age = startAge + (y - oldestYear);
-           let activeInc = 0;
-           let passiveInc = 0;
-           let expenses = 0;
-
-           if (y <= currentYear) {
-              // Historical data
-              const yd = yearlyData.get(y);
-              if (yd) {
-                 activeInc = yd.activeInc;
-                 passiveInc = yd.passiveInc;
-                 expenses = yd.expenses;
-                 
-                 if (activeInc > 0) lastKnownActiveInc = activeInc;
-                 if (passiveInc > 0) lastKnownPassiveInc = passiveInc;
-                 if (expenses > 0) lastKnownExpenses = expenses;
-              } else {
-                 // Missing historical year, use last known
-                 activeInc = lastKnownActiveInc;
-                 passiveInc = lastKnownPassiveInc;
-                 expenses = lastKnownExpenses;
-              }
-           } else {
-              // Projection
-              activeInc = age >= rAge ? 0 : lastKnownActiveInc * Math.pow(1 + salaryGrowthRate / 100, y - currentYear);
-              passiveInc = lastKnownPassiveInc; // Keep constant
-              expenses = lastKnownExpenses * Math.pow(1 + inflationRate / 100, y - currentYear);
-           }
-
-           // Only apply active income if before retirement age
-           if (age >= rAge) activeInc = 0;
-
-           let totalInc = activeInc + passiveInc;
-           let takeHomeUsed = 0;
-           let passiveUsed = 0;
-           let cashUsed = 0;
-           let shortfall = 0;
-
-           if (totalInc >= expenses) {
-             takeHomeUsed = Math.min(activeInc, expenses);
-             passiveUsed = expenses - takeHomeUsed;
-             currentSavings += (totalInc - expenses);
-           } else {
-             takeHomeUsed = activeInc;
-             passiveUsed = passiveInc;
-             let remainingExpenses = expenses - totalInc;
-             
-             if (currentSavings >= remainingExpenses) {
-               cashUsed = remainingExpenses;
-               currentSavings -= remainingExpenses;
-             } else {
-               cashUsed = currentSavings;
-               shortfall = remainingExpenses - currentSavings;
-               currentSavings = 0;
-             }
-           }
-
-           data.push({
-             age,
-             year: y,
-             expenses,
-             takeHomeUsed,
-             passiveUsed,
-             cashUsed,
-             shortfall,
-             savings: currentSavings
-           });
-        }
-        
-        setChartData(data);
-
+        const data = await fetchRawHealthData();
+        setRawData(data);
+        setHasLoadedBaseData(true);
       } catch (err: any) {
         setError(err.message || 'Failed to load data');
       } finally {
@@ -258,7 +97,175 @@ const Retirement: React.FC = () => {
       }
     };
     loadData();
-  }, [salaryGrowthRate, inflationRate]); // Re-run when growth rates change
+  }, []); // Only run once on mount
+
+  useEffect(() => {
+    if (!hasLoadedBaseData || !rawData) return;
+    
+    try {
+      // Find oldest year from incomes and expenses
+      let oldestYear = new Date().getFullYear();
+      const currentYear = new Date().getFullYear();
+      
+      const processYear = (item: any) => {
+         const yearStr = extractString(item, ["Year", "year"], "");
+         if (yearStr) {
+            const y = parseInt(yearStr, 10);
+            if (!isNaN(y) && y > 1900 && y <= currentYear) {
+               if (y < oldestYear) oldestYear = y;
+            }
+         }
+      };
+
+      (rawData.incomes || []).forEach(processYear);
+      (rawData.expenses || []).forEach(processYear);
+
+      // Group data by year
+      const yearlyData = new Map<number, { activeInc: number, passiveInc: number, expenses: number }>();
+      
+      for (let y = oldestYear; y <= currentYear; y++) {
+         yearlyData.set(y, { activeInc: 0, passiveInc: 0, expenses: 0 });
+      }
+
+      (rawData.incomes || []).forEach((item: any) => {
+         const yearStr = extractString(item, ["Year", "year"], "");
+         let y = parseInt(yearStr, 10);
+         if (isNaN(y) || y > currentYear || y < oldestYear) y = currentYear;
+         
+         let val = extractValue(item, ["Amount", "amount"]);
+         const cat = extractString(item, ["Category", "category"]);
+         
+         if (!yearlyData.has(y)) yearlyData.set(y, { activeInc: 0, passiveInc: 0, expenses: 0 });
+         const data = yearlyData.get(y)!;
+
+         if (cat === 'Annual Bonus') {
+           data.activeInc += val;
+         } else if (cat === 'Rental Income' || cat === 'Dividend Income') {
+           data.passiveInc += (val * 12); // Assuming monthly input
+         } else {
+           data.activeInc += (val * 12); // Assuming monthly salary
+         }
+      });
+
+      (rawData.expenses || []).forEach((item: any) => {
+         const yearStr = extractString(item, ["Year", "year"], "");
+         let y = parseInt(yearStr, 10);
+         if (isNaN(y) || y > currentYear || y < oldestYear) y = currentYear;
+         
+         let val = extractValue(item, ["Amount", "amount"]);
+         const type = extractString(item, ["Type", "type"]);
+         
+         if (!yearlyData.has(y)) yearlyData.set(y, { activeInc: 0, passiveInc: 0, expenses: 0 });
+         const data = yearlyData.get(y)!;
+
+         if (type === 'Vacation/ Travel' || type === 'Income Tax Expense') {
+            data.expenses += val;
+         } else {
+            data.expenses += (val * 12);
+         }
+      });
+
+      let totalCashFD = 0;
+      (rawData.assets || []).forEach((item: any) => {
+        const val = extractValue(item, ["Value", "value", "Amount", "amount"]);
+        const cat = extractString(item, ["Category", "category"]);
+        if (cat === "Cash/Savings" || cat === "Savings" || cat === "Savings/Current Account" || cat === "Fixed Deposit" || cat === "Money Market Fund For Savings") {
+          totalCashFD += val;
+        }
+      });
+
+      // Calculate age at oldest year
+      const startAge = currentAge - (currentYear - oldestYear);
+      
+      // Prepare projection data
+      const data = [];
+      let currentSavings = 0; 
+      currentSavings += totalCashFD; 
+      
+      const endYear = oldestYear + (100 - startAge);
+      
+      let lastKnownActiveInc = 0;
+      let lastKnownPassiveInc = 0;
+      let lastKnownExpenses = 0;
+
+      const numRetirementAge = Number(retirementAge) || 55;
+      const numSalaryGrowth = Number(salaryGrowthRate) || 0;
+      const numInflation = Number(inflationRate) || 0;
+
+      for (let y = oldestYear; y <= endYear; y++) {
+         const age = startAge + (y - oldestYear);
+         let activeInc = 0;
+         let passiveInc = 0;
+         let expenses = 0;
+
+         if (y <= currentYear) {
+            // Historical data
+            const yd = yearlyData.get(y);
+            if (yd) {
+               activeInc = yd.activeInc;
+               passiveInc = yd.passiveInc;
+               expenses = yd.expenses;
+               
+               if (activeInc > 0) lastKnownActiveInc = activeInc;
+               if (passiveInc > 0) lastKnownPassiveInc = passiveInc;
+               if (expenses > 0) lastKnownExpenses = expenses;
+            } else {
+               activeInc = lastKnownActiveInc;
+               passiveInc = lastKnownPassiveInc;
+               expenses = lastKnownExpenses;
+            }
+         } else {
+            // Projection
+            activeInc = age >= numRetirementAge ? 0 : lastKnownActiveInc * Math.pow(1 + numSalaryGrowth / 100, y - currentYear);
+            passiveInc = lastKnownPassiveInc; // Keep constant
+            expenses = lastKnownExpenses * Math.pow(1 + numInflation / 100, y - currentYear);
+         }
+
+         if (age >= numRetirementAge) activeInc = 0;
+
+         let totalInc = activeInc + passiveInc;
+         let takeHomeUsed = 0;
+         let passiveUsed = 0;
+         let cashUsed = 0;
+         let shortfall = 0;
+
+         if (totalInc >= expenses) {
+           takeHomeUsed = Math.min(activeInc, expenses);
+           passiveUsed = expenses - takeHomeUsed;
+           currentSavings += (totalInc - expenses);
+         } else {
+           takeHomeUsed = activeInc;
+           passiveUsed = passiveInc;
+           let remainingExpenses = expenses - totalInc;
+           
+           if (currentSavings >= remainingExpenses) {
+             cashUsed = remainingExpenses;
+             currentSavings -= remainingExpenses;
+           } else {
+             cashUsed = currentSavings;
+             shortfall = remainingExpenses - currentSavings;
+             currentSavings = 0;
+           }
+         }
+
+         data.push({
+           age,
+           year: y,
+           expenses,
+           takeHomeUsed,
+           passiveUsed,
+           cashUsed,
+           shortfall,
+           savings: currentSavings
+         });
+      }
+      
+      setChartData(data);
+
+    } catch (err: any) {
+      console.error('Calculation error:', err);
+    }
+  }, [hasLoadedBaseData, rawData, currentAge, retirementAge, salaryGrowthRate, inflationRate]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-MY', {
@@ -348,7 +355,7 @@ const Retirement: React.FC = () => {
           <input 
             type="number" 
             value={salaryGrowthRate} 
-            onChange={(e) => setSalaryGrowthRate(Number(e.target.value))}
+            onChange={(e) => setSalaryGrowthRate(e.target.value === '' ? '' : Number(e.target.value))}
             className="w-full text-2xl font-bold text-xin-blue bg-transparent border-b-2 border-slate-200 focus:border-xin-blue focus:outline-none pb-1 transition-colors"
             step="0.1"
           />
@@ -360,7 +367,7 @@ const Retirement: React.FC = () => {
           <input 
             type="number" 
             value={inflationRate} 
-            onChange={(e) => setInflationRate(Number(e.target.value))}
+            onChange={(e) => setInflationRate(e.target.value === '' ? '' : Number(e.target.value))}
             className="w-full text-2xl font-bold text-xin-blue bg-transparent border-b-2 border-slate-200 focus:border-xin-blue focus:outline-none pb-1 transition-colors"
             step="0.1"
           />
@@ -372,7 +379,7 @@ const Retirement: React.FC = () => {
           <input 
             type="number" 
             value={retirementAge} 
-            onChange={(e) => setRetirementAge(Number(e.target.value))}
+            onChange={(e) => setRetirementAge(e.target.value === '' ? '' : Number(e.target.value))}
             className="w-full text-2xl font-bold text-xin-blue bg-transparent border-b-2 border-slate-200 focus:border-xin-blue focus:outline-none pb-1 transition-colors"
           />
         </div>

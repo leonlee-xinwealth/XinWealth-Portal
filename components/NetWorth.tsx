@@ -9,6 +9,7 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'
 
 // Helpers
 const extractValue = (item: any, fields: string[]): number => {
+  if (!item || !item.fields) return 0;
   for (const field of fields) {
     if (item.fields[field] !== undefined) {
        let val = item.fields[field];
@@ -16,10 +17,10 @@ const extractValue = (item: any, fields: string[]): number => {
        // Handle arrays (e.g., lookup or formula fields returning arrays)
        if (Array.isArray(val) && val.length > 0) {
            val = val[0];
-           if (typeof val === 'object' && val.text) val = val.text;
+           if (val && typeof val === 'object' && val.text) val = val.text;
        }
        // Handle objects
-       else if (typeof val === 'object' && val !== null && val.text) {
+       else if (val && typeof val === 'object' && val !== null && val.text) {
            val = val.text;
        }
 
@@ -33,14 +34,15 @@ const extractValue = (item: any, fields: string[]): number => {
 };
 
 const extractString = (item: any, fields: string[], defaultValue: string = 'Unknown'): string => {
+  if (!item || !item.fields) return defaultValue;
   for (const field of fields) {
     if (item.fields[field] !== undefined) {
        let val = item.fields[field];
        if (Array.isArray(val) && val.length > 0) {
-           if (typeof val[0] === 'object' && val[0].text) return val[0].text;
+           if (val[0] && typeof val[0] === 'object' && val[0].text) return val[0].text;
            return String(val[0]);
        }
-       if (typeof val === 'object' && val.text) return val.text;
+       if (val && typeof val === 'object' && val.text) return val.text;
        return String(val);
     }
   }
@@ -48,6 +50,9 @@ const extractString = (item: any, fields: string[], defaultValue: string = 'Unkn
 };
 
 const parseDate = (item: any) => {
+    if (!item || !item.fields) {
+        return { year: 'N/A', month: 'N/A', timestamp: 0 };
+    }
     // First check specific Quarter/Year fields if any are present from the API or custom logic
     const quarterStr = extractString(item, ["Quarter", "quarter"], "");
     const yearStr = extractString(item, ["Year", "year"], "");
@@ -152,24 +157,37 @@ const getQuarter = (monthStr: string): string => {
 };
 
 const mapRecords = (rawArray: any[], valueFields: string[], defaultCategory?: string): RecordItem[] => {
-  return (rawArray || []).map(item => {
-    const d = parseDate(item);
-    // Explicitly check for Quarter field in raw item, otherwise derive from month
-    const explicitQuarter = extractString(item, ["Quarter", "quarter"], "");
-    const finalQuarter = explicitQuarter ? explicitQuarter.toUpperCase() : getQuarter(d.month);
-    
-    return {
-      id: item.id || Math.random().toString(),
-      year: d.year,
-      month: d.month,
-      quarter: finalQuarter,
-      timestamp: d.timestamp,
-      category: defaultCategory || extractString(item, ["Category", "category", "Type", "type"]),
-      description: extractString(item, ["Description", "description", "Name", "name", "Item", "item", "Fund Name", "fund name", "Investment Name", "investment name"]),
-      value: extractValue(item, valueFields)
-    };
-  });
-};
+    return (rawArray || []).map(item => {
+      if (!item || !item.fields) {
+          return {
+            id: Math.random().toString(),
+            year: 'N/A',
+            month: 'N/A',
+            quarter: 'Q1',
+            timestamp: 0,
+            category: defaultCategory || 'Unknown',
+            description: 'Unknown',
+            value: 0
+          };
+      }
+      
+      const d = parseDate(item);
+      // Explicitly check for Quarter field in raw item, otherwise derive from month
+      const explicitQuarter = extractString(item, ["Quarter", "quarter"], "");
+      const finalQuarter = explicitQuarter ? explicitQuarter.toUpperCase() : getQuarter(d.month);
+      
+      return {
+        id: item.id || Math.random().toString(),
+        year: d.year || 'N/A',
+        month: d.month || 'N/A',
+        quarter: finalQuarter || 'Q1',
+        timestamp: d.timestamp || 0,
+        category: defaultCategory || extractString(item, ["Category", "category", "Type", "type"]),
+        description: extractString(item, ["Description", "description", "Name", "name", "Item", "item", "Fund Name", "fund name", "Investment Name", "investment name"]),
+        value: extractValue(item, valueFields)
+      };
+    });
+  };
 
 const NetWorth: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('assets');
@@ -205,8 +223,8 @@ const NetWorth: React.FC = () => {
         let latestYear = '';
         let latestQuarter = '';
         
-        [...combinedAssets, ...parsedLiabilities].forEach(item => {
-            if (!item.year || item.year === 'N/A') return;
+        [...(combinedAssets || []), ...(parsedLiabilities || [])].forEach(item => {
+            if (!item || !item.year || item.year === 'N/A') return;
             const itemYear = item.year;
             const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
             
@@ -238,23 +256,28 @@ const NetWorth: React.FC = () => {
 
   // Dropdown options
   const availableYears = useMemo(() => {
-      const years = new Set<string>();
-      
-      // Always collect years from both lists to ensure dropdown has options
-      // even if one list is empty for a particular year
-      assets.forEach(item => { 
-          if (item.year && item.year !== 'N/A') years.add(item.year); 
-      });
-      liabilities.forEach(item => { 
-          if (item.year && item.year !== 'N/A') years.add(item.year); 
-      });
-      
-      // Only include current year if no data is present at all to avoid confusing UI
-      if (years.size === 0) {
-          years.add(new Date().getFullYear().toString());
+      try {
+          const years = new Set<string>();
+          
+          // Always collect years from both lists to ensure dropdown has options
+          // even if one list is empty for a particular year
+          (assets || []).forEach(item => { 
+              if (item && item.year && item.year !== 'N/A') years.add(item.year); 
+          });
+          (liabilities || []).forEach(item => { 
+              if (item && item.year && item.year !== 'N/A') years.add(item.year); 
+          });
+          
+          // Only include current year if no data is present at all to avoid confusing UI
+          if (years.size === 0) {
+              years.add(new Date().getFullYear().toString());
+          }
+          
+          return Array.from(years).sort((a, b) => b.localeCompare(a));
+      } catch (err) {
+          console.error("Error in availableYears useMemo:", err);
+          return [new Date().getFullYear().toString()];
       }
-      
-      return Array.from(years).sort((a, b) => b.localeCompare(a));
   }, [assets, liabilities]);
 
   const availableQuarters = useMemo(() => {
@@ -270,50 +293,60 @@ const NetWorth: React.FC = () => {
 
   // Ensure selected quarter is valid when year changes
   useEffect(() => {
-      if (!selectedQuarter) {
-          setSelectedQuarter('Q1');
-      }
-      if (!selectedYear || !availableYears.includes(selectedYear)) {
-          if (availableYears.length > 0) {
-              setSelectedYear(availableYears[0]);
-          } else {
-              setSelectedYear(new Date().getFullYear().toString());
+      try {
+          if (!selectedQuarter) {
+              setSelectedQuarter('Q1');
           }
+          if (!selectedYear || (availableYears && !availableYears.includes(selectedYear))) {
+              if (availableYears && availableYears.length > 0) {
+                  setSelectedYear(availableYears[0]);
+              } else {
+                  setSelectedYear(new Date().getFullYear().toString());
+              }
+          }
+      } catch (err) {
+          console.error("Error in selection effect:", err);
       }
   }, [selectedQuarter, selectedYear, availableYears]);
 
 
       // Tab 1 & 2: Assets / Liabilities
   const renderAssetsOrLiabilities = () => {
-      const { pieData, categoryMap, totalValue } = useMemo(() => {
-          const list = activeTab === 'assets' ? assets : liabilities;
-          const filteredList = list.filter(item => {
-              if (!item.year || item.year === 'N/A') return false;
-              const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
-              return String(item.year) === String(selectedYear) && String(itemQuarter) === String(selectedQuarter);
-          });
-          
-          const catMap = new Map<string, { value: number, items: RecordItem[] }>();
-          
-          filteredList.forEach(item => {
-              if (item.value === undefined || item.value === 0) return;
+      // Add default values to prevent destructuring errors if useMemo fails or returns undefined somehow
+      const { pieData = [], categoryMap = new Map(), totalValue = 0 } = useMemo(() => {
+          try {
+              const list = activeTab === 'assets' ? (assets || []) : (liabilities || []);
+              const filteredList = list.filter(item => {
+                  if (!item || !item.year || item.year === 'N/A') return false;
+                  const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
+                  return String(item.year) === String(selectedYear) && String(itemQuarter) === String(selectedQuarter);
+              });
               
-              if (!catMap.has(item.category)) {
-                  catMap.set(item.category, { value: 0, items: [] });
-              }
-              const group = catMap.get(item.category)!;
-              group.value += item.value;
-              group.items.push(item);
-          });
-          
-          const pData = Array.from(catMap.entries()).map(([name, data]) => ({
-              name,
-              value: data.value
-          })).filter(d => d.value > 0);
+              const catMap = new Map<string, { value: number, items: RecordItem[] }>();
+              
+              filteredList.forEach(item => {
+                  if (!item || item.value === undefined || item.value === 0) return;
+                  
+                  if (!catMap.has(item.category)) {
+                      catMap.set(item.category, { value: 0, items: [] });
+                  }
+                  const group = catMap.get(item.category)!;
+                  group.value += item.value;
+                  group.items.push(item);
+              });
+              
+              const pData = Array.from(catMap.entries()).map(([name, data]) => ({
+                  name,
+                  value: data.value
+              })).filter(d => d.value > 0);
 
-          const tValue = pData.reduce((sum, item) => sum + item.value, 0);
+              const tValue = pData.reduce((sum, item) => sum + item.value, 0);
 
-          return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+              return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+          } catch (err) {
+              console.error("Error in useMemo for Assets/Liabilities:", err);
+              return { pieData: [], categoryMap: new Map(), totalValue: 0 };
+          }
       }, [activeTab, assets, liabilities, selectedYear, selectedQuarter]);
 
       return (
@@ -417,44 +450,49 @@ const NetWorth: React.FC = () => {
   // Tab 3: Net Worth
   const renderNetWorth = () => {
       const finalChartData = useMemo(() => {
-          const timeMap = new Map<string, { time: string, timestamp: number, assets: number, liabilities: number, netWorth: number }>();
-          
-          const addToMap = (item: RecordItem, type: 'assets' | 'liabilities') => {
-              if (!item.year || item.year === 'N/A') return;
-
-              const itemYear = item.year;
-              const quarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
+          try {
+              const timeMap = new Map<string, { time: string, timestamp: number, assets: number, liabilities: number, netWorth: number }>();
               
-              const key = `${itemYear} ${quarter}`;
-              if (!timeMap.has(key)) {
-                  const qStr = String(quarter).replace(/[^0-9]/g, '');
-                  const qNum = parseInt(qStr, 10) || 1;
-                  const mockMonth = (qNum - 1) * 3 + 1;
-                  const timestamp = new Date(`${itemYear}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
+              const addToMap = (item: RecordItem, type: 'assets' | 'liabilities') => {
+                  if (!item || !item.year || item.year === 'N/A') return;
+
+                  const itemYear = item.year;
+                  const quarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
                   
-                  timeMap.set(key, { time: key, timestamp, assets: 0, liabilities: 0, netWorth: 0 });
-              }
-              const group = timeMap.get(key)!;
-              const val = Number(item.value) || 0;
-              if (type === 'assets') group.assets += val;
-              if (type === 'liabilities') group.liabilities += val;
-          };
+                  const key = `${itemYear} ${quarter}`;
+                  if (!timeMap.has(key)) {
+                      const qStr = String(quarter).replace(/[^0-9]/g, '');
+                      const qNum = parseInt(qStr, 10) || 1;
+                      const mockMonth = (qNum - 1) * 3 + 1;
+                      const timestamp = new Date(`${itemYear}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
+                      
+                      timeMap.set(key, { time: key, timestamp, assets: 0, liabilities: 0, netWorth: 0 });
+                  }
+                  const group = timeMap.get(key)!;
+                  const val = Number(item.value) || 0;
+                  if (type === 'assets') group.assets += val;
+                  if (type === 'liabilities') group.liabilities += val;
+              };
 
-          assets.forEach(item => addToMap(item, 'assets'));
-          liabilities.forEach(item => addToMap(item, 'liabilities'));
+              (assets || []).forEach(item => addToMap(item, 'assets'));
+              (liabilities || []).forEach(item => addToMap(item, 'liabilities'));
 
-          const chartData = Array.from(timeMap.values());
-          
-          chartData.forEach(group => {
-              group.netWorth = group.assets - group.liabilities;
-          });
+              const chartData = Array.from(timeMap.values());
+              
+              chartData.forEach(group => {
+                  group.netWorth = group.assets - group.liabilities;
+              });
 
-          chartData.sort((a, b) => a.timestamp - b.timestamp);
+              chartData.sort((a, b) => a.timestamp - b.timestamp);
 
-          return [...chartData];
+              return [...chartData];
+          } catch (err) {
+              console.error("Error in useMemo for NetWorth:", err);
+              return [];
+          }
       }, [assets, liabilities]);
 
-      if (finalChartData.length === 0) {
+      if (!finalChartData || finalChartData.length === 0) {
           return (
               <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm min-h-[300px] flex items-center justify-center">
                   <p className="text-slate-400">No historical data available to generate charts.</p>
@@ -565,18 +603,18 @@ const NetWorth: React.FC = () => {
         {activeTab !== 'networth' && (
             <div className="flex gap-3">
                 <select 
-                    value={selectedYear} 
+                    value={selectedYear || ''} 
                     onChange={(e) => setSelectedYear(e.target.value)}
                     className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue"
                 >
-                    {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
+                    {(availableYears || []).map(y => <option key={y} value={y}>{y}</option>)}
                 </select>
                 <select 
-                    value={selectedQuarter} 
+                    value={selectedQuarter || ''} 
                     onChange={(e) => setSelectedQuarter(e.target.value)}
                     className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue"
                 >
-                    {availableQuarters.map(q => <option key={q.id} value={q.id}>{q.label}</option>)}
+                    {(availableQuarters || []).map(q => <option key={q.id} value={q.id}>{q.label}</option>)}
                 </select>
             </div>
         )}
