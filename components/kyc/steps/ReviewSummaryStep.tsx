@@ -202,44 +202,6 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                         )}
                     </div>
 
-                    {/* Assets */}
-                    <div>
-                        <SectionHeader 
-                            icon={Home} 
-                            title={t('review.assets')} 
-                            onEdit={onEditStep} 
-                            stepId="assets" 
-                            totalLabel={t('review.total')} 
-                            totalValue={formatCurrency(totalAssets)} 
-                        />
-                        {totalAssets > 0 ? (
-                            <div className="space-y-2">
-                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
-                        )}
-                    </div>
-
-                    {/* Liabilities */}
-                    <div>
-                        <SectionHeader 
-                            icon={Umbrella} 
-                            title={t('review.liabilities')} 
-                            onEdit={onEditStep} 
-                            stepId="liabilities" 
-                            totalLabel={t('review.total')} 
-                            totalValue={formatCurrency(totalLiabilities)} 
-                        />
-                        {totalLiabilities > 0 ? (
-                            <div className="space-y-2">
-                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
-                        )}
-                    </div>
-
                     {/* Expenses */}
                     <div>
                         <SectionHeader 
@@ -259,6 +221,25 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                         )}
                     </div>
 
+                    {/* Assets */}
+                    <div>
+                        <SectionHeader 
+                            icon={Home} 
+                            title={t('review.assets')} 
+                            onEdit={onEditStep} 
+                            stepId="assets" 
+                            totalLabel={t('review.total')} 
+                            totalValue={formatCurrency(totalAssets)} 
+                        />
+                        {totalAssets > 0 ? (
+                            <div className="space-y-2">
+                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
+                            </div>
+                        ) : (
+                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
+                        )}
+                    </div>
+
                     {/* Investments */}
                     <div>
                         <SectionHeader 
@@ -270,6 +251,25 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                             totalValue={formatCurrency(totalInvestments)} 
                         />
                         {totalInvestments > 0 ? (
+                            <div className="space-y-2">
+                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
+                            </div>
+                        ) : (
+                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
+                        )}
+                    </div>
+
+                    {/* Liabilities */}
+                    <div>
+                        <SectionHeader 
+                            icon={Umbrella} 
+                            title={t('review.liabilities')} 
+                            onEdit={onEditStep} 
+                            stepId="liabilities" 
+                            totalLabel={t('review.total')} 
+                            totalValue={formatCurrency(totalLiabilities)} 
+                        />
+                        {totalLiabilities > 0 ? (
                             <div className="space-y-2">
                                 <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
                             </div>

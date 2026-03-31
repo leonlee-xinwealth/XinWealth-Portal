@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { KYCData, FinancialItem, KYCInvestmentsData } from '../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Trash2, ChevronDown, ChevronUp, PlusCircle, TrendingUp, Briefcase, Landmark, DollarSign, Wallet, LineChart, Building2, FolderPlus } from 'lucide-react';
+import { Trash2, ChevronDown, ChevronUp, PlusCircle, TrendingUp, Briefcase, DollarSign, Wallet, LineChart, Building2, FolderPlus, Home } from 'lucide-react';
 import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
 
 interface InvestmentsStepProps {
@@ -182,7 +182,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                     {renderExpandableInvestmentCard(t('investments.bonds'), Briefcase, "bonds")}
                     {renderExpandableInvestmentCard(t('investments.stocks'), LineChart, "stocks")}
                     {renderExpandableInvestmentCard(t('investments.unitTrusts'), Building2, "unitTrusts")}
-                    {renderExpandableInvestmentCard(t('investments.fixedDeposits'), Landmark, "fixedDeposits")}
+                    {renderExpandableInvestmentCard(t('investments.fixedDeposits'), Home, "fixedDeposits")}
                     {renderExpandableInvestmentCard(t('investments.forex'), DollarSign, "forex")}
                     {renderExpandableInvestmentCard(t('investments.money'), Wallet, "moneyMarket")}
                     {renderExpandableInvestmentCard(t('investments.others'), FolderPlus, "otherInvestments")}

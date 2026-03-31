@@ -6,6 +6,7 @@ import FinancialHealthCheck from './FinancialHealthCheck';
 import Tax from './Tax';
 import FinancialGoal from './FinancialGoal';
 import NetWorth from './NetWorth';
+import Cashflow from './Cashflow';
 import Login from './Login';
 import { ViewState } from '../types';
 import { clearSession } from '../services/larkService';
@@ -40,6 +41,8 @@ const PortalLayout: React.FC = () => {
         return <FinancialGoal />;
       case ViewState.NET_WORTH:
         return <NetWorth />;
+      case ViewState.CASHFLOW:
+        return <Cashflow />;
       default:
         return <Investment />;
     }

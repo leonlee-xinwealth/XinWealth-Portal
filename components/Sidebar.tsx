@@ -9,7 +9,8 @@ import {
   X, 
   Calculator,
   Target,
-  Wallet
+  Wallet,
+  ArrowRightLeft
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -25,6 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isOpen, setIsOp
   const navItems = [
     { id: ViewState.INVESTMENT, label: 'Portfolio', icon: PieChart },
     { id: ViewState.NET_WORTH, label: 'Net Worth', icon: Wallet },
+    { id: ViewState.CASHFLOW, label: 'Cashflow', icon: ArrowRightLeft },
     { id: ViewState.INSURANCE, label: 'Insurance', icon: ShieldCheck },
     { id: ViewState.HEALTH_CHECK, label: 'Financial Health', icon: Activity },
     { id: ViewState.TAX, label: 'Tax', icon: Calculator },

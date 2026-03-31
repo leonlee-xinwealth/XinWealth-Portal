@@ -5,6 +5,7 @@ export enum ViewState {
   TAX = 'TAX',
   FINANCIAL_GOAL = 'FINANCIAL_GOAL',
   NET_WORTH = 'NET_WORTH',
+  CASHFLOW = 'CASHFLOW',
   SETTINGS = 'SETTINGS'
 }
 

@@ -186,7 +186,7 @@ export default async function handler(req, res) {
       ...(investments.stocks || []).map(i => ({ ...i, category: "Stocks" })),
       ...(investments.bonds || []).map(i => ({ ...i, category: "Bonds" })),
       ...(investments.unitTrusts || []).map(i => ({ ...i, category: "Unit Trust" })),
-      ...(investments.fixedDeposits || []).map(i => ({ ...i, category: "Fixed Deposit" })),
+      ...(investments.fixedDeposits || []).map(i => ({ ...i, category: "Investment Properties" })),
       ...(investments.forex || []).map(i => ({ ...i, category: "Forex" })),
       ...(investments.moneyMarket || []).map(i => ({ ...i, category: "Money Market" })),
       ...(investments.otherInvestments || []).map(i => ({ ...i, category: "Other" }))

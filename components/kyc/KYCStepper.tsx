@@ -29,10 +29,10 @@ export const STEPS = [
     { id: 'welcome', labelKey: 'nav.welcome', showNav: false },
     { id: 'basic', labelKey: 'nav.basic', showNav: true },
     { id: 'income', labelKey: 'nav.income', showNav: true },
-    { id: 'assets', labelKey: 'nav.assets', showNav: true },
-    { id: 'liabilities', labelKey: 'nav.liabilities', showNav: true },
     { id: 'expenses', labelKey: 'nav.expenses', showNav: true },
+    { id: 'assets', labelKey: 'nav.assets', showNav: true },
     { id: 'investments', labelKey: 'nav.investments', showNav: true },
+    { id: 'liabilities', labelKey: 'nav.liabilities', showNav: true },
     { id: 'review', labelKey: 'nav.review', showNav: true },
 ];
 

@@ -12,16 +12,27 @@ const extractValue = (item: any, fields: string[]): number => {
   for (const field of fields) {
     if (item.fields[field] !== undefined) {
        let val = item.fields[field];
+       
+       // Handle arrays (e.g., lookup or formula fields returning arrays)
+       if (Array.isArray(val) && val.length > 0) {
+           val = val[0];
+           if (typeof val === 'object' && val.text) val = val.text;
+       }
+       // Handle objects
+       else if (typeof val === 'object' && val !== null && val.text) {
+           val = val.text;
+       }
+
        if (typeof val === 'string') {
          val = parseFloat(val.replace(/RM/g, '').replace(/,/g, '').trim());
        }
-       return val || 0;
+       return Number(val) || 0;
     }
   }
   return 0;
 };
 
-const extractString = (item: any, fields: string[]): string => {
+const extractString = (item: any, fields: string[], defaultValue: string = 'Unknown'): string => {
   for (const field of fields) {
     if (item.fields[field] !== undefined) {
        let val = item.fields[field];
@@ -33,32 +44,77 @@ const extractString = (item: any, fields: string[]): string => {
        return String(val);
     }
   }
-  return 'Unknown';
+  return defaultValue;
 };
 
 const parseDate = (item: any) => {
-  const rawDate = item.fields["Date"] || item.fields["date"];
-  if (rawDate) {
-      const d = new Date(rawDate);
-      if (!isNaN(d.getTime())) {
-          return {
-              year: d.getFullYear().toString(),
-              month: (d.getMonth() + 1).toString().padStart(2, '0'),
-              timestamp: d.getTime()
-          };
-      }
-  }
-  const year = item.fields["Year"] || item.fields["year"];
-  const month = item.fields["Month"] || item.fields["month"];
-  if (year && month) {
-      return { 
-          year: String(year), 
-          month: String(month).padStart(2, '0'), 
-          timestamp: new Date(`${year}-${month}-01`).getTime() 
-      };
-  }
-  return { year: 'N/A', month: 'N/A', timestamp: 0 };
-};
+    // First check specific Quarter/Year fields if any are present from the API or custom logic
+    const quarterStr = extractString(item, ["Quarter", "quarter"], "");
+    const yearStr = extractString(item, ["Year", "year"], "");
+    
+    // Then check Date
+    const rawDate = item.fields["Date"] || item.fields["date"];
+
+    if (rawDate) {
+        const d = new Date(typeof rawDate === 'number' ? rawDate : rawDate);
+        if (!isNaN(d.getTime())) {
+            return {
+                year: d.getFullYear().toString(),
+                month: (d.getMonth() + 1).toString().padStart(2, '0'),
+                timestamp: d.getTime()
+            };
+        }
+    }
+
+    // If no raw Date, use Year and Month/Quarter
+    const monthStr = extractString(item, ["Month", "month"], "");
+    
+    if (yearStr && monthStr) {
+        // Convert month names like "January" to numbers if needed, or assume it's "1"
+        const m = parseInt(monthStr, 10);
+        let validMonth = "01";
+        if (!isNaN(m) && m >= 1 && m <= 12) {
+            validMonth = m.toString().padStart(2, '0');
+        } else {
+            // handle string months if necessary
+            const monthMap: Record<string, string> = { jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12" };
+            const mStrLower = monthStr.substring(0, 3).toLowerCase();
+            if (monthMap[mStrLower]) validMonth = monthMap[mStrLower];
+        }
+        return { 
+            year: yearStr, 
+            month: validMonth, 
+            timestamp: new Date(`${yearStr}-${validMonth}-01`).getTime() 
+        };
+    }
+
+    if (yearStr && quarterStr) {
+        // Approximate month from quarter for sorting
+        const qNum = parseInt(quarterStr.replace(/[^0-9]/g, '')) || 1;
+        const mockMonth = (qNum - 1) * 3 + 1; // Q1 -> 1, Q2 -> 4
+        return {
+            year: yearStr,
+            month: mockMonth.toString().padStart(2, '0'),
+            timestamp: new Date(`${yearStr}-${mockMonth.toString().padStart(2, '0')}-01`).getTime()
+        }
+    }
+    
+    // If we only have year but no month/quarter/date, default to Jan 1st (Q1)
+    if (yearStr) {
+        return {
+            year: yearStr,
+            month: '01',
+            timestamp: new Date(`${yearStr}-01-01`).getTime()
+        }
+    }
+
+    // Return N/A so it doesn't skew current data falsely. 
+    return { 
+        year: 'N/A', 
+        month: 'N/A', 
+        timestamp: 0 
+    };
+  };
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('en-MY', {
@@ -66,7 +122,7 @@ const formatCurrency = (value: number) => {
     currency: 'MYR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(value || 0);
 };
 
 interface RecordItem {
@@ -81,25 +137,35 @@ interface RecordItem {
 }
 
 const getQuarter = (monthStr: string): string => {
+    // If it's already a valid quarter string (Q1, Q2, Q3, Q4), return it directly
+    if (monthStr && (monthStr.toUpperCase() === 'Q1' || monthStr.toUpperCase() === 'Q2' || monthStr.toUpperCase() === 'Q3' || monthStr.toUpperCase() === 'Q4')) {
+        return monthStr.toUpperCase();
+    }
+    
     const m = parseInt(monthStr, 10);
+    if (isNaN(m)) return 'Q1'; // Default to Q1 instead of N/A to ensure data shows up
     if (m >= 1 && m <= 3) return 'Q1';
     if (m >= 4 && m <= 6) return 'Q2';
     if (m >= 7 && m <= 9) return 'Q3';
     if (m >= 10 && m <= 12) return 'Q4';
-    return 'N/A';
+    return 'Q1'; // Default fallback
 };
 
-const mapRecords = (rawArray: any[], valueFields: string[]): RecordItem[] => {
+const mapRecords = (rawArray: any[], valueFields: string[], defaultCategory?: string): RecordItem[] => {
   return (rawArray || []).map(item => {
     const d = parseDate(item);
+    // Explicitly check for Quarter field in raw item, otherwise derive from month
+    const explicitQuarter = extractString(item, ["Quarter", "quarter"], "");
+    const finalQuarter = explicitQuarter ? explicitQuarter.toUpperCase() : getQuarter(d.month);
+    
     return {
       id: item.id || Math.random().toString(),
       year: d.year,
       month: d.month,
-      quarter: getQuarter(d.month),
+      quarter: finalQuarter,
       timestamp: d.timestamp,
-      category: extractString(item, ["Category", "category", "Type", "type"]),
-      description: extractString(item, ["Description", "description", "Name", "name", "Item", "item"]),
+      category: defaultCategory || extractString(item, ["Category", "category", "Type", "type"]),
+      description: extractString(item, ["Description", "description", "Name", "name", "Item", "item", "Fund Name", "fund name", "Investment Name", "investment name"]),
       value: extractValue(item, valueFields)
     };
   });
@@ -113,8 +179,8 @@ const NetWorth: React.FC = () => {
   const [assets, setAssets] = useState<RecordItem[]>([]);
   const [liabilities, setLiabilities] = useState<RecordItem[]>([]);
 
-  const [selectedYear, setSelectedYear] = useState<string>('');
-  const [selectedQuarter, setSelectedQuarter] = useState<string>('');
+  const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
+  const [selectedQuarter, setSelectedQuarter] = useState<string>('Q1');
 
   useEffect(() => {
     const loadData = async () => {
@@ -124,9 +190,13 @@ const NetWorth: React.FC = () => {
         
         const combinedAssets = [
             ...mapRecords(data.assets || [], ["Value", "value", "Amount", "amount"]),
-            ...mapRecords(data.investments || [], ["Amount", "amount", "Value", "value", "End Value", "end value"])
+            ...mapRecords(data.investments || [], ["Amount", "amount", "Value", "value", "End Value", "end value"], 'Investment')
         ];
         const parsedLiabilities = mapRecords(data.liabilities || [], ["Outstanding Amount", "outstanding amount", "Amount", "amount", "Value", "value"]);
+        
+        console.log("Raw Health Data:", data);
+        console.log("Combined Assets:", combinedAssets);
+        console.log("Parsed Liabilities:", parsedLiabilities);
         
         setAssets(combinedAssets);
         setLiabilities(parsedLiabilities);
@@ -134,20 +204,28 @@ const NetWorth: React.FC = () => {
         // Find latest date for default selection
         let latestYear = '';
         let latestQuarter = '';
-        let maxTime = 0;
         
         [...combinedAssets, ...parsedLiabilities].forEach(item => {
-            if (item.timestamp > maxTime) {
-                maxTime = item.timestamp;
-                latestYear = item.year;
-                latestQuarter = item.quarter;
+            if (!item.year || item.year === 'N/A') return;
+            const itemYear = item.year;
+            const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
+            
+            if (itemYear > latestYear) {
+                latestYear = itemYear;
+                latestQuarter = itemQuarter;
+            } else if (itemYear === latestYear && itemQuarter > latestQuarter) {
+                latestQuarter = itemQuarter;
             }
         });
         
-        if (latestYear && latestQuarter) {
+        if (latestYear) {
             setSelectedYear(latestYear);
-            setSelectedQuarter(latestQuarter);
+            setSelectedQuarter(latestQuarter || 'Q1');
+        } else {
+            setSelectedYear(new Date().getFullYear().toString());
+            setSelectedQuarter('Q1');
         }
+
 
       } catch (err: any) {
         setError(err.message || 'Failed to load net worth data');
@@ -161,38 +239,71 @@ const NetWorth: React.FC = () => {
   // Dropdown options
   const availableYears = useMemo(() => {
       const years = new Set<string>();
-      const currentList = activeTab === 'assets' ? assets : liabilities;
-      currentList.forEach(item => { if (item.year !== 'N/A') years.add(item.year); });
+      
+      // Always collect years from both lists to ensure dropdown has options
+      // even if one list is empty for a particular year
+      assets.forEach(item => { 
+          if (item.year && item.year !== 'N/A') years.add(item.year); 
+      });
+      liabilities.forEach(item => { 
+          if (item.year && item.year !== 'N/A') years.add(item.year); 
+      });
+      
+      // Only include current year if no data is present at all to avoid confusing UI
+      if (years.size === 0) {
+          years.add(new Date().getFullYear().toString());
+      }
+      
       return Array.from(years).sort((a, b) => b.localeCompare(a));
-  }, [assets, liabilities, activeTab]);
+  }, [assets, liabilities]);
 
   const availableQuarters = useMemo(() => {
-      const quarters = new Set<string>();
-      const currentList = activeTab === 'assets' ? assets : liabilities;
-      currentList.forEach(item => { 
-          if (item.year === selectedYear && item.quarter !== 'N/A') {
-              quarters.add(item.quarter);
-          }
-      });
-      return Array.from(quarters).sort();
-  }, [assets, liabilities, activeTab, selectedYear]);
+      // Return fixed quarters with descriptive names instead of dynamic derivation
+      // This ensures we always have these four options regardless of what data was loaded
+      return [
+          { id: 'Q1', label: 'Q1 (Jan-Mar)' },
+          { id: 'Q2', label: 'Q2 (Apr-Jun)' },
+          { id: 'Q3', label: 'Q3 (Jul-Sep)' },
+          { id: 'Q4', label: 'Q4 (Oct-Dec)' }
+      ];
+  }, []);
 
   // Ensure selected quarter is valid when year changes
   useEffect(() => {
-      if (availableQuarters.length > 0 && !availableQuarters.includes(selectedQuarter)) {
-          setSelectedQuarter(availableQuarters[availableQuarters.length - 1]);
+      if (!selectedQuarter) {
+          setSelectedQuarter('Q1');
       }
-  }, [availableQuarters, selectedQuarter]);
+      if (!selectedYear || !availableYears.includes(selectedYear)) {
+          if (availableYears.length > 0) {
+              setSelectedYear(availableYears[0]);
+          } else {
+              setSelectedYear(new Date().getFullYear().toString());
+          }
+      }
+  }, [selectedQuarter, selectedYear, availableYears]);
 
 
-  // Tab 1 & 2: Assets / Liabilities
+      // Tab 1 & 2: Assets / Liabilities
   const renderAssetsOrLiabilities = () => {
       const list = activeTab === 'assets' ? assets : liabilities;
-      const filteredList = list.filter(item => item.year === selectedYear && item.quarter === selectedQuarter);
+      // Filter strictly by year, and fallback to Q1 if item quarter is N/A to allow seeing data
+      const filteredList = list.filter(item => {
+          if (!item.year || item.year === 'N/A') return false;
+          const itemQuarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
+          return String(item.year) === String(selectedYear) && String(itemQuarter) === String(selectedQuarter);
+      });
       
+      console.log(`Filtered ${activeTab} for ${selectedYear} ${selectedQuarter}:`, filteredList);
+
       // Group by category
       const categoryMap = new Map<string, { value: number, items: RecordItem[] }>();
-      filteredList.forEach(item => {
+      
+      const dataToMap = filteredList;
+
+      dataToMap.forEach(item => {
+          // Only exclude items that literally have 0 or are undefined
+          if (item.value === undefined || item.value === 0) return;
+          
           if (!categoryMap.has(item.category)) {
               categoryMap.set(item.category, { value: 0, items: [] });
           }
@@ -222,10 +333,23 @@ const NetWorth: React.FC = () => {
                                           data={pieData}
                                           cx="50%"
                                           cy="50%"
-                                          innerRadius={80}
-                                          outerRadius={120}
+                                          innerRadius={60}
+                                          outerRadius={100}
                                           paddingAngle={5}
                                           dataKey="value"
+                                          label={({ cx, cy, midAngle, innerRadius, outerRadius, percent }: any) => {
+                                              const RADIAN = Math.PI / 180;
+                                              const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+                                              const x = cx + radius * Math.cos(-midAngle * RADIAN);
+                                              const y = cy + radius * Math.sin(-midAngle * RADIAN);
+                                              // Show label for anything >= 1% to ensure most get displayed
+                                              return percent >= 0.01 ? (
+                                                  <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight="bold">
+                                                      {`${(percent * 100).toFixed(0)}%`}
+                                                  </text>
+                                              ) : null;
+                                          }}
+                                          labelLine={false}
                                       >
                                           {pieData.map((entry, index) => (
                                               <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -237,7 +361,7 @@ const NetWorth: React.FC = () => {
                               </ResponsiveContainer>
                               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none pb-8">
                                   <p className="text-sm text-slate-500 font-medium">Total</p>
-                                  <p className="text-xl font-bold text-xin-blue">{formatCurrency(totalValue)}</p>
+                                  <p className="text-lg font-bold text-xin-blue">{formatCurrency(totalValue)}</p>
                               </div>
                           </>
                       ) : (
@@ -287,28 +411,47 @@ const NetWorth: React.FC = () => {
       const timeMap = new Map<string, { time: string, timestamp: number, assets: number, liabilities: number, netWorth: number }>();
       
       const addToMap = (item: RecordItem, type: 'assets' | 'liabilities') => {
-          if (item.year === 'N/A' || item.quarter === 'N/A') return;
-          const key = `${item.year} ${item.quarter}`;
+          // Skip if year is N/A
+          if (!item.year || item.year === 'N/A') return;
+
+          const itemYear = item.year;
+          
+          // Fallback to Q1 if quarter is missing or 'N/A'
+          const quarter = (item.quarter && item.quarter !== 'N/A') ? item.quarter : 'Q1';
+          
+          const key = `${itemYear} ${quarter}`;
           if (!timeMap.has(key)) {
               // Create a consistent timestamp for sorting based on year and quarter
-              const qNum = parseInt(item.quarter.replace('Q', ''));
+              const qStr = String(quarter).replace(/[^0-9]/g, '');
+              const qNum = parseInt(qStr, 10) || 1;
               const mockMonth = (qNum - 1) * 3 + 1; // Q1 -> 1, Q2 -> 4, etc.
-              const timestamp = new Date(`${item.year}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
+              const timestamp = new Date(`${itemYear}-${mockMonth.toString().padStart(2, '0')}-01`).getTime();
               
               timeMap.set(key, { time: key, timestamp, assets: 0, liabilities: 0, netWorth: 0 });
           }
           const group = timeMap.get(key)!;
-          if (type === 'assets') group.assets += item.value;
-          if (type === 'liabilities') group.liabilities += item.value;
-          group.netWorth = group.assets - group.liabilities;
+          // Important: Handle empty values safely
+          const val = Number(item.value) || 0;
+          if (type === 'assets') group.assets += val;
+          if (type === 'liabilities') group.liabilities += val;
       };
 
       assets.forEach(item => addToMap(item, 'assets'));
       liabilities.forEach(item => addToMap(item, 'liabilities'));
 
-      const chartData = Array.from(timeMap.values()).sort((a, b) => a.timestamp - b.timestamp);
+      const chartData = Array.from(timeMap.values());
+      
+      // Calculate Net Worth for each quarter after both assets and liabilities are accumulated
+      chartData.forEach(group => {
+          group.netWorth = group.assets - group.liabilities;
+      });
 
-      if (chartData.length === 0) {
+      chartData.sort((a, b) => a.timestamp - b.timestamp);
+
+      // Force to array for recharts
+      const finalChartData = [...chartData];
+
+      if (finalChartData.length === 0) {
           return (
               <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm min-h-[300px] flex items-center justify-center">
                   <p className="text-slate-400">No historical data available to generate charts.</p>
@@ -324,7 +467,7 @@ const NetWorth: React.FC = () => {
                   <p className="text-sm text-slate-500 mb-6">Comparing total assets against the sum of liabilities and net worth over time.</p>
                   <div className="h-[400px]">
                       <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                          <BarChart data={finalChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                               <XAxis dataKey="time" tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} />
                               <YAxis 
@@ -355,7 +498,7 @@ const NetWorth: React.FC = () => {
                   <h3 className="text-xl font-bold text-xin-blue mb-6">Net Worth Trend</h3>
                   <div className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                          <LineChart data={finalChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                               <XAxis dataKey="time" tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} />
                               <YAxis 
@@ -430,7 +573,7 @@ const NetWorth: React.FC = () => {
                     onChange={(e) => setSelectedQuarter(e.target.value)}
                     className="px-4 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 focus:outline-none focus:ring-2 focus:ring-xin-blue/20 focus:border-xin-blue"
                 >
-                    {availableQuarters.map(q => <option key={q} value={q}>{q}</option>)}
+                    {availableQuarters.map(q => <option key={q.id} value={q.id}>{q.label}</option>)}
                 </select>
             </div>
         )}
