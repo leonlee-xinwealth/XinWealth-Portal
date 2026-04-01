@@ -6,6 +6,7 @@ import { clearSession, getSession } from '../services/larkService';
 import { Menu, Loader2 } from 'lucide-react';
 
 const Investment = lazy(() => import('./Investment'));
+const Player = lazy(() => import('./Player'));
 const Insurance = lazy(() => import('./Insurance'));
 const FinancialHealthCheck = lazy(() => import('./FinancialHealthCheck'));
 const Tax = lazy(() => import('./Tax'));
@@ -16,7 +17,7 @@ const Retirement = lazy(() => import('./Retirement'));
 
 const PortalLayout: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [currentView, setCurrentView] = useState<ViewState>(ViewState.INVESTMENT);
+  const [currentView, setCurrentView] = useState<ViewState>(ViewState.PLAYER);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const handleLoginSuccess = () => {
@@ -26,11 +27,13 @@ const PortalLayout: React.FC = () => {
   const handleLogout = () => {
     clearSession();
     setIsAuthenticated(false);
-    setCurrentView(ViewState.INVESTMENT);
+    setCurrentView(ViewState.PLAYER);
   };
 
   const renderContent = () => {
     switch (currentView) {
+      case ViewState.PLAYER:
+        return <Player />;
       case ViewState.INVESTMENT:
         return <Investment />;
       case ViewState.INSURANCE:

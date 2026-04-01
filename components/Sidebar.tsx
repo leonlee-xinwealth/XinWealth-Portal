@@ -12,7 +12,8 @@ import {
   Target,
   Wallet,
   ArrowRightLeft,
-  TrendingUp
+  TrendingUp,
+  Gamepad2
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -29,6 +30,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setView, isOpen, setIsOp
   const advisorInitials = advisorName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() || 'AD';
 
   const navItems = [
+    { id: ViewState.PLAYER, label: 'Player', icon: Gamepad2 },
     { id: ViewState.INVESTMENT, label: 'Portfolio', icon: PieChart },
     { id: ViewState.NET_WORTH, label: 'Net Worth', icon: Wallet },
     { id: ViewState.CASHFLOW, label: 'Cashflow', icon: ArrowRightLeft },
