@@ -125,7 +125,55 @@ const Player: React.FC = () => {
   const atkValue = Math.max(activeIncome, 0);
 
   // 4) DEF (防御力) - Insurance Coverage
-  const defValue = raw.totalSumAssured || 0;
+  // Logic: 6 targets for insurance. Display percentage of targets met (e.g. 2/6 = 33%)
+  let defValue = 0;
+  let finalTargets = 0;
+  if (raw.insurance && Array.isArray(raw.insurance)) {
+    // Calculate basic metrics from existing healthData logic
+    const { 
+      monthlyExpenses, 
+      totalMonthlyDebtRepayment, 
+      cashAndFD, 
+      monthlyNetIncome,
+      annualIncome 
+    } = raw;
+    
+    const emergencyTarget = monthlyExpenses * 3;
+    const debtServiceRatio = monthlyNetIncome > 0 ? totalMonthlyDebtRepayment / monthlyNetIncome : 0;
+    const basicLiquidityRatio = monthlyExpenses > 0 ? cashAndFD / monthlyExpenses : 0;
+    
+    let lifeCoverage = 0;
+    let criticalIllnessCoverage = 0;
+    let personalAccidentCoverage = 0;
+    let hasMedicalCard = false;
+    
+    raw.insurance.forEach((item: any) => {
+      const type = item.fields["Type"] || item.fields["type"] || "";
+      const sumAssured = parseFloat(item.fields["Sum Assured"] || item.fields["sum assured"] || 0);
+      
+      if (type.toLowerCase().includes("life") || type.toLowerCase().includes("death")) {
+        lifeCoverage += sumAssured;
+      }
+      if (type.toLowerCase().includes("critical") || type.toLowerCase().includes("ci")) {
+        criticalIllnessCoverage += sumAssured;
+      }
+      if (type.toLowerCase().includes("accident") || type.toLowerCase().includes("pa")) {
+        personalAccidentCoverage += sumAssured;
+      }
+      if (type.toLowerCase().includes("medical") || type.toLowerCase().includes("hospital")) {
+        hasMedicalCard = true;
+      }
+    });
+
+    if (lifeCoverage >= (annualIncome * 10)) finalTargets++;
+    if (criticalIllnessCoverage >= (annualIncome * 3)) finalTargets++;
+    if (personalAccidentCoverage >= (annualIncome * 5)) finalTargets++;
+    if (hasMedicalCard) finalTargets++;
+    if (basicLiquidityRatio >= 3) finalTargets++;
+    if (debtServiceRatio <= 0.35) finalTargets++;
+
+    defValue = Math.round((finalTargets / 6) * 100);
+  }
 
   // 5) INT (智力) - Net Worth Growth Rate
   const intValue = profileData.returnPercentage; // 5% base, 10% standard, 15% excellent
@@ -464,7 +512,10 @@ const Player: React.FC = () => {
                   <Shield className="text-indigo-500" size={24} />
                   <span className="font-bold text-slate-600 tracking-wider">DEF</span>
                 </div>
-                <span className="text-xl font-bold text-slate-800">{formatCurrency(defValue)}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100 px-2 py-0.5 rounded-full uppercase">{finalTargets}/6 MET</span>
+                  <span className="text-xl font-bold text-slate-800">{defValue}</span>
+                </div>
               </div>
               
               <div className="flex items-center justify-between">

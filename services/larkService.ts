@@ -450,6 +450,23 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
   let monthlyGrossIncome = 0;
   let annualPassiveIncome = 0;
 
+  // For dynamic annual income calculation
+  let totalCurrentYearIncome = 0;
+  const currentYear = new Date().getFullYear().toString();
+  const recordedMonths = new Set<string>();
+
+  data.incomes?.forEach((item: any) => {
+    let val = getValue(item, ["Amount", "amount"]);
+    const cat = item.fields["Category"] || "";
+    const year = item.fields["Year"] || item.fields["year"] || "";
+    const month = item.fields["Month"] || item.fields["month"] || "";
+
+    if (year === currentYear) {
+      totalCurrentYearIncome += val;
+      if (month) recordedMonths.add(month);
+    }
+  });
+
   latestIncomes.forEach((item: any) => {
     let val = getValue(item, ["Amount", "amount"]);
     const cat = item.fields["Category"] || "";
@@ -467,7 +484,16 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
 
   const monthlyNetIncome = monthlyGrossIncome; // Approximate if tax isn't detailed
   const monthlySavings = monthlyNetIncome - monthlyExpenses;
-  const annualIncome = monthlyGrossIncome * 12;
+  
+  // Calculate dynamic annual income
+  let annualIncome = 0;
+  const monthsCount = recordedMonths.size;
+  if (monthsCount > 0) {
+    annualIncome = (totalCurrentYearIncome / monthsCount) * 12;
+  } else {
+    // Fallback to legacy calculation if no data for current year
+    annualIncome = monthlyGrossIncome * 12;
+  }
   
   // Total Sum Assured - hardcoded to 0 for now as no insurance table
   const totalSumAssured = 0;

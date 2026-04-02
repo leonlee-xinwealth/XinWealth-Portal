@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth } from '../services/larkService';
-import { Loader2, Shield, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, Shield, AlertTriangle, CheckCircle2, AlertCircle, FileText, ExternalLink } from 'lucide-react';
 import { FinancialHealthData } from '../types';
+
+type TabType = 'overview' | 'policies';
 
 // Helpers
 const extractValue = (item: any, fields: string[]): number => {
@@ -54,6 +56,7 @@ const Insurance: React.FC = () => {
   const [data, setData] = useState<FinancialHealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
 
   useEffect(() => {
     const loadData = async () => {
@@ -103,6 +106,35 @@ const Insurance: React.FC = () => {
       return sum + extractValue(record, fieldNames);
     }, 0);
   };
+
+  // Extract policy URL
+  const getPolicyUrl = (item: any): string | null => {
+    if (!item || !item.fields) return null;
+    const policyField = item.fields["E-policy"] || item.fields["e-policy"];
+    if (Array.isArray(policyField) && policyField.length > 0) {
+      // Lark attachment field format
+      if (policyField[0].file_token) {
+        // This is a placeholder since actual download requires authenticated API call
+        // In a real scenario, you'd generate a temporary download URL via your backend
+        return policyField[0].url || null; 
+      }
+      // Link field format
+      if (policyField[0].link) return policyField[0].link;
+      if (policyField[0].text && policyField[0].text.startsWith('http')) return policyField[0].text;
+    }
+    if (typeof policyField === 'string' && policyField.startsWith('http')) return policyField;
+    return null;
+  };
+
+  // Parse policies for the table
+  const policies = insuranceRecords.map(record => ({
+    id: record.id || record.record_id,
+    insurer: extractString(record, ['Insurer', 'insurer', 'Company', 'company']),
+    planName: extractString(record, ['Plan Name', 'plan name', 'Plan', 'plan', 'Policy Name', 'policy name']),
+    policyNumber: extractString(record, ['Policy Number', 'policy number', 'Policy No', 'policy no']),
+    premium: extractValue(record, ['Premium', 'premium']),
+    policyUrl: getPolicyUrl(record)
+  })).filter(p => p.planName !== 'Unknown' || p.policyNumber !== 'Unknown');
 
   // Requirements Map
   const requirements = [
@@ -168,11 +200,38 @@ const Insurance: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {requirements.map((req) => {
-          const isSufficient = req.current >= req.required;
-          const percentage = req.required > 0 ? Math.min(100, (req.current / req.required) * 100) : 100;
-          const shortfall = req.required - req.current;
+      {/* Tabs */}
+      <div className="flex justify-center mb-8">
+        <div className="bg-slate-100/80 backdrop-blur-sm p-1 rounded-full inline-flex border border-slate-200/50 shadow-inner">
+          <button
+            onClick={() => setActiveTab('overview')}
+            className={`px-8 py-3 rounded-full text-sm font-bold tracking-widest uppercase transition-all duration-300 ${
+              activeTab === 'overview'
+                ? 'bg-white text-xin-blue shadow-md shadow-slate-200/50 scale-100'
+                : 'text-slate-500 hover:text-xin-blue hover:bg-white/50 scale-95'
+            }`}
+          >
+            Overview
+          </button>
+          <button
+            onClick={() => setActiveTab('policies')}
+            className={`px-8 py-3 rounded-full text-sm font-bold tracking-widest uppercase transition-all duration-300 ${
+              activeTab === 'policies'
+                ? 'bg-white text-xin-blue shadow-md shadow-slate-200/50 scale-100'
+                : 'text-slate-500 hover:text-xin-blue hover:bg-white/50 scale-95'
+            }`}
+          >
+            Policies
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'overview' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
+          {requirements.map((req) => {
+            const isSufficient = req.current >= req.required;
+            const percentage = req.required > 0 ? Math.min(100, (req.current / req.required) * 100) : 100;
+            const shortfall = req.required - req.current;
 
           return (
             <div key={req.id} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow relative overflow-hidden">
@@ -229,6 +288,66 @@ const Insurance: React.FC = () => {
           );
         })}
       </div>
+      ) : (
+        <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-100 animate-fade-in overflow-hidden">
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-xl font-bold text-xin-blue">Your Policies</h3>
+            <span className="bg-xin-blue/10 text-xin-blue px-3 py-1 rounded-full text-xs font-bold">
+              {policies.length} Active
+            </span>
+          </div>
+
+          {policies.length === 0 ? (
+            <div className="text-center py-12">
+              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FileText className="text-slate-400 w-8 h-8" />
+              </div>
+              <p className="text-slate-500 font-medium">No policies found</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-100">
+                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400">Insurer</th>
+                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400">Plan Name</th>
+                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400">Policy Number</th>
+                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400 text-right">Premium</th>
+                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400 text-center">Policy</th>
+                  </tr>
+                </thead>
+                <tbody className="text-sm">
+                  {policies.map((policy) => (
+                    <tr key={policy.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                      <td className="py-4 px-4 font-semibold text-slate-800 whitespace-nowrap">{policy.insurer}</td>
+                      <td className="py-4 px-4 text-slate-600">{policy.planName}</td>
+                      <td className="py-4 px-4 font-mono text-xs text-slate-500">{policy.policyNumber}</td>
+                      <td className="py-4 px-4 font-bold text-xin-blue text-right whitespace-nowrap">{formatRM(policy.premium)}</td>
+                      <td className="py-4 px-4 text-center">
+                        {policy.policyUrl ? (
+                          <a 
+                            href={policy.policyUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-600 transition-colors"
+                            title="View E-Policy"
+                          >
+                            <FileText className="w-4 h-4" />
+                          </a>
+                        ) : (
+                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-50 text-slate-300" title="No E-Policy available">
+                            <FileText className="w-4 h-4" />
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
