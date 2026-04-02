@@ -1,11 +1,9 @@
-import fetch from 'node-fetch';
-
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { file_token, table_id, record_id, field_id } = req.query;
+  const { file_token } = req.query;
 
   if (!file_token) {
     return res.status(400).json({ error: 'File token is required' });
@@ -36,10 +34,6 @@ export default async function handler(req, res) {
     const accessToken = tokenData.tenant_access_token;
 
     // 2. Download File from Lark Drive API
-    // According to Lark API, bitable attachments are downloaded via drive/v1/medias/download
-    // Note: To download a file from Bitable, the URL format is specific.
-    // If it's a bitable attachment, the API is often drive/v1/medias/download
-    
     const downloadUrl = `https://open.larksuite.com/open-apis/drive/v1/medias/download?file_token=${encodeURIComponent(file_token)}`;
     
     const fileRes = await fetch(downloadUrl, {
@@ -66,8 +60,10 @@ export default async function handler(req, res) {
        res.setHeader('Content-Disposition', `inline; filename="e-policy-${file_token}.pdf"`);
     }
 
-    // Pipe the stream to the response
-    return fileRes.body.pipe(res);
+    // Send the buffer
+    const arrayBuffer = await fileRes.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    return res.send(buffer);
 
   } catch (error) {
     console.error("Download API Error:", error);
