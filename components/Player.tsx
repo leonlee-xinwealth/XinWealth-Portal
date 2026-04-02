@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth, fetchClientProfile } from '../services/larkService';
 import { FinancialHealthData, ClientProfile } from '../types';
-import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword } from 'lucide-react';
+import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, PersonStanding, Sparkles, Sword } from 'lucide-react';
 
 const Player: React.FC = () => {
   const [healthData, setHealthData] = useState<FinancialHealthData | null>(null);
@@ -58,6 +58,9 @@ const Player: React.FC = () => {
 
   // 2) MP (法力值) - Deployable Capital (Liquid assets - Emergency reserve)
   const mpValue = Math.max(raw.cashAndFD - emergencyTarget, 0);
+  const netWorth = raw.netWorth;
+  let mpPercent = netWorth > 0 ? (mpValue / netWorth) * 100 : 0;
+  mpPercent = Math.min(Math.max(mpPercent, 0), 100);
 
   // 3) ATK (攻击力) - Active Income = Gross Income - Passive Income
   const activeIncome = raw.monthlyGrossIncome - (raw.annualPassiveIncome / 12);
@@ -119,10 +122,12 @@ const Player: React.FC = () => {
                 </div>
                 <div className="text-right">
                   <span className="text-sm font-bold text-slate-800">{formatCurrency(currentEmergency)}</span>
-                  <span className="text-xs text-slate-400 block">/ {formatCurrency(emergencyTarget)}</span>
                 </div>
               </div>
-              <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
+              <div 
+                className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner cursor-help"
+                title={`${hpPercent.toFixed(1)}%`}
+              >
                 <div 
                   className={`h-full transition-all duration-1000 ease-out ${hpPercent > 50 ? 'bg-green-500' : hpPercent > 20 ? 'bg-yellow-500' : 'bg-red-500'}`}
                   style={{ width: `${hpPercent}%` }}
@@ -142,10 +147,13 @@ const Player: React.FC = () => {
                   <span className="text-sm font-bold text-slate-800">{formatCurrency(mpValue)}</span>
                 </div>
               </div>
-              <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner">
+              <div 
+                className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner cursor-help"
+                title={`${mpPercent.toFixed(1)}%`}
+              >
                 <div 
                   className="h-full bg-blue-500 transition-all duration-1000 ease-out"
-                  style={{ width: `${Math.min((mpValue / (currentEmergency || 1)) * 100, 100)}%` }}
+                  style={{ width: `${mpPercent}%` }}
                 />
               </div>
               <p className="text-xs text-slate-500 text-center">Deployable Capital (Excess Liquid Assets)</p>
@@ -204,7 +212,7 @@ const Player: React.FC = () => {
               {/* AGI */}
               <div className="flex items-start gap-4 p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 hover:shadow-md transition-shadow">
                 <div className="p-3 bg-emerald-100 rounded-xl text-emerald-600">
-                  <TrendingUp size={24} />
+                  <PersonStanding size={24} />
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">AGI (Agility)</h4>
@@ -220,7 +228,12 @@ const Player: React.FC = () => {
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">LUK (Luck)</h4>
-                  <p className="text-2xl font-bold text-slate-800 mb-1">{formatPercent(lukValue)}</p>
+                  <div className="flex items-baseline gap-2 mb-1">
+                    <p className="text-2xl font-bold text-slate-800">{formatPercent(lukValue)}</p>
+                    {lukValue < 50 && (
+                      <span className="text-xs font-semibold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">Bad Luck</span>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-500">Solvency Ratio (Net Worth / Total Assets). True wealth percentage. Higher LUK means you truly own your assets.</p>
                 </div>
               </div>
