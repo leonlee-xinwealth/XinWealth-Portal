@@ -114,9 +114,8 @@ const Insurance: React.FC = () => {
     if (Array.isArray(policyField) && policyField.length > 0) {
       // Lark attachment field format
       if (policyField[0].file_token) {
-        // This is a placeholder since actual download requires authenticated API call
-        // In a real scenario, you'd generate a temporary download URL via your backend
-        return policyField[0].url || null; 
+        // Route through our proxy endpoint
+        return `/api/download?file_token=${policyField[0].file_token}`; 
       }
       // Link field format
       if (policyField[0].link) return policyField[0].link;
