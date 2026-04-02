@@ -52,6 +52,7 @@ export interface FinancialHealthData {
     investmentAssets: number;
     annualPassiveIncome: number;
     annualExpenses: number;
+    insurance: any[]; // Add insurance raw data
   }
 }
 

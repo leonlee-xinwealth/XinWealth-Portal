@@ -29,7 +29,8 @@ export default async function handler(req, res) {
       liabilities: (process.env.LARK_TABLE_LIABILITIES || "").trim(),
       incomes: (process.env.LARK_TABLE_INCOMES || "").trim(),
       expenses: (process.env.LARK_TABLE_EXPENSES || "").trim(),
-      investments: (process.env.LARK_TABLE_INVESTMENT || "").trim()
+      investments: (process.env.LARK_TABLE_INVESTMENT || "").trim(),
+      insurance: (process.env.LARK_TABLE_INSURANCE || "").trim()
   };
 
   if (!appId || !appSecret || !baseToken) {
@@ -69,12 +70,13 @@ export default async function handler(req, res) {
         });
     };
 
-    const [assets, liabilities, incomes, expenses, investments] = await Promise.all([
+    const [assets, liabilities, incomes, expenses, investments, insurance] = await Promise.all([
         fetchTable(tables.assets),
         fetchTable(tables.liabilities),
         fetchTable(tables.incomes),
         fetchTable(tables.expenses),
-        fetchTable(tables.investments)
+        fetchTable(tables.investments),
+        fetchTable(tables.insurance)
     ]);
 
     return res.status(200).json({
@@ -82,7 +84,8 @@ export default async function handler(req, res) {
         liabilities,
         incomes,
         expenses,
-        investments
+        investments,
+        insurance
     });
 
   } catch (error) {

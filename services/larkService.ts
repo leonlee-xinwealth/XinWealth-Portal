@@ -507,7 +507,8 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
       monthlyGrossIncome,
       investmentAssets,
       annualPassiveIncome,
-      annualExpenses
+      annualExpenses,
+      insurance: data.insurance || []
     }
   };
 };

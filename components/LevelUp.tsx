@@ -2,6 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { fetchRawHealthData, getLatestRecords, getSession } from '../services/larkService';
 import { Loader2, AlertCircle, UploadCloud, TrendingUp, TrendingDown, Edit2, Check, ArrowRight, Save, Plus, Trash2 } from 'lucide-react';
 
+const StepUpIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="currentColor"
+    className={className}
+  >
+    <path d="M18 7c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-4.3 2.1c-.3-.5-.8-.8-1.4-.8H9.6c-.6 0-1.1.3-1.4.8l-2.6 4.3v6.6c0 .6.5 1 1.1 1h1.5c.6 0 1.1-.4 1.1-1v-5.2l1.6-2.5v7.7c0 .6.5 1 1.1 1h1.5c.6 0 1.1-.4 1.1-1V14l3.1 3v4c0 .6.5 1 1.1 1h1.5c.6 0 1.1-.4 1.1-1v-5c0-.3-.1-.6-.3-.8l-3.3-3.2.7-3.4 1.9 1.9c.2.2.5.3.8.3h2.6c.6 0 1.1-.4 1.1-1v-1.5c0-.6-.5-1-1.1-1h-1.9l-2.6-2.2z" />
+    <path d="M2 22h4v-4h4v-4h4v-4h4v-4h4V2H2v20zm2-2V4h16v2h-4v4h-4v4H8v4H4z" fillOpacity="0.3" />
+  </svg>
+);
+
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const INCOME_CATEGORIES = ['Salary', 'Director/Advisory/Professional Fee', 'Commission/Referral Fee', 'Dividend from company', 'Rental Income', 'Interest from investment'];
 const EXPENSE_CATEGORIES = ['Household', 'Transportation', 'Dependants', 'Personal', 'Miscellaneous', 'Other Expenses'];
@@ -142,7 +155,7 @@ const LevelUp: React.FC = () => {
       <div className="flex flex-col md:flex-row md:justify-between md:items-end mb-8 border-b border-slate-100 pb-6">
         <div>
           <h3 className="text-2xl font-bold text-slate-800 mb-2 flex items-center gap-2">
-            <UploadCloud className="text-emerald-500" />
+            <StepUpIcon className="text-emerald-500" size={28} />
             Monthly Level Up
           </h3>
           <p className="text-sm text-slate-500">Record your latest financial data to track your progress and level up your stats.</p>
