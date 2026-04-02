@@ -97,14 +97,10 @@ const Insurance: React.FC = () => {
   const annualIncome = data.raw.annualIncome || 0;
   const insuranceRecords = data.raw.insurance || [];
 
-  // Group insurance records by category to calculate total coverage
-  const getCoverage = (categoryKeywords: string[]) => {
+  // Calculate total coverage for a specific column field across all insurance records
+  const getCoverage = (fieldNames: string[]) => {
     return insuranceRecords.reduce((sum: number, record: any) => {
-      const cat = extractString(record, ["Category", "category", "Type", "type"], "").toLowerCase();
-      if (categoryKeywords.some(keyword => cat.includes(keyword.toLowerCase()))) {
-        return sum + extractValue(record, ["Amount", "amount", "Value", "value", "Sum Assured", "sum assured", "Coverage", "coverage"]);
-      }
-      return sum;
+      return sum + extractValue(record, fieldNames);
     }, 0);
   };
 
@@ -114,42 +110,42 @@ const Insurance: React.FC = () => {
       id: 'accident',
       title: 'Accident',
       description: 'Standard: 10x Annual Income',
-      current: getCoverage(['Accident']),
+      current: getCoverage(['Personal Accident', 'personal accident']),
       required: annualIncome * 10,
     },
     {
       id: 'basicMedical',
       title: 'Basic Medical',
       description: 'Standard: At least RM 1,000,000',
-      current: getCoverage(['Basic Medical', 'Medical', 'Health']),
+      current: getCoverage(['Medical Annual limit', 'medical annual limit']),
       required: 1000000,
     },
     {
       id: 'criticalIllnessAdvance',
       title: 'Critical Illness (Advance)',
       description: 'Standard: 3x Annual Income',
-      current: getCoverage(['Critical Illness (Advance)', 'CI Advance', 'Critical Illness']), // Might need refinement based on actual data
+      current: getCoverage(['Advance Critical Illness', 'advance critical illness']),
       required: annualIncome * 3,
     },
     {
       id: 'disability',
       title: 'Disability',
       description: 'Standard: 10x Annual Income',
-      current: getCoverage(['Disability', 'TPD']),
+      current: getCoverage(['TPD', 'tpd']),
       required: annualIncome * 10,
     },
     {
       id: 'earlyCriticalIllness',
       title: 'Early Critical Illness',
       description: 'Standard: 50% of Critical Illness (Advance)',
-      current: getCoverage(['Early Critical Illness', 'Early CI']),
+      current: getCoverage(['Early Critical Illness', 'early critical illness']),
       required: annualIncome * 3 * 0.5,
     },
     {
       id: 'familyProtection',
       title: 'Family Protection',
       description: 'Standard: 10x Annual Income',
-      current: getCoverage(['Family Protection', 'Life', 'Death']),
+      current: getCoverage(['Death', 'death']),
       required: annualIncome * 10,
     }
   ];
