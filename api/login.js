@@ -140,10 +140,10 @@ export default async function handler(req, res) {
     const residency = extractLarkValue(userRecord.fields["Residency"]);
     const epfAccountNumber = extractLarkValue(userRecord.fields["EPF Account Number"] || userRecord.fields["EPF No"]);
     const ppaAccountNumber = extractLarkValue(userRecord.fields["PPA Account Number"] || userRecord.fields["PPA No"]);
-    const correspodenceAddress = extractLarkValue(userRecord.fields["Correspondence Address"]);
-    const correspodencePostalCode = extractLarkValue(userRecord.fields["Correspondence Postal Code"]);
-    const correspodenceCity = extractLarkValue(userRecord.fields["Correspondence City"]);
-    const correspodenceState = extractLarkValue(userRecord.fields["Correspondence State"]);
+    const correspondenceAddress = extractLarkValue(userRecord.fields["Correspondence Address"]);
+    const correspondencePostalCode = extractLarkValue(userRecord.fields["Correspondence Postal Code"]);
+    const correspondenceCity = extractLarkValue(userRecord.fields["Correspondence City"]);
+    const correspondenceState = extractLarkValue(userRecord.fields["Correspondence State"]);
 
     
     let currentAge = 30; // Default
@@ -183,10 +183,10 @@ export default async function handler(req, res) {
         residency,
         epfAccountNumber,
         ppaAccountNumber,
-        correspodenceAddress,
-        correspodencePostalCode,
-        correspodenceCity,
-        correspodenceState
+        correspondenceAddress,
+        correspondencePostalCode,
+        correspondenceCity,
+        correspondenceState
       });
     } else {
       return res.status(401).json({ error: 'Invalid password' });

@@ -327,10 +327,10 @@ const Player: React.FC = () => {
               
               <div className="space-y-1 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
                 <h4 className="text-xs font-bold text-xin-gold uppercase tracking-widest mb-4">Contact</h4>
-                <InfoRow label="Correspondence Address" value={session?.correspodenceAddress} />
-                <InfoRow label="Postal Code" value={session?.correspodencePostalCode} />
-                <InfoRow label="City" value={session?.correspodenceCity} />
-                <InfoRow label="State" value={session?.correspodenceState} />
+                <InfoRow label="Correspondence Address" value={session?.correspondenceAddress} />
+                <InfoRow label="Postal Code" value={session?.correspondencePostalCode} />
+                <InfoRow label="City" value={session?.correspondenceCity} />
+                <InfoRow label="State" value={session?.correspondenceState} />
               </div>
             </div>
           </div>
