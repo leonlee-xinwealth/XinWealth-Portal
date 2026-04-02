@@ -43,16 +43,29 @@ const calculateTotalAssets = (assets: any) => {
     return total;
 };
 
-const calculateTotalLiabilities = (liabilities: any) => {
+const calculateTotalLiabilities = (formData: any) => {
     let total = 0;
-    ['mortgages', 'carLoans', 'studyLoans', 'interestOnlyLoans', 'renovationLoans', 'otherLoans'].forEach(key => {
+    const liabilities = formData.liabilities;
+    ['studyLoans', 'personalLoans', 'renovationLoans', 'otherLoans'].forEach(key => {
         liabilities[key]?.forEach((item: FinancialItem) => total += parseAmount(item.amount));
     });
+    
+    // Add dynamically from assets
+    const assets = formData.assets;
+    ['properties', 'vehicles'].forEach(key => {
+        assets[key]?.forEach((item: any) => {
+            if (item.isUnderLoan && item.outstandingBalance) {
+                total += parseAmount(item.outstandingBalance);
+            }
+        });
+    });
+    
     return total;
 };
 
-const calculateTotalExpenses = (expenses: any) => {
+const calculateTotalExpenses = (formData: any) => {
     let total = 0;
+    const expenses = formData.expenses;
     const isYearlyType = (type: string) => type === 'Vacation/ Travel' || type === 'Income Tax Expense';
 
     ['household', 'transportation', 'dependants', 'personal', 'miscellaneous', 'otherExpenses'].forEach(key => {
@@ -61,6 +74,17 @@ const calculateTotalExpenses = (expenses: any) => {
             total += isYearlyType(item.type) ? amount : amount * 12;
         });
     });
+    
+    // Add dynamically from assets monthly installments
+    const assets = formData.assets;
+    ['properties', 'vehicles'].forEach(key => {
+        assets[key]?.forEach((item: any) => {
+            if (item.isUnderLoan && item.monthlyInstallment) {
+                total += parseAmount(item.monthlyInstallment) * 12;
+            }
+        });
+    });
+
     return total;
 };
 
@@ -105,8 +129,8 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
     
     const annualIncome = calculateAnnualIncome(formData.income);
     const totalAssets = calculateTotalAssets(formData.assets);
-    const totalLiabilities = calculateTotalLiabilities(formData.liabilities);
-    const totalExpenses = calculateTotalExpenses(formData.expenses);
+    const totalLiabilities = calculateTotalLiabilities(formData);
+    const totalExpenses = calculateTotalExpenses(formData);
     const totalInvestments = calculateTotalInvestments(formData.investments);
 
     const formatCurrency = (val: number) => `RM ${val.toLocaleString('en-US')}`;

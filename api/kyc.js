@@ -200,10 +200,10 @@ export default async function handler(req, res) {
 
     // 7. Create Liability Records
     const allLiabilities = [
-      ...(liabilities.mortgages || []).map(l => ({ ...l, category: "Mortgage" })),
-      ...(liabilities.carLoans || []).map(l => ({ ...l, category: "Car Loan" })),
+      ...(assets.properties || []).filter(p => p.isUnderLoan).map(p => ({ ...p, amount: p.outstandingBalance, category: "Mortgage" })),
+      ...(assets.vehicles || []).filter(v => v.isUnderLoan).map(v => ({ ...v, amount: v.outstandingBalance, category: "Car Loan" })),
       ...(liabilities.studyLoans || []).map(l => ({ ...l, category: "Study Loan" })),
-      ...(liabilities.interestOnlyLoans || []).map(l => ({ ...l, category: "Interest-Only Loan" })),
+      ...(liabilities.personalLoans || []).map(l => ({ ...l, category: "Personal Loan" })),
       ...(liabilities.renovationLoans || []).map(l => ({ ...l, category: "Renovation Loan" })),
       ...(liabilities.otherLoans || []).map(l => ({ ...l, category: "Other Loan" }))
     ];
@@ -221,6 +221,20 @@ export default async function handler(req, res) {
 
     // 8. Create Expense Records (with month/year period)
     const allExpenses = [
+      ...(assets.properties || []).filter(p => p.isUnderLoan && p.monthlyInstallment).map(p => ({
+        amount: p.monthlyInstallment,
+        category: "Household",
+        type: "Home Loan Installment",
+        month: new Date().getMonth().toString(),
+        year: new Date().getFullYear().toString()
+      })),
+      ...(assets.vehicles || []).filter(v => v.isUnderLoan && v.monthlyInstallment).map(v => ({
+        amount: v.monthlyInstallment,
+        category: "Transportation",
+        type: "Car Loan Installment",
+        month: new Date().getMonth().toString(),
+        year: new Date().getFullYear().toString()
+      })),
       ...(expenses.household || []).map(e => ({ ...e, category: "Household" })),
       ...(expenses.transportation || []).map(e => ({ ...e, category: "Transportation" })),
       ...(expenses.dependants || []).map(e => ({ ...e, category: "Dependants" })),

@@ -95,6 +95,14 @@ export interface FinancialItem {
   description: string;
   month?: string;
   year?: string;
+  // Loan fields for Property and Vehicle
+  isUnderLoan?: boolean;
+  outstandingBalance?: string;
+  interestRate?: string;
+  tenure?: string;
+  loanCommencementYear?: string;
+  loanCommencementMonth?: string;
+  monthlyInstallment?: string;
 }
 
 export interface ExpenseItem {
@@ -142,10 +150,8 @@ export interface KYCAssetsData {
 }
 
 export interface KYCLiabilitiesData {
-  mortgages: FinancialItem[];
-  carLoans: FinancialItem[];
   studyLoans: FinancialItem[];
-  interestOnlyLoans: FinancialItem[];
+  personalLoans: FinancialItem[];
   renovationLoans: FinancialItem[];
   otherLoans: FinancialItem[];
 }
@@ -247,10 +253,8 @@ export const initialKYCData: KYCData = {
     otherAssets: [],
   },
   liabilities: {
-    mortgages: [],
-    carLoans: [],
     studyLoans: [],
-    interestOnlyLoans: [],
+    personalLoans: [],
     renovationLoans: [],
     otherLoans: [],
   },

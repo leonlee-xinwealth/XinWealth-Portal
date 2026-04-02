@@ -39,10 +39,8 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
     
     // Safety check just in case formData.liabilities is somehow missing
     const liabilitiesData = formData.liabilities || {
-        mortgages: [],
-        carLoans: [],
         studyLoans: [],
-        interestOnlyLoans: [],
+        personalLoans: [],
         renovationLoans: [],
         otherLoans: []
     };
@@ -223,10 +221,8 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                 </div>
                 
                 <div className="space-y-4">
-                    {renderExpandableLoanCard(t('liabilities.mortgages'), Home, "mortgages")}
-                    {renderExpandableLoanCard(t('liabilities.car'), Car, "carLoans")}
                     {renderExpandableLoanCard(t('liabilities.study'), GraduationCap, "studyLoans")}
-                    {renderExpandableLoanCard(t('liabilities.interest'), Percent, "interestOnlyLoans")}
+                    {renderExpandableLoanCard(isZh ? '个人贷款' : 'Personal Loans', Percent, "personalLoans")}
                     {renderExpandableLoanCard(t('liabilities.renovation'), HardHat, "renovationLoans")}
                     {renderExpandableLoanCard(t('liabilities.others'), FolderPlus, "otherLoans")}
                 </div>
