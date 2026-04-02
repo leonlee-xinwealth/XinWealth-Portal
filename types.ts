@@ -78,6 +78,7 @@ export interface UserSession {
   familyName?: string;
   givenName?: string;
   advisor?: string;
+  occupation?: string;
 }
 
 export interface IncomeItem {

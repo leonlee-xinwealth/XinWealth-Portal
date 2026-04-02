@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth, fetchClientProfile } from '../services/larkService';
+import { getSession } from '../services/larkService';
 import { FinancialHealthData, ClientProfile } from '../types';
-import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword } from 'lucide-react';
+import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins } from 'lucide-react';
 
 const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -104,6 +105,11 @@ const Player: React.FC = () => {
   // 7) LUK (幸运) - Net Worth / Total Assets
   const lukValue = healthData.solvencyRatio * 100;
 
+  // Session Data for JOB
+  const session = getSession();
+  const occupation = session?.occupation || 'None';
+  const title = 'Wealth Awakener';
+
   // Formatters
   const formatCurrency = (val: number) => `RM ${val.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
   const formatPercent = (val: number) => `${val.toFixed(1)}%`;
@@ -118,152 +124,141 @@ const Player: React.FC = () => {
         <p className="text-slate-500">Your gamified financial profile. Level up your stats by improving your financial health!</p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="max-w-4xl mx-auto bg-white rounded-3xl p-8 border border-slate-100 shadow-xl relative overflow-hidden">
+        {/* Decorators */}
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-xin-blue via-xin-gold to-xin-blue" />
         
-        {/* Left Column: Player Avatar & Vital Bars (HP/MP) */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm flex flex-col items-center relative overflow-hidden">
-            {/* Background Pattern */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-xin-gold/5 rounded-bl-full -z-10" />
-            <div className="absolute bottom-0 left-0 w-24 h-24 bg-xin-blue/5 rounded-tr-full -z-10" />
-
-            <div className="w-24 h-24 bg-gradient-to-tr from-xin-blue to-blue-400 rounded-full flex items-center justify-center shadow-lg shadow-xin-blue/30 mb-4 border-4 border-white">
-              <span className="text-3xl font-bold text-white">
-                {profileData.name.charAt(0).toUpperCase()}
-              </span>
+        {/* Top Section */}
+        <div className="flex flex-col items-center mb-10">
+          <div className="border border-xin-blue/20 px-10 py-2 rounded-full mb-6 tracking-[0.2em] font-bold text-xin-blue uppercase text-sm">
+            STATUS
+          </div>
+          
+          <div className="flex flex-col md:flex-row items-center gap-6 md:gap-10">
+            {/* Level */}
+            <div className="text-center">
+              <span className="text-6xl font-bold text-xin-blue drop-shadow-sm block leading-none">1</span>
+              <span className="text-xs font-bold text-slate-400 tracking-widest uppercase">Level</span>
             </div>
-            <h3 className="text-xl font-bold text-slate-800 mb-1">{profileData.name}</h3>
-            <p className="text-sm font-semibold text-xin-gold mb-8 uppercase tracking-widest">Financial Player</p>
-
-            {/* HP Bar */}
-            <div className="w-full space-y-2 mb-6">
-              <div className="flex justify-between items-end">
-                <div className="flex items-center gap-2">
-                  <Heart className="text-red-500" size={18} fill="currentColor" />
-                  <span className="font-bold text-slate-700">HP (Health)</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-sm font-bold text-slate-800">{formatCurrency(currentEmergency)}</span>
-                </div>
+            
+            {/* Job and Title */}
+            <div className="space-y-3 md:border-l-2 border-slate-100 md:pl-8 text-center md:text-left">
+              <div className="flex items-center justify-center md:justify-start gap-3">
+                <span className="text-xs font-bold text-slate-400 tracking-widest uppercase w-12 text-right md:text-left">Job</span>
+                <span className="text-lg font-bold text-slate-700">{occupation}</span>
               </div>
-              <div className="h-5 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner relative flex items-center justify-center">
+              <div className="flex items-center justify-center md:justify-start gap-3">
+                <span className="text-xs font-bold text-slate-400 tracking-widest uppercase w-12 text-right md:text-left">Title</span>
+                <span className="text-lg font-bold text-xin-gold">{title}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Middle Box: HP & Gold */}
+        <div className="border-2 border-slate-100 rounded-2xl p-6 mb-8 flex flex-col md:flex-row justify-around items-center gap-8 bg-slate-50/50">
+          {/* HP Bar */}
+          <div className="w-full max-w-sm flex items-center gap-4">
+            <div className="flex flex-col items-center">
+              <Heart className="text-red-500" size={28} fill="currentColor" />
+              <span className="text-[10px] font-bold text-slate-500 mt-1">HP</span>
+            </div>
+            <div className="flex-1">
+              <div className="flex justify-between items-end mb-1">
+                <span className="text-xs font-bold text-slate-500">Emergency</span>
+                <span className="text-xs font-bold text-slate-700">{formatCurrency(currentEmergency)} / {formatCurrency(emergencyTarget)}</span>
+              </div>
+              <div className="h-4 w-full bg-slate-200 rounded-full overflow-hidden shadow-inner relative flex items-center justify-center">
                 <div 
                   className={`absolute left-0 top-0 bottom-0 transition-all duration-1000 ease-out ${hpPercent > 50 ? 'bg-green-500' : hpPercent > 20 ? 'bg-yellow-500' : 'bg-red-500'}`}
                   style={{ width: `${hpPercent}%` }}
                 />
-                <span className="relative text-[11px] font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)] tracking-wide">
+                <span className="relative text-[10px] font-bold text-white drop-shadow-md">
                   {hpPercent.toFixed(0)}%
                 </span>
               </div>
-              <p className="text-xs text-slate-500 text-center">Emergency Reserve</p>
             </div>
+          </div>
 
-            {/* MP Bar */}
-            <div className="w-full space-y-2">
-              <div className="flex justify-between items-end">
-                <div className="flex items-center gap-2">
-                  <Zap className="text-blue-500" size={18} fill="currentColor" />
-                  <span className="font-bold text-slate-700">MP (Mana)</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-sm font-bold text-slate-800">{formatCurrency(mpValue)}</span>
-                </div>
-              </div>
-              <div className="h-5 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner relative flex items-center justify-center">
-                <div 
-                  className="absolute left-0 top-0 bottom-0 bg-blue-500 transition-all duration-1000 ease-out"
-                  style={{ width: `${mpPercent}%` }}
-                />
-                <span className="relative text-[11px] font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)] tracking-wide">
-                  {mpPercent.toFixed(0)}%
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 text-center">Deployable Capital / Net Worth</p>
+          {/* Vertical Divider */}
+          <div className="hidden md:block w-px h-16 bg-slate-200" />
+
+          {/* Gold Value */}
+          <div className="w-full max-w-sm flex items-center gap-4 md:justify-center">
+            <div className="flex flex-col items-center">
+              <Coins className="text-yellow-500" size={28} fill="currentColor" />
+              <span className="text-[10px] font-bold text-slate-500 mt-1">GOLD</span>
+            </div>
+            <div className="flex flex-col justify-center">
+              <span className="text-2xl font-bold text-slate-800">{formatCurrency(mpValue)}</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Deployable Capital</span>
             </div>
           </div>
         </div>
 
-        {/* Right Column: Player Stats */}
-        <div className="lg:col-span-2">
-          <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-sm h-full relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-xin-blue/5 rounded-bl-full -z-10" />
-            
-            <h3 className="text-xl font-bold text-xin-blue mb-8">Character Stats</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Bottom Box: Stats Grid */}
+        <div className="border-2 border-slate-100 rounded-2xl p-8 bg-slate-50/50">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-16 gap-y-8">
+            {/* Col 1 */}
+            <div className="space-y-8">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Sword className="text-orange-500" size={24} />
+                  <span className="font-bold text-slate-600 tracking-wider">ATK</span>
+                </div>
+                <span className="text-xl font-bold text-slate-800">{formatCurrency(atkValue)}</span>
+              </div>
               
-              {/* ATK */}
-              <div className="flex items-start gap-4 p-4 rounded-2xl bg-orange-50/50 border border-orange-100 hover:shadow-md transition-shadow">
-                <div className="p-3 bg-orange-100 rounded-xl text-orange-600">
-                  <Sword size={24} />
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <MovementIcon className="text-emerald-500" size={24} />
+                  <span className="font-bold text-slate-600 tracking-wider">AGI</span>
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">ATK (Attack)</h4>
-                  <p className="text-2xl font-bold text-slate-800 mb-1">{formatCurrency(atkValue)}</p>
-                  <p className="text-xs text-slate-500">Active Monthly Income. Increases your offensive wealth-building power.</p>
+                <span className="text-xl font-bold text-slate-800">{formatPercent(agiValue)}</span>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Sparkles className="text-yellow-500" size={24} />
+                  <span className="font-bold text-slate-600 tracking-wider">LUK</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {lukValue < 50 && (
+                    <span className="text-[10px] font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full uppercase">Bad Luck</span>
+                  )}
+                  <span className="text-xl font-bold text-slate-800">{formatPercent(lukValue)}</span>
                 </div>
               </div>
+            </div>
 
-              {/* DEF */}
-              <div className="flex items-start gap-4 p-4 rounded-2xl bg-indigo-50/50 border border-indigo-100 hover:shadow-md transition-shadow">
-                <div className="p-3 bg-indigo-100 rounded-xl text-indigo-600">
-                  <Shield size={24} />
+            {/* Col 2 */}
+            <div className="space-y-8">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Shield className="text-indigo-500" size={24} />
+                  <span className="font-bold text-slate-600 tracking-wider">DEF</span>
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">DEF (Defense)</h4>
-                  <p className="text-2xl font-bold text-slate-800 mb-1">{formatCurrency(defValue)}</p>
-                  <p className="text-xs text-slate-500">Risk Tolerance / Insurance Coverage. Protects you from unexpected critical hits.</p>
+                <span className="text-xl font-bold text-slate-800">{formatCurrency(defValue)}</span>
+              </div>
+              
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Brain className="text-purple-500" size={24} />
+                  <span className="font-bold text-slate-600 tracking-wider">INT</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full uppercase">{intStatus}</span>
+                  <span className="text-xl font-bold text-slate-800">{formatPercent(intValue)}</span>
                 </div>
               </div>
-
-              {/* INT */}
-              <div className="flex items-start gap-4 p-4 rounded-2xl bg-purple-50/50 border border-purple-100 hover:shadow-md transition-shadow">
-                <div className="p-3 bg-purple-100 rounded-xl text-purple-600">
-                  <Brain size={24} />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">INT (Intelligence)</h4>
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <p className="text-2xl font-bold text-slate-800">{formatPercent(intValue)}</p>
-                    <span className="text-xs font-semibold text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">{intStatus}</span>
-                  </div>
-                  <p className="text-xs text-slate-500">Net Worth Growth Rate. Smart investments increase your INT (Base: 5%, Excellent: 15%+).</p>
-                </div>
+              
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200/80 mt-2">
+                <span className="text-sm font-bold text-slate-500">Available Points</span>
+                <span className="text-2xl font-bold text-xin-blue">0</span>
               </div>
-
-              {/* AGI */}
-              <div className="flex items-start gap-4 p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 hover:shadow-md transition-shadow">
-                <div className="p-3 bg-emerald-100 rounded-xl text-emerald-600">
-                  <MovementIcon size={24} />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">AGI (Agility)</h4>
-                  <p className="text-2xl font-bold text-slate-800 mb-1">{formatPercent(agiValue)}</p>
-                  <p className="text-xs text-slate-500">Liquid Asset to Net Worth. How fast you can mobilize funds in opportunities.</p>
-                </div>
-              </div>
-
-              {/* LUK */}
-              <div className="flex items-start gap-4 p-4 rounded-2xl bg-yellow-50/50 border border-yellow-100 hover:shadow-md transition-shadow md:col-span-2">
-                <div className="p-3 bg-yellow-100 rounded-xl text-yellow-600">
-                  <Sparkles size={24} />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">LUK (Luck)</h4>
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <p className="text-2xl font-bold text-slate-800">{formatPercent(lukValue)}</p>
-                    {lukValue < 50 && (
-                      <span className="text-xs font-semibold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">Bad Luck</span>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-500">Solvency Ratio (Net Worth / Total Assets). True wealth percentage. Higher LUK means you truly own your assets.</p>
-                </div>
-              </div>
-
             </div>
           </div>
         </div>
-
       </div>
     </div>
   );

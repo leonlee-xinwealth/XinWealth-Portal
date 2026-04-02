@@ -116,6 +116,7 @@ export default async function handler(req, res) {
     const familyName = extractLarkValue(userRecord.fields["Family Name"]);
     const givenName = extractLarkValue(userRecord.fields["Given Name"]);
     const advisor = extractLarkValue(userRecord.fields["Advisor"]);
+    const occupation = extractLarkValue(userRecord.fields["Occupation"]);
 
     
     let currentAge = 30; // Default
@@ -145,7 +146,8 @@ export default async function handler(req, res) {
         retirementAge,
         familyName,
         givenName,
-        advisor
+        advisor,
+        occupation
       });
     } else {
       return res.status(401).json({ error: 'Invalid password' });
