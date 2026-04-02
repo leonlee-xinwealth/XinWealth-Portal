@@ -108,7 +108,21 @@ export default async function handler(req, res) {
     const userName = extractLarkValue(userRecord.fields["Client"] || userRecord.fields["Full Name"] || userRecord.fields["Name"]);
     
     // Extract optional fields for projection
-    const dob = extractLarkValue(userRecord.fields["Date of Birth"] || userRecord.fields["DOB"]);
+    let dob = extractLarkValue(userRecord.fields["Date of Birth"] || userRecord.fields["DOB"]);
+    
+    // Lark returns Date/Time fields as a timestamp in milliseconds if not formatted as string.
+    // If dob is a string of numbers (like "482371200000"), parse it back to a readable date format.
+    if (dob && !isNaN(Number(dob)) && String(dob).length > 8) {
+       const dobDate = new Date(Number(dob));
+       if (!isNaN(dobDate.getTime())) {
+           // Format to YYYY/MM/DD or similar readable format
+           const yyyy = dobDate.getFullYear();
+           const mm = String(dobDate.getMonth() + 1).padStart(2, '0');
+           const dd = String(dobDate.getDate()).padStart(2, '0');
+           dob = `${yyyy}/${mm}/${dd}`;
+       }
+    }
+
     const ageStr = extractLarkValue(userRecord.fields["Age"]);
     const retirementAgeStr = extractLarkValue(userRecord.fields["Retirement Age"]);
     
@@ -126,10 +140,10 @@ export default async function handler(req, res) {
     const residency = extractLarkValue(userRecord.fields["Residency"]);
     const epfAccountNumber = extractLarkValue(userRecord.fields["EPF Account Number"] || userRecord.fields["EPF No"]);
     const ppaAccountNumber = extractLarkValue(userRecord.fields["PPA Account Number"] || userRecord.fields["PPA No"]);
-    const correspodenceAddress = extractLarkValue(userRecord.fields["Correspondence Address"] || userRecord.fields["Address"]);
-    const correspodencePostalCode = extractLarkValue(userRecord.fields["Correspondence Postal Code"] || userRecord.fields["Postal Code"]);
-    const correspodenceCity = extractLarkValue(userRecord.fields["Correspondence City"] || userRecord.fields["City"]);
-    const correspodenceState = extractLarkValue(userRecord.fields["Correspondence State"] || userRecord.fields["State"]);
+    const correspodenceAddress = extractLarkValue(userRecord.fields["Correspondence Address"]);
+    const correspodencePostalCode = extractLarkValue(userRecord.fields["Correspondence Postal Code"]);
+    const correspodenceCity = extractLarkValue(userRecord.fields["Correspondence City"]);
+    const correspodenceState = extractLarkValue(userRecord.fields["Correspondence State"]);
 
     
     let currentAge = 30; // Default
