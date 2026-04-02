@@ -5,6 +5,12 @@ import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealt
  */
 
 const setSession = (data: any) => localStorage.setItem('xinwealth_user', JSON.stringify(data));
+export const updateSession = (partialData: Partial<UserSession>) => {
+  const current = getSession();
+  if (current) {
+    setSession({ ...current, ...partialData });
+  }
+};
 export const getSession = (): UserSession | null => {
   const s = localStorage.getItem('xinwealth_user');
   return s ? JSON.parse(s) as UserSession : null;
@@ -310,6 +316,66 @@ export const fetchRawHealthData = async (): Promise<any> => {
   return await response.json();
 };
 
+export const updateClientInfo = async (recordId: string, fields: any): Promise<{ success: boolean }> => {
+  try {
+    const session = getSession();
+    if (!session || !session.token) {
+      throw new Error("Authentication error. Please login again.");
+    }
+
+    const response = await fetch('/api/updateClient', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.token}`
+      },
+      body: JSON.stringify({ recordId, fields }) // We still send recordId for fallback or validation, though backend will trust token
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to update client info');
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Update Client Info Error:", error);
+    throw error;
+  }
+};
+
+export const getLatestRecords = (records: any[]) => {
+  if (!records || records.length === 0) return [];
+  // Sort by Submission Date or created time if available, otherwise by Year and Month
+  const sorted = [...records].sort((a, b) => {
+    // First try Year and Month
+    const yearA = parseInt(a.fields["Year"] || a.fields["year"] || "0", 10);
+    const yearB = parseInt(b.fields["Year"] || b.fields["year"] || "0", 10);
+    if (yearA !== yearB) return yearB - yearA; // Descending
+    
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const getMonthIndex = (m: string) => monthNames.indexOf(m);
+    const monthA = getMonthIndex(a.fields["Month"] || a.fields["month"] || "");
+    const monthB = getMonthIndex(b.fields["Month"] || b.fields["month"] || "");
+    if (monthA !== monthB) return monthB - monthA;
+
+    // Fallback to record creation time
+    return b.create_time - a.create_time; 
+  });
+
+  // The first one is the latest. We want all records that share its Year and Month.
+  const latestYear = sorted[0].fields["Year"] || sorted[0].fields["year"];
+  const latestMonth = sorted[0].fields["Month"] || sorted[0].fields["month"];
+  
+  // If no month/year, just return all (for backward compatibility)
+  if (!latestYear && !latestMonth) return records;
+
+  return sorted.filter(r => 
+    (r.fields["Year"] || r.fields["year"]) === latestYear && 
+    (r.fields["Month"] || r.fields["month"]) === latestMonth
+  );
+};
+
 export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
   const data = await fetchRawHealthData();
 
@@ -323,12 +389,18 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
     return 0;
   };
 
-  // 1. Calculate components
+  // 1. Calculate components using only the latest snapshots
+  const latestAssets = getLatestRecords(data.assets || []);
+  const latestInvestments = getLatestRecords(data.investments || []);
+  const latestLiabilities = getLatestRecords(data.liabilities || []);
+  const latestExpenses = getLatestRecords(data.expenses || []);
+  const latestIncomes = getLatestRecords(data.incomes || []);
+
   let cashAndFD = 0;
   let totalAssets = 0;
   let investmentAssets = 0;
   
-  (data.assets || []).forEach((item: any) => {
+  latestAssets.forEach((item: any) => {
     const val = getValue(item, ["Value", "value", "Amount", "amount"]);
     const cat = item.fields["Category"] || "";
     totalAssets += val;
@@ -337,14 +409,14 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
     }
   });
 
-  (data.investments || []).forEach((item: any) => {
+  latestInvestments.forEach((item: any) => {
     const val = getValue(item, ["Amount", "amount", "Value", "value", "End Value"]);
     totalAssets += val;
     investmentAssets += val;
   });
 
   let totalLiabilities = 0;
-  (data.liabilities || []).forEach((item: any) => {
+  latestLiabilities.forEach((item: any) => {
     const val = getValue(item, ["Outstanding Amount", "outstanding amount", "Amount", "amount"]);
     totalLiabilities += val;
   });
@@ -354,9 +426,9 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
   let monthlyExpenses = 0;
   let annualExpenses = 0;
   let totalMonthlyDebtRepayment = 0;
-  let consumerDebtRepayment = 0; // assuming non-mortgage loans
+  let consumerDebtRepayment = 0; 
 
-  (data.expenses || []).forEach((item: any) => {
+  latestExpenses.forEach((item: any) => {
     let val = getValue(item, ["Amount", "amount"]);
     const type = item.fields["Type"] || "";
 
@@ -371,9 +443,6 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
 
     if (type === 'Loan Repayment' || type.includes('Loan')) {
        totalMonthlyDebtRepayment += val;
-       // Try to guess if consumer debt. In expenses we only have 'Loan Repayment' usually.
-       // Let's assume all loan repayments in expenses are consumer unless specified as mortgage.
-       // A simplistic approach:
        consumerDebtRepayment += val; 
     }
   });
@@ -381,7 +450,7 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
   let monthlyGrossIncome = 0;
   let annualPassiveIncome = 0;
 
-  (data.incomes || []).forEach((item: any) => {
+  latestIncomes.forEach((item: any) => {
     let val = getValue(item, ["Amount", "amount"]);
     const cat = item.fields["Category"] || "";
 
@@ -392,9 +461,6 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
     }
 
     if (cat === 'Rental Income' || cat === 'Dividend Income') {
-      // Assuming entered as monthly or yearly?
-      // KYC form allows month/year but it's just amount. Let's assume amount is monthly unless it's a known annual thing.
-      // Usually rental is monthly, dividend can be annual. We will just multiply by 12 for simplicity.
       annualPassiveIncome += val * 12;
     }
   });

@@ -70,6 +70,7 @@ export interface ClientProfile {
 
 export interface UserSession {
   success: boolean;
+  token?: string; // JWT token for backend auth
   name: string;
   email: string;
   recordId: string;

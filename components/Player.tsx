@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { fetchFinancialHealth, fetchClientProfile } from '../services/larkService';
+import { fetchFinancialHealth, fetchClientProfile, updateClientInfo, updateSession } from '../services/larkService';
 import { getSession } from '../services/larkService';
-import { FinancialHealthData, ClientProfile } from '../types';
-import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins, User } from 'lucide-react';
+import { FinancialHealthData, ClientProfile, UserSession } from '../types';
+import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins, User, Edit2, X, Check, Save } from 'lucide-react';
+import LevelUp from './LevelUp';
 
 const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -31,7 +32,14 @@ const Player: React.FC = () => {
   const [profileData, setProfileData] = useState<ClientProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'stats' | 'info'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'info' | 'levelup'>('stats');
+  const session = getSession();
+
+  // Edit Mode State
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [editFormData, setEditFormData] = useState<Partial<UserSession>>({});
+  const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null);
 
   useEffect(() => {
     const loadData = async () => {
@@ -107,7 +115,6 @@ const Player: React.FC = () => {
   const lukValue = healthData.solvencyRatio * 100;
 
   // Session Data for JOB
-  const session = getSession();
   const occupation = session?.occupation || 'None';
   const title = 'Wealth Awakener';
 
@@ -115,10 +122,155 @@ const Player: React.FC = () => {
   const formatCurrency = (val: number) => `RM ${val.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
   const formatPercent = (val: number) => `${val.toFixed(1)}%`;
 
-  const InfoRow = ({ label, value }: { label: string, value?: string | number }) => (
-    <div className="flex flex-col sm:flex-row sm:justify-between py-3 border-b border-slate-100 last:border-0 gap-1">
-      <span className="text-sm font-bold text-slate-500">{label}</span>
-      <span className="text-sm font-medium text-slate-800 text-right">{value || '-'}</span>
+  const handleEditToggle = () => {
+    if (isEditing) {
+      // Cancel edit
+      setIsEditing(false);
+      setEditFormData({});
+      setSaveMessage(null);
+    } else {
+      // Start edit
+      setIsEditing(true);
+      setSaveMessage(null);
+      if (session) {
+        setEditFormData({
+          familyName: session.familyName || '',
+          givenName: session.givenName || '',
+          nric: session.nric || '',
+          dob: session.dob || '',
+          gender: session.gender || '',
+          maritalStatus: session.maritalStatus || '',
+          nationality: session.nationality || '',
+          residency: session.residency || '',
+          epfAccountNumber: session.epfAccountNumber || '',
+          ppaAccountNumber: session.ppaAccountNumber || '',
+          correspondenceAddress: session.correspondenceAddress || '',
+          correspondencePostalCode: session.correspondencePostalCode || '',
+          correspondenceCity: session.correspondenceCity || '',
+          correspondenceState: session.correspondenceState || ''
+        });
+      }
+    }
+  };
+
+  const handleInputChange = (field: keyof UserSession, value: string) => {
+    setEditFormData(prev => {
+      const newData = { ...prev, [field]: value };
+      
+      // Auto-calculate age if DOB is updated
+      if (field === 'dob' && value) {
+        const dateObj = new Date(value);
+        if (!isNaN(dateObj.getTime())) {
+          const ageDiffMs = Date.now() - dateObj.getTime();
+          const ageDate = new Date(ageDiffMs);
+          const calculatedAge = Math.abs(ageDate.getUTCFullYear() - 1970);
+          newData.currentAge = calculatedAge;
+        }
+      }
+      return newData;
+    });
+  };
+
+  const handleSave = async () => {
+    if (!session || !session.recordId) return;
+
+    // Dirty check: Only save if there are changes
+    let hasChanges = false;
+    const fieldsToUpdate: Record<string, string> = {};
+
+    const mapping: Array<{ key: keyof UserSession, larkField: string }> = [
+      { key: 'familyName', larkField: 'Family Name' },
+      { key: 'givenName', larkField: 'Given Name' },
+      { key: 'nric', larkField: 'NRIC' },
+      { key: 'dob', larkField: 'Date of Birth' }, // Lark format needs to be checked, assuming string works if text field, or date string
+      { key: 'gender', larkField: 'Gender' },
+      { key: 'maritalStatus', larkField: 'Marital Status' },
+      { key: 'nationality', larkField: 'Nationality' },
+      { key: 'residency', larkField: 'Residency' },
+      { key: 'epfAccountNumber', larkField: 'EPF Account Number' },
+      { key: 'ppaAccountNumber', larkField: 'PPA Account Number' },
+      { key: 'correspondenceAddress', larkField: 'Correspondence Address' },
+      { key: 'correspondencePostalCode', larkField: 'Correspondence Postal Code' },
+      { key: 'correspondenceCity', larkField: 'Correspondence City' },
+      { key: 'correspondenceState', larkField: 'Correspondence State' },
+    ];
+
+    for (const { key, larkField } of mapping) {
+      const newValue = editFormData[key];
+      const oldValue = session[key];
+      if (newValue !== undefined && newValue !== (oldValue || '')) {
+        hasChanges = true;
+        fieldsToUpdate[larkField] = String(newValue);
+      }
+    }
+
+    if (!hasChanges) {
+      setSaveMessage({ type: 'success', text: 'No changes detected. Save successful.' });
+      setTimeout(() => { setIsEditing(false); setSaveMessage(null); }, 2000);
+      return;
+    }
+
+    // Frontend Validations
+    if (editFormData.correspondencePostalCode && !/^\d+$/.test(editFormData.correspondencePostalCode)) {
+      setSaveMessage({ type: 'error', text: 'Postal Code must contain only numbers.' });
+      return;
+    }
+    if (editFormData.dob) {
+      const dateObj = new Date(editFormData.dob);
+      if (isNaN(dateObj.getTime())) {
+        setSaveMessage({ type: 'error', text: 'Invalid Date of Birth format.' });
+        return;
+      }
+      if (dateObj > new Date()) {
+        setSaveMessage({ type: 'error', text: 'Date of Birth cannot be in the future.' });
+        return;
+      }
+    }
+
+    // Calculate Age in backend representation as string if needed, 
+    // but the backend only maps DOB right now. If we want Lark to also save Age:
+    if (hasChanges && editFormData.currentAge !== session.currentAge) {
+       fieldsToUpdate['Age'] = String(editFormData.currentAge);
+    }
+
+    setIsSaving(true);
+    setSaveMessage(null);
+
+    try {
+      // API call to update Lark
+      await updateClientInfo(session.recordId, fieldsToUpdate);
+      
+      // Update local session storage
+      updateSession(editFormData);
+      
+      setSaveMessage({ type: 'success', text: 'Profile updated successfully!' });
+      setTimeout(() => { setIsEditing(false); setSaveMessage(null); }, 2000);
+    } catch (err: any) {
+      setSaveMessage({ type: 'error', text: err.message || 'Failed to update profile' });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const InfoRow = ({ label, field, value, readonly = false, placeholder = '' }: { label: string, field: keyof UserSession, value?: string | number, readonly?: boolean, placeholder?: string }) => (
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between py-3 border-b border-slate-100 last:border-0 gap-2 min-h-[48px]">
+      <span className="text-sm font-bold text-slate-500 w-1/3">{label}</span>
+      <div className="flex-1 flex justify-end">
+        {isEditing && !readonly ? (
+          <input 
+            type="text" 
+            placeholder={placeholder}
+            className="w-full max-w-[240px] px-3 py-1.5 text-sm font-medium text-slate-800 bg-white border border-xin-blue/30 rounded-lg focus:outline-none focus:ring-2 focus:ring-xin-blue/50 text-right"
+            value={String(editFormData[field] || '')}
+            onChange={(e) => handleInputChange(field, e.target.value)}
+            disabled={isSaving}
+          />
+        ) : (
+          <span className={`text-sm font-medium text-right ${readonly && isEditing ? 'text-slate-400 cursor-not-allowed' : 'text-slate-800'}`}>
+            {isEditing && readonly ? String(editFormData[field] || value || '-') : String(value || '-')}
+          </span>
+        )}
+      </div>
     </div>
   );
 
@@ -157,9 +309,21 @@ const Player: React.FC = () => {
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-xin-blue rounded-t-full" />
           )}
         </button>
+        <button
+          onClick={() => setActiveTab('levelup')}
+          className={`pb-4 px-2 text-sm font-bold uppercase tracking-wider transition-colors relative flex items-center gap-2 ${
+            activeTab === 'levelup' ? 'text-xin-blue' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <TrendingUp size={16} />
+          Level Up
+          {activeTab === 'levelup' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-xin-blue rounded-t-full" />
+          )}
+        </button>
       </div>
 
-      {activeTab === 'stats' ? (
+      {activeTab === 'stats' && (
         <div className="max-w-4xl mx-auto bg-white rounded-3xl p-8 border border-slate-100 shadow-xl relative overflow-hidden">
           {/* Decorators */}
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-xin-blue via-xin-gold to-xin-blue" />
@@ -296,45 +460,89 @@ const Player: React.FC = () => {
           </div>
         </div>
         </div>
-      ) : (
+      )}
+      
+      {activeTab === 'info' && (
         <div className="max-w-4xl mx-auto bg-white rounded-3xl p-8 border border-slate-100 shadow-xl relative overflow-hidden">
           <div className="absolute top-0 right-0 w-64 h-64 bg-xin-blue/5 rounded-bl-full -z-10" />
           
-          <h3 className="text-xl font-bold text-xin-blue mb-8">Personal Information</h3>
+          <div className="flex justify-between items-start mb-8">
+            <h3 className="text-xl font-bold text-xin-blue">Personal Information</h3>
+            
+            {!isEditing ? (
+              <button 
+                onClick={handleEditToggle}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-xin-blue bg-xin-blue/10 rounded-full hover:bg-xin-blue/20 transition-colors"
+              >
+                <Edit2 size={16} />
+                Edit
+              </button>
+            ) : (
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={handleEditToggle}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-slate-500 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors disabled:opacity-50"
+                >
+                  <X size={16} />
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSave}
+                  disabled={isSaving}
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white bg-xin-blue rounded-full hover:bg-xin-blue/90 transition-colors shadow-md shadow-xin-blue/30 disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                  {isSaving ? 'Saving...' : 'Save'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {saveMessage && (
+            <div className={`mb-6 p-4 rounded-xl flex items-center gap-3 ${saveMessage.type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+              {saveMessage.type === 'success' ? <Check size={20} /> : <AlertCircle size={20} />}
+              <span className="font-bold text-sm">{saveMessage.text}</span>
+            </div>
+          )}
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
             {/* Basic Info */}
-            <div className="space-y-1 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
+            <div className={`space-y-1 bg-slate-50/50 p-6 rounded-2xl border transition-colors ${isEditing ? 'border-xin-blue/30 shadow-inner bg-slate-50/80' : 'border-slate-100'}`}>
               <h4 className="text-xs font-bold text-xin-gold uppercase tracking-widest mb-4">Identity</h4>
-              <InfoRow label="Family Name" value={session?.familyName} />
-              <InfoRow label="Given Name" value={session?.givenName} />
-              <InfoRow label="NRIC" value={session?.nric} />
-              <InfoRow label="Date of Birth" value={session?.dob} />
-              <InfoRow label="Age" value={session?.currentAge} />
-              <InfoRow label="Gender" value={session?.gender} />
-              <InfoRow label="Marital Status" value={session?.maritalStatus} />
-              <InfoRow label="Nationality" value={session?.nationality} />
-              <InfoRow label="Residency" value={session?.residency} />
+              <InfoRow label="Family Name" field="familyName" value={session?.familyName} />
+              <InfoRow label="Given Name" field="givenName" value={session?.givenName} />
+              <InfoRow label="NRIC" field="nric" value={session?.nric} />
+              <InfoRow label="Date of Birth" field="dob" value={session?.dob} placeholder="YYYY/MM/DD" />
+              <InfoRow label="Age" field="currentAge" value={session?.currentAge} readonly={true} />
+              <InfoRow label="Gender" field="gender" value={session?.gender} />
+              <InfoRow label="Marital Status" field="maritalStatus" value={session?.maritalStatus} />
+              <InfoRow label="Nationality" field="nationality" value={session?.nationality} />
+              <InfoRow label="Residency" field="residency" value={session?.residency} />
             </div>
 
             {/* Financial & Contact Info */}
             <div className="space-y-6">
-              <div className="space-y-1 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
+              <div className={`space-y-1 bg-slate-50/50 p-6 rounded-2xl border transition-colors ${isEditing ? 'border-xin-blue/30 shadow-inner bg-slate-50/80' : 'border-slate-100'}`}>
                 <h4 className="text-xs font-bold text-xin-gold uppercase tracking-widest mb-4">Accounts</h4>
-                <InfoRow label="EPF Account Number" value={session?.epfAccountNumber} />
-                <InfoRow label="PPA Account Number" value={session?.ppaAccountNumber} />
+                <InfoRow label="EPF Account Number" field="epfAccountNumber" value={session?.epfAccountNumber} />
+                <InfoRow label="PPA Account Number" field="ppaAccountNumber" value={session?.ppaAccountNumber} />
               </div>
               
-              <div className="space-y-1 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
+              <div className={`space-y-1 bg-slate-50/50 p-6 rounded-2xl border transition-colors ${isEditing ? 'border-xin-blue/30 shadow-inner bg-slate-50/80' : 'border-slate-100'}`}>
                 <h4 className="text-xs font-bold text-xin-gold uppercase tracking-widest mb-4">Contact</h4>
-                <InfoRow label="Correspondence Address" value={session?.correspondenceAddress} />
-                <InfoRow label="Postal Code" value={session?.correspondencePostalCode} />
-                <InfoRow label="City" value={session?.correspondenceCity} />
-                <InfoRow label="State" value={session?.correspondenceState} />
+                <InfoRow label="Correspondence Address" field="correspondenceAddress" value={session?.correspondenceAddress} />
+                <InfoRow label="Postal Code" field="correspondencePostalCode" value={session?.correspondencePostalCode} />
+                <InfoRow label="City" field="correspondenceCity" value={session?.correspondenceCity} />
+                <InfoRow label="State" field="correspondenceState" value={session?.correspondenceState} />
               </div>
             </div>
           </div>
         </div>
+      )}
+
+      {activeTab === 'levelup' && (
+        <LevelUp />
       )}
     </div>
   );

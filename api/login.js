@@ -1,3 +1,5 @@
+import jwt from 'jsonwebtoken';
+
 // Robust Login Handler
 
 // Helper to handle Lark Field types (Text, Lookup Array, Link Object)
@@ -164,8 +166,20 @@ export default async function handler(req, res) {
     }
     
     if (storedPassword.trim() === String(password).trim()) {
+      // Create JWT Token for secure backend requests
+      const jwtSecret = process.env.JWT_SECRET || appSecret || 'fallback_secret_xinwealth';
+      const authToken = jwt.sign(
+        { 
+          recordId: userRecord.record_id,
+          email: email
+        },
+        jwtSecret,
+        { expiresIn: '24h' }
+      );
+
       return res.status(200).json({ 
         success: true, 
+        token: authToken,
         name: userName,
         email: email,
         recordId: userRecord.record_id,
