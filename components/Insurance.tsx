@@ -114,7 +114,11 @@ const Insurance: React.FC = () => {
     if (Array.isArray(policyField) && policyField.length > 0) {
       // Lark attachment field format
       if (policyField[0].file_token) {
-        // Route through our proxy endpoint
+        // Use the tmp_url provided by Lark if available (this is the most reliable way for bitable attachments)
+        if (policyField[0].tmp_url) return policyField[0].tmp_url;
+        if (policyField[0].url) return policyField[0].url;
+        
+        // Fallback to our proxy endpoint
         return `/api/download?file_token=${policyField[0].file_token}`; 
       }
       // Link field format
