@@ -117,6 +117,19 @@ export default async function handler(req, res) {
     const givenName = extractLarkValue(userRecord.fields["Given Name"]);
     const advisor = extractLarkValue(userRecord.fields["Advisor"]);
     const occupation = extractLarkValue(userRecord.fields["Occupation"]);
+    
+    // Player Info extended fields
+    const nric = extractLarkValue(userRecord.fields["NRIC"] || userRecord.fields["IC"] || userRecord.fields["IC Number"]);
+    const gender = extractLarkValue(userRecord.fields["Gender"]);
+    const maritalStatus = extractLarkValue(userRecord.fields["Marital Status"]);
+    const nationality = extractLarkValue(userRecord.fields["Nationality"]);
+    const residency = extractLarkValue(userRecord.fields["Residency"]);
+    const epfAccountNumber = extractLarkValue(userRecord.fields["EPF Account Number"] || userRecord.fields["EPF No"]);
+    const ppaAccountNumber = extractLarkValue(userRecord.fields["PPA Account Number"] || userRecord.fields["PPA No"]);
+    const correspodenceAddress = extractLarkValue(userRecord.fields["Correspondence Address"] || userRecord.fields["Address"]);
+    const correspodencePostalCode = extractLarkValue(userRecord.fields["Correspondence Postal Code"] || userRecord.fields["Postal Code"]);
+    const correspodenceCity = extractLarkValue(userRecord.fields["Correspondence City"] || userRecord.fields["City"]);
+    const correspodenceState = extractLarkValue(userRecord.fields["Correspondence State"] || userRecord.fields["State"]);
 
     
     let currentAge = 30; // Default
@@ -147,7 +160,19 @@ export default async function handler(req, res) {
         familyName,
         givenName,
         advisor,
-        occupation
+        occupation,
+        dob,
+        nric,
+        gender,
+        maritalStatus,
+        nationality,
+        residency,
+        epfAccountNumber,
+        ppaAccountNumber,
+        correspodenceAddress,
+        correspodencePostalCode,
+        correspodenceCity,
+        correspodenceState
       });
     } else {
       return res.status(401).json({ error: 'Invalid password' });

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth, fetchClientProfile } from '../services/larkService';
 import { getSession } from '../services/larkService';
 import { FinancialHealthData, ClientProfile } from '../types';
-import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins } from 'lucide-react';
+import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins, User } from 'lucide-react';
 
 const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -31,6 +31,7 @@ const Player: React.FC = () => {
   const [profileData, setProfileData] = useState<ClientProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'stats' | 'info'>('stats');
 
   useEffect(() => {
     const loadData = async () => {
@@ -114,6 +115,13 @@ const Player: React.FC = () => {
   const formatCurrency = (val: number) => `RM ${val.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
   const formatPercent = (val: number) => `${val.toFixed(1)}%`;
 
+  const InfoRow = ({ label, value }: { label: string, value?: string | number }) => (
+    <div className="flex flex-col sm:flex-row sm:justify-between py-3 border-b border-slate-100 last:border-0 gap-1">
+      <span className="text-sm font-bold text-slate-500">{label}</span>
+      <span className="text-sm font-medium text-slate-800 text-right">{value || '-'}</span>
+    </div>
+  );
+
   return (
     <div className="animate-fade-in-up pb-10">
       <div className="mb-8">
@@ -124,8 +132,36 @@ const Player: React.FC = () => {
         <p className="text-slate-500">Your gamified financial profile. Level up your stats by improving your financial health!</p>
       </div>
 
-      <div className="max-w-4xl mx-auto bg-white rounded-3xl p-8 border border-slate-100 shadow-xl relative overflow-hidden">
-        {/* Decorators */}
+      <div className="flex gap-4 mb-8 border-b border-slate-200">
+        <button
+          onClick={() => setActiveTab('stats')}
+          className={`pb-4 px-2 text-sm font-bold uppercase tracking-wider transition-colors relative flex items-center gap-2 ${
+            activeTab === 'stats' ? 'text-xin-blue' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <Gamepad2 size={16} />
+          Attributes
+          {activeTab === 'stats' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-xin-blue rounded-t-full" />
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab('info')}
+          className={`pb-4 px-2 text-sm font-bold uppercase tracking-wider transition-colors relative flex items-center gap-2 ${
+            activeTab === 'info' ? 'text-xin-blue' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <User size={16} />
+          Player Info
+          {activeTab === 'info' && (
+            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-xin-blue rounded-t-full" />
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'stats' ? (
+        <div className="max-w-4xl mx-auto bg-white rounded-3xl p-8 border border-slate-100 shadow-xl relative overflow-hidden">
+          {/* Decorators */}
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-xin-blue via-xin-gold to-xin-blue" />
         
         {/* Top Section */}
@@ -259,7 +295,47 @@ const Player: React.FC = () => {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      ) : (
+        <div className="max-w-4xl mx-auto bg-white rounded-3xl p-8 border border-slate-100 shadow-xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-xin-blue/5 rounded-bl-full -z-10" />
+          
+          <h3 className="text-xl font-bold text-xin-blue mb-8">Personal Information</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+            {/* Basic Info */}
+            <div className="space-y-1 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
+              <h4 className="text-xs font-bold text-xin-gold uppercase tracking-widest mb-4">Identity</h4>
+              <InfoRow label="Family Name" value={session?.familyName} />
+              <InfoRow label="Given Name" value={session?.givenName} />
+              <InfoRow label="NRIC" value={session?.nric} />
+              <InfoRow label="Date of Birth" value={session?.dob} />
+              <InfoRow label="Age" value={session?.currentAge} />
+              <InfoRow label="Gender" value={session?.gender} />
+              <InfoRow label="Marital Status" value={session?.maritalStatus} />
+              <InfoRow label="Nationality" value={session?.nationality} />
+              <InfoRow label="Residency" value={session?.residency} />
+            </div>
+
+            {/* Financial & Contact Info */}
+            <div className="space-y-6">
+              <div className="space-y-1 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
+                <h4 className="text-xs font-bold text-xin-gold uppercase tracking-widest mb-4">Accounts</h4>
+                <InfoRow label="EPF Account Number" value={session?.epfAccountNumber} />
+                <InfoRow label="PPA Account Number" value={session?.ppaAccountNumber} />
+              </div>
+              
+              <div className="space-y-1 bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
+                <h4 className="text-xs font-bold text-xin-gold uppercase tracking-widest mb-4">Contact</h4>
+                <InfoRow label="Correspondence Address" value={session?.correspodenceAddress} />
+                <InfoRow label="Postal Code" value={session?.correspodencePostalCode} />
+                <InfoRow label="City" value={session?.correspodenceCity} />
+                <InfoRow label="State" value={session?.correspodenceState} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

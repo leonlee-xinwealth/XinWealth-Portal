@@ -202,10 +202,11 @@ export default async function handler(req, res) {
     const allLiabilities = [
       ...(assets.properties || []).filter(p => p.isUnderLoan).map(p => ({ ...p, amount: p.outstandingBalance, category: "Mortgage" })),
       ...(assets.vehicles || []).filter(v => v.isUnderLoan).map(v => ({ ...v, amount: v.outstandingBalance, category: "Car Loan" })),
-      ...(liabilities.studyLoans || []).map(l => ({ ...l, category: "Study Loan" })),
-      ...(liabilities.personalLoans || []).map(l => ({ ...l, category: "Personal Loan" })),
-      ...(liabilities.renovationLoans || []).map(l => ({ ...l, category: "Renovation Loan" })),
-      ...(liabilities.otherLoans || []).map(l => ({ ...l, category: "Other Loan" }))
+      ...(investments.fixedDeposits || []).filter(i => i.isUnderLoan).map(i => ({ ...i, amount: i.outstandingBalance, category: "Mortgage" })),
+      ...(liabilities.studyLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Study Loan" })),
+      ...(liabilities.personalLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Personal Loan" })),
+      ...(liabilities.renovationLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Renovation Loan" })),
+      ...(liabilities.otherLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Other Loan" }))
     ];
 
     await createSubRecords(tableLiabilities, allLiabilities, item => {
@@ -232,6 +233,41 @@ export default async function handler(req, res) {
         amount: v.monthlyInstallment,
         category: "Transportation",
         type: "Car Loan Installment",
+        month: new Date().getMonth().toString(),
+        year: new Date().getFullYear().toString()
+      })),
+      ...(investments.fixedDeposits || []).filter(i => i.isUnderLoan && i.monthlyInstallment).map(i => ({
+        amount: i.monthlyInstallment,
+        category: "Other",
+        type: "Investment Property Installment",
+        month: new Date().getMonth().toString(),
+        year: new Date().getFullYear().toString()
+      })),
+      ...(liabilities.studyLoans || []).filter(l => l.isUnderLoan && l.monthlyInstallment).map(l => ({
+        amount: l.monthlyInstallment,
+        category: "Other",
+        type: "Study Loan Installment",
+        month: new Date().getMonth().toString(),
+        year: new Date().getFullYear().toString()
+      })),
+      ...(liabilities.personalLoans || []).filter(l => l.isUnderLoan && l.monthlyInstallment).map(l => ({
+        amount: l.monthlyInstallment,
+        category: "Personal",
+        type: "Personal Loan Installment",
+        month: new Date().getMonth().toString(),
+        year: new Date().getFullYear().toString()
+      })),
+      ...(liabilities.renovationLoans || []).filter(l => l.isUnderLoan && l.monthlyInstallment).map(l => ({
+        amount: l.monthlyInstallment,
+        category: "Household",
+        type: "Renovation Loan Installment",
+        month: new Date().getMonth().toString(),
+        year: new Date().getFullYear().toString()
+      })),
+      ...(liabilities.otherLoans || []).filter(l => l.isUnderLoan && l.monthlyInstallment).map(l => ({
+        amount: l.monthlyInstallment,
+        category: "Other",
+        type: "Other Loan Installment",
         month: new Date().getMonth().toString(),
         year: new Date().getFullYear().toString()
       })),

@@ -79,6 +79,19 @@ export interface UserSession {
   givenName?: string;
   advisor?: string;
   occupation?: string;
+  // Extended fields for Player Info
+  nric?: string;
+  dob?: string;
+  gender?: string;
+  maritalStatus?: string;
+  nationality?: string;
+  residency?: string;
+  epfAccountNumber?: string;
+  ppaAccountNumber?: string;
+  correspodenceAddress?: string;
+  correspodencePostalCode?: string;
+  correspodenceCity?: string;
+  correspodenceState?: string;
 }
 
 export interface IncomeItem {

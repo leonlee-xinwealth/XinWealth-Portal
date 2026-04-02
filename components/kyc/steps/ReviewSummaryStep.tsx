@@ -47,7 +47,13 @@ const calculateTotalLiabilities = (formData: any) => {
     let total = 0;
     const liabilities = formData.liabilities;
     ['studyLoans', 'personalLoans', 'renovationLoans', 'otherLoans'].forEach(key => {
-        liabilities[key]?.forEach((item: FinancialItem) => total += parseAmount(item.amount));
+        liabilities[key]?.forEach((item: FinancialItem) => {
+            if (item.isUnderLoan && item.outstandingBalance) {
+                total += parseAmount(item.outstandingBalance);
+            } else if (!item.isUnderLoan) {
+                total += parseAmount(item.amount);
+            }
+        });
     });
     
     // Add dynamically from assets
@@ -58,6 +64,14 @@ const calculateTotalLiabilities = (formData: any) => {
                 total += parseAmount(item.outstandingBalance);
             }
         });
+    });
+
+    // Add dynamically from investments (investment properties / fixedDeposits)
+    const investments = formData.investments;
+    investments?.fixedDeposits?.forEach((item: any) => {
+        if (item.isUnderLoan && item.outstandingBalance) {
+            total += parseAmount(item.outstandingBalance);
+        }
     });
     
     return total;
@@ -83,6 +97,24 @@ const calculateTotalExpenses = (formData: any) => {
                 total += parseAmount(item.monthlyInstallment) * 12;
             }
         });
+    });
+
+    // Add dynamically from liabilities monthly installments
+    const liabilities = formData.liabilities;
+    ['studyLoans', 'personalLoans', 'renovationLoans', 'otherLoans'].forEach(key => {
+        liabilities[key]?.forEach((item: any) => {
+            if (item.isUnderLoan && item.monthlyInstallment) {
+                total += parseAmount(item.monthlyInstallment) * 12;
+            }
+        });
+    });
+
+    // Add dynamically from investments monthly installments
+    const investments = formData.investments;
+    investments?.fixedDeposits?.forEach((item: any) => {
+        if (item.isUnderLoan && item.monthlyInstallment) {
+            total += parseAmount(item.monthlyInstallment) * 12;
+        }
     });
 
     return total;
