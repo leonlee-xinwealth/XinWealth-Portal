@@ -1,7 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth, fetchClientProfile } from '../services/larkService';
 import { FinancialHealthData, ClientProfile } from '../types';
-import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, PersonStanding, Sparkles, Sword } from 'lucide-react';
+import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword } from 'lucide-react';
+
+const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
+  <svg 
+    width={size} 
+    height={size} 
+    viewBox="0 0 24 24" 
+    fill="none" 
+    stroke="currentColor" 
+    strokeWidth="2.5" 
+    strokeLinecap="round" 
+    strokeLinejoin="round" 
+    className={className}
+  >
+    <path d="M4 8h4" />
+    <path d="M2 12h5" />
+    <path d="M5 16h3" />
+    <circle cx="16" cy="5" r="2" />
+    <path d="M12 10l2-2l3 2l2-1" />
+    <path d="M14 8v5l-3 4l-2 4" />
+    <path d="M11 17l4 1l1 4" />
+  </svg>
+);
 
 const Player: React.FC = () => {
   const [healthData, setHealthData] = useState<FinancialHealthData | null>(null);
@@ -124,16 +146,16 @@ const Player: React.FC = () => {
                   <span className="text-sm font-bold text-slate-800">{formatCurrency(currentEmergency)}</span>
                 </div>
               </div>
-              <div 
-                className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner cursor-help"
-                title={`${hpPercent.toFixed(1)}%`}
-              >
+              <div className="h-5 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner relative flex items-center justify-center">
                 <div 
-                  className={`h-full transition-all duration-1000 ease-out ${hpPercent > 50 ? 'bg-green-500' : hpPercent > 20 ? 'bg-yellow-500' : 'bg-red-500'}`}
+                  className={`absolute left-0 top-0 bottom-0 transition-all duration-1000 ease-out ${hpPercent > 50 ? 'bg-green-500' : hpPercent > 20 ? 'bg-yellow-500' : 'bg-red-500'}`}
                   style={{ width: `${hpPercent}%` }}
                 />
+                <span className="relative text-[11px] font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)] tracking-wide">
+                  {hpPercent.toFixed(0)}%
+                </span>
               </div>
-              <p className="text-xs text-slate-500 text-center">Emergency Reserve (Goal: 3 Months)</p>
+              <p className="text-xs text-slate-500 text-center">Emergency Reserve</p>
             </div>
 
             {/* MP Bar */}
@@ -147,16 +169,16 @@ const Player: React.FC = () => {
                   <span className="text-sm font-bold text-slate-800">{formatCurrency(mpValue)}</span>
                 </div>
               </div>
-              <div 
-                className="h-4 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner cursor-help"
-                title={`${mpPercent.toFixed(1)}%`}
-              >
+              <div className="h-5 w-full bg-slate-100 rounded-full overflow-hidden shadow-inner relative flex items-center justify-center">
                 <div 
-                  className="h-full bg-blue-500 transition-all duration-1000 ease-out"
+                  className="absolute left-0 top-0 bottom-0 bg-blue-500 transition-all duration-1000 ease-out"
                   style={{ width: `${mpPercent}%` }}
                 />
+                <span className="relative text-[11px] font-bold text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.8)] tracking-wide">
+                  {mpPercent.toFixed(0)}%
+                </span>
               </div>
-              <p className="text-xs text-slate-500 text-center">Deployable Capital (Excess Liquid Assets)</p>
+              <p className="text-xs text-slate-500 text-center">Deployable Capital / Net Worth</p>
             </div>
           </div>
         </div>
@@ -212,7 +234,7 @@ const Player: React.FC = () => {
               {/* AGI */}
               <div className="flex items-start gap-4 p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 hover:shadow-md transition-shadow">
                 <div className="p-3 bg-emerald-100 rounded-xl text-emerald-600">
-                  <PersonStanding size={24} />
+                  <MovementIcon size={24} />
                 </div>
                 <div>
                   <h4 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">AGI (Agility)</h4>
