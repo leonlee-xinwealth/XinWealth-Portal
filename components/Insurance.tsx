@@ -113,10 +113,11 @@ const Insurance: React.FC = () => {
     const policyField = item.fields["E-policy"] || item.fields["e-policy"];
     if (Array.isArray(policyField) && policyField.length > 0) {
       // Lark attachment field format
-      if (policyField[0].file_token) {
-        // Since tmp_url from Lark Bitable API might require an active authenticated session 
-        // to be viewed directly in the browser (leading to "Missing access token"),
-        // we must route the file download through our backend proxy that has the tenant_access_token.
+      if (policyField[0].url) {
+        // Bitable attachments require special URLs with `extra` auth parameters.
+        // We pass the pre-constructed `url` from Lark to our proxy to inject the tenant token.
+        return `/api/download?url=${encodeURIComponent(policyField[0].url)}&file_token=${policyField[0].file_token || ''}`; 
+      } else if (policyField[0].file_token) {
         return `/api/download?file_token=${policyField[0].file_token}`; 
       }
       // Link field format

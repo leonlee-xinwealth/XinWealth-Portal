@@ -3,10 +3,10 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { file_token } = req.query;
+  const { file_token, url } = req.query;
 
-  if (!file_token) {
-    return res.status(400).json({ error: 'File token is required' });
+  if (!file_token && !url) {
+    return res.status(400).json({ error: 'File token or url is required' });
   }
 
   const appId = (process.env.LARK_APP_ID || "").trim();
@@ -34,7 +34,7 @@ export default async function handler(req, res) {
     const accessToken = tokenData.tenant_access_token;
 
     // 2. Download File from Lark Drive API
-    const downloadUrl = `https://open.larksuite.com/open-apis/drive/v1/medias/download?file_token=${encodeURIComponent(file_token)}`;
+    let downloadUrl = url || `https://open.larksuite.com/open-apis/drive/v1/medias/download?file_token=${encodeURIComponent(file_token)}`;
     
     const fileRes = await fetch(downloadUrl, {
       method: 'GET',
@@ -46,7 +46,11 @@ export default async function handler(req, res) {
     if (!fileRes.ok) {
       const errorText = await fileRes.text();
       console.error("Lark Download Error:", errorText);
-      return res.status(fileRes.status).json({ error: 'Failed to download file from Lark' });
+      return res.status(fileRes.status).json({ 
+        error: 'Failed to download file from Lark',
+        details: errorText,
+        url: downloadUrl
+      });
     }
 
     // 3. Proxy the file back to the client
@@ -57,7 +61,7 @@ export default async function handler(req, res) {
     if (contentDisposition) {
        res.setHeader('Content-Disposition', contentDisposition);
     } else {
-       res.setHeader('Content-Disposition', `inline; filename="e-policy-${file_token}.pdf"`);
+       res.setHeader('Content-Disposition', `inline; filename="e-policy-${file_token || 'download'}.pdf"`);
     }
 
     // Send the buffer
