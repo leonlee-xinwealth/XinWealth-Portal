@@ -55,14 +55,11 @@ export default async function handler(req, res) {
 
     // 3. Proxy the file back to the client
     const contentType = fileRes.headers.get('content-type') || 'application/pdf';
-    const contentDisposition = fileRes.headers.get('content-disposition');
     
+    // We intentionally override content-disposition to be "inline" instead of "attachment"
+    // This allows the browser to render the PDF instead of forcing a download.
     res.setHeader('Content-Type', contentType);
-    if (contentDisposition) {
-       res.setHeader('Content-Disposition', contentDisposition);
-    } else {
-       res.setHeader('Content-Disposition', `inline; filename="e-policy-${file_token || 'download'}.pdf"`);
-    }
+    res.setHeader('Content-Disposition', `inline; filename="e-policy-${file_token || 'view'}.pdf"`);
 
     // Send the buffer
     const arrayBuffer = await fileRes.arrayBuffer();
