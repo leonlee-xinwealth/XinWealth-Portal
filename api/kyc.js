@@ -20,9 +20,8 @@ export default async function handler(req, res) {
   // Table IDs (matches user's Vercel env var names)
   const tableClient = (process.env.LARK_TABLE_CLIENT || "").trim();
   const tableIncomes = (process.env.LARK_TABLE_INCOMES || "").trim();
-  const tableAssets = (process.env.LARK_TABLE_ASSETS || "").trim();
+  const tableNetWorth = (process.env.LARK_TABLE_NETWORTH || "").trim();
   const tableInvestment = (process.env.LARK_TABLE_INVESTMENT || "").trim();
-  const tableLiabilities = (process.env.LARK_TABLE_LIABILITIES || "").trim();
   const tableExpenses = (process.env.LARK_TABLE_EXPENSES || "").trim();
 
   if (!appId || !appSecret || !baseToken || !tableClient) {
@@ -157,8 +156,9 @@ export default async function handler(req, res) {
     if (assets.epfSejahtera) allAssets.push({ description: "EPF Account 2 (Akaun Sejahtera)", amount: assets.epfSejahtera, category: "EPF", month: assets.epfSejahteraMonth, year: assets.epfSejahteraYear });
     if (assets.epfFleksibel) allAssets.push({ description: "EPF Account 3 (Akaun Fleksibel)", amount: assets.epfFleksibel, category: "EPF", month: assets.epfFleksibelMonth, year: assets.epfFleksibelYear });
 
-    await createSubRecords(tableAssets, allAssets, item => {
+    await createSubRecords(tableNetWorth, allAssets, item => {
       const fieldData = {
+        "Type": "Asset",
         "Category": item.category,
         "Description": item.description || "",
         "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
@@ -198,11 +198,12 @@ export default async function handler(req, res) {
       ...(liabilities.otherLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Other Loan" }))
     ];
 
-    await createSubRecords(tableLiabilities, allLiabilities, item => {
+    await createSubRecords(tableNetWorth, allLiabilities, item => {
       const fieldData = {
+        "Type": "Liability",
         "Category": item.category,
         "Description": item.description || "",
-        "Outstanding Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+        "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
       };
       if (item.originalLoanAmount) fieldData["Original Loan Amount"] = parseFloat(String(item.originalLoanAmount).replace(/,/g, '')) || 0;
       if (item.month != null) fieldData["Month"] = getMonthName(item.month);

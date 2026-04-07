@@ -417,7 +417,7 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
 
   let totalLiabilities = 0;
   latestLiabilities.forEach((item: any) => {
-    const val = getValue(item, ["Outstanding Amount", "outstanding amount", "Amount", "amount"]);
+    const val = getValue(item, ["Value", "value", "Outstanding Amount", "outstanding amount", "Amount", "amount"]);
     totalLiabilities += val;
   });
 

@@ -23,10 +23,12 @@ export default async function handler(req, res) {
   const appSecret = (process.env.LARK_APP_SECRET || "").trim();
   const baseToken = (process.env.LARK_BASE_TOKEN || "").trim();
 
-  // Tables
+  // Tables — updated to match new Vercel env var names
+  // Net Worth table contains BOTH assets and liabilities (distinguished by "Type" column)
+  // Monthly Snapshot is the new standalone liabilities/installment tracking table
   const tables = {
-      assets: (process.env.LARK_TABLE_ASSETS || "").trim(),
-      liabilities: (process.env.LARK_TABLE_LIABILITIES || "").trim(),
+      networth: (process.env.LARK_TABLE_NETWORTH || "").trim(),
+      monthlySnapshot: (process.env.LARK_TABLE_MONTHLYSNAPSHOT || "").trim(),
       incomes: (process.env.LARK_TABLE_INCOMES || "").trim(),
       expenses: (process.env.LARK_TABLE_EXPENSES || "").trim(),
       investments: (process.env.LARK_TABLE_INVESTMENT || "").trim(),
@@ -70,14 +72,25 @@ export default async function handler(req, res) {
         });
     };
 
-    const [assets, liabilities, incomes, expenses, investments, insurance] = await Promise.all([
-        fetchTable(tables.assets),
-        fetchTable(tables.liabilities),
+    const [networthRecords, monthlySnapshot, incomes, expenses, investments, insurance] = await Promise.all([
+        fetchTable(tables.networth),
+        fetchTable(tables.monthlySnapshot),
         fetchTable(tables.incomes),
         fetchTable(tables.expenses),
         fetchTable(tables.investments),
         fetchTable(tables.insurance)
     ]);
+
+    // 3. Split the unified Net Worth table into assets vs liabilities by "Type" field
+    const assets = networthRecords.filter(item => {
+        const type = extractLarkValue(item.fields["Type"] || "");
+        return type === "Asset";
+    });
+
+    const liabilities = networthRecords.filter(item => {
+        const type = extractLarkValue(item.fields["Type"] || "");
+        return type === "Liability";
+    });
 
     return res.status(200).json({
         assets,
@@ -85,7 +98,8 @@ export default async function handler(req, res) {
         incomes,
         expenses,
         investments,
-        insurance
+        insurance,
+        monthlySnapshot
     });
 
   } catch (error) {
