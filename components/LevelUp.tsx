@@ -53,7 +53,7 @@ const LevelUp: React.FC = () => {
       }));
 
       const initLiabilities = latestLiabilities.map((r: any) => {
-        const oldAmount = parseFloat(r.fields['Outstanding Amount'] || r.fields['Amount'] || 0);
+        const oldAmount = parseFloat(r.fields['Value'] || r.fields['value'] || r.fields['Outstanding Amount'] || r.fields['Amount'] || 0);
         const monthly = parseFloat(r.fields['Monthly Installment'] || 0);
         // Auto-decrement logic!
         const newAmount = Math.max(0, oldAmount - monthly);
