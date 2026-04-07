@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KYCData, FinancialItem, KYCLiabilitiesData } from '../../types';
+import { KYCData, FinancialItem, KYCLiabilitiesData } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Home, Car, GraduationCap, Percent, HardHat, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
 import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
@@ -62,7 +62,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
     };
 
     const removeLoanItem = (collectionPath: keyof KYCLiabilitiesData, idToRemove: string) => {
-        const newItems = liabilitiesData[collectionPath].filter(item => item.id !== idToRemove);
+        const newItems = liabilitiesData[collectionPath].filter((item: FinancialItem) => item.id !== idToRemove);
         updateLiabilities({ [collectionPath]: newItems });
         if (newItems.length === 0) setExpandedCard(null);
     };
@@ -73,7 +73,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
         field: keyof FinancialItem, 
         value: any
     ) => {
-        const newItems = liabilitiesData[collectionPath].map(item => {
+        const newItems = liabilitiesData[collectionPath].map((item: FinancialItem) => {
             if (item.id !== idToUpdate) return item;
             
             const updatedItem = { ...item, [field]: value };
@@ -167,7 +167,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                 {/* Body */}
                 {isOpen && (
                     <div className="bg-slate-50 p-6 space-y-6">
-                        {items.map((item, index) => (
+                        {items.map((item: FinancialItem) => (
                             <div key={item.id} className="relative bg-white p-6 rounded-md border border-gray-200 shadow-sm">
                                 <div className="flex justify-end mb-4 border-b border-gray-100 pb-3">
                                     <button 
@@ -194,6 +194,21 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
 
                                     {item.isUnderLoan && (
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-slate-50/50 p-4 rounded-lg border border-slate-100">
+                                            <div>
+                                                <label className={labelClasses}>
+                                                    {t('common.originalLoanAmount')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
+                                                </label>
+                                                <div className="relative mt-1">
+                                                    <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                                        <span className="text-gray-500 font-medium">RM</span>
+                                                    </div>
+                                                    <DebouncedNumberInput 
+                                                        className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
+                                                        value={item.originalLoanAmount || ''}
+                                                        onChange={(val) => updateLoanItemField(collectionPath, item.id, 'originalLoanAmount', val)}
+                                                    />
+                                                </div>
+                                            </div>
                                             <div>
                                                 <label className={labelClasses}>
                                                     {isZh ? '未偿还余额' : 'Outstanding Balance'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KYCData, FinancialItem, KYCAssetsData } from '../../types';
+import { KYCData, FinancialItem, KYCAssetsData } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Home, Car, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle, Building2 } from 'lucide-react';
 import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
@@ -204,6 +204,22 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                 <div className="space-y-5">
                                     <div>
                                         <label className={labelClasses}>
+                                            {t('common.purchasePrice')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
+                                        </label>
+                                        <div className="relative mt-1">
+                                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                                <span className="text-gray-500 font-medium">RM</span>
+                                            </div>
+                                            <DebouncedNumberInput
+                                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
+                                                value={item.purchasePrice || ''}
+                                                onChange={(val) => updateAssetItemField(collectionPath, item.id, 'purchasePrice', val)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className={labelClasses}>
                                             {t('common.value')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
                                         </label>
                                         <div className="relative mt-1">
@@ -276,6 +292,19 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                             
                                             {item.isUnderLoan && (
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 bg-slate-50/50 p-4 rounded-lg border border-slate-100">
+                                                    <div>
+                                                        <label className={labelClasses}>{t('common.originalLoanAmount')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
+                                                        <div className="relative mt-1">
+                                                            <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none border-r border-gray-200 pr-2 my-px bg-slate-50 rounded-l-md">
+                                                                <span className="text-gray-500 text-sm font-medium">RM</span>
+                                                            </div>
+                                                            <DebouncedNumberInput
+                                                                className="w-full pl-12 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
+                                                                value={item.originalLoanAmount || ''}
+                                                                onChange={(val) => updateAssetItemField(collectionPath, item.id, 'originalLoanAmount', val)}
+                                                            />
+                                                        </div>
+                                                    </div>
                                                     <div>
                                                         <label className={labelClasses}>{isZh ? '未偿还余额' : 'Outstanding Balance'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
                                                         <div className="relative mt-1">

@@ -111,36 +111,24 @@ export default async function handler(req, res) {
 
     // 4. Create Income Records
     const allIncomes = [];
-    if (income.monthlySalary) {
-      allIncomes.push({
-        category: "Monthly Salary",
-        description: "Monthly Salary",
-        amount: income.monthlySalary,
-        month: income.salaryMonth,
-        year: income.salaryYear
-      });
-    }
-    if (income.annualBonus) {
-      allIncomes.push({
-        category: "Annual Bonus",
-        description: "Annual Bonus",
-        amount: income.annualBonus,
-        month: income.bonusMonth,
-        year: income.bonusYear
-      });
-    }
-    // Dynamic income items
-    const incomeTypes = { rentalIncome: "Rental Income", dividendIncome: "Dividend Income", otherIncome: "Other Income" };
-    for (const [key, category] of Object.entries(incomeTypes)) {
-      if (income[key] && income[key].length > 0) {
-        income[key].forEach(item => {
-          allIncomes.push({
-            category,
-            description: item.description || "",
-            amount: item.amount,
-            month: item.month,
-            year: item.year
-          });
+    const incomeMappings = [
+      { key: 'salary', category: 'Salary', desc: 'Monthly Base Pay' },
+      { key: 'bonus', category: 'Bonus / One-off Incentives', desc: 'Bonus/Incentive' },
+      { key: 'directorFee', category: 'Director / Advisory / Professional Fees', desc: 'Director/Advisory/Professional Fee' },
+      { key: 'commission', category: 'Commission / Referral Fee', desc: 'Commission/Referral Fee' },
+      { key: 'dividendCompany', category: 'Dividend from Own Company', desc: 'Dividend from Own Company' },
+      { key: 'dividendInvestment', category: 'Investment Dividends / Interest', desc: 'Investment Dividends/Interest' },
+      { key: 'rentalIncome', category: 'Rental Income', desc: 'Rental Income' }
+    ];
+
+    for (const mapping of incomeMappings) {
+      if (income[mapping.key]) {
+        allIncomes.push({
+          category: mapping.category,
+          description: mapping.desc,
+          amount: income[mapping.key],
+          month: income[`${mapping.key}Month`],
+          year: income[`${mapping.key}Year`]
         });
       }
     }
@@ -175,6 +163,7 @@ export default async function handler(req, res) {
         "Description": item.description || "",
         "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
       };
+      if (item.purchasePrice) fieldData["Purchase Price"] = parseFloat(String(item.purchasePrice).replace(/,/g, '')) || 0;
       if (item.month != null) fieldData["Month"] = getMonthName(item.month);
       if (item.year) fieldData["Year"] = String(item.year);
       return fieldData;
@@ -215,6 +204,7 @@ export default async function handler(req, res) {
         "Description": item.description || "",
         "Outstanding Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
       };
+      if (item.originalLoanAmount) fieldData["Original Loan Amount"] = parseFloat(String(item.originalLoanAmount).replace(/,/g, '')) || 0;
       if (item.month != null) fieldData["Month"] = getMonthName(item.month);
       if (item.year) fieldData["Year"] = String(item.year);
       return fieldData;

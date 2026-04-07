@@ -12,9 +12,8 @@ const translations: Record<Language, Record<string, string>> = {
   en: {
     'nav.welcome': 'Welcome',
     'nav.basic': 'Basic Information',
-    'nav.income': 'Income',
-    'nav.assets': 'Assets',
-    'nav.liabilities': 'Liabilities',
+    'nav.assets': 'Net Worth',
+    'nav.liabilities': 'Monthly Snapshot',
     'nav.expenses': 'Expenses',
     'nav.investments': 'Investments',
     'nav.review': 'Review Summary',
@@ -63,7 +62,7 @@ const translations: Record<Language, Record<string, string>> = {
     'income.amount': 'Amount',
     'income.desc': 'Description',
     
-    'assets.title': 'Our Assets',
+    'assets.title': 'Net Worth (Assets)',
     'assets.liquid': 'My Savings',
     'assets.savingsAccount': 'Savings/Current Account',
     'assets.fixedDeposit': 'Fixed Deposit',
@@ -78,9 +77,9 @@ const translations: Record<Language, Record<string, string>> = {
     'assets.others': 'Other Assets',
     'assets.add': 'Add Asset',
     'assets.addBtn': 'Add Asset',
-    'assets.value': 'Value',
+    'assets.value': 'Current Value',
 
-    'liabilities.title': 'My Liabilities',
+    'liabilities.title': 'Monthly Snapshot (Liabilities)',
     'liabilities.mortgages': 'Mortgage Loan',
     'liabilities.car': 'Car Loan',
     'liabilities.study': 'Study Loan',
@@ -150,14 +149,16 @@ const translations: Record<Language, Record<string, string>> = {
     'common.description': 'Description',
     'common.expand': 'Expand',
     'common.collapse': 'Collapse',
-    'common.selectAll': 'Select all that applies'
+    'common.selectAll': 'Select all that applies',
+    'common.purchasePrice': 'Purchase Price / Principal',
+    'common.originalLoanAmount': 'Original Loan Amount'
   },
   zh: {
     'nav.welcome': '欢迎',
     'nav.basic': '基本信息',
     'nav.income': '收入',
-    'nav.assets': '资产',
-    'nav.liabilities': '负债',
+    'nav.assets': '净资产 (Net Worth)',
+    'nav.liabilities': '月度快照 (Monthly Snapshot)',
     'nav.expenses': '开销',
     'nav.investments': '投资',
     'nav.review': '检查确认',
@@ -206,7 +207,7 @@ const translations: Record<Language, Record<string, string>> = {
     'income.amount': '金额',
     'income.desc': '描述',
     
-    'assets.title': '我们的资产',
+    'assets.title': '净资产 (Net Worth)',
     'assets.liquid': '我的储蓄',
     'assets.savingsAccount': '储蓄/往来账户',
     'assets.fixedDeposit': '定期存款',
@@ -221,9 +222,9 @@ const translations: Record<Language, Record<string, string>> = {
     'assets.others': '其他资产',
     'assets.add': '添加资产',
     'assets.addBtn': '添加资产',
-    'assets.value': '价值',
+    'assets.value': '当前价值 (Current Value)',
 
-    'liabilities.title': '我的负债',
+    'liabilities.title': '月度快照 (Monthly Snapshot)',
     'liabilities.mortgages': '房屋贷款',
     'liabilities.car': '汽车贷款',
     'liabilities.study': '教育贷款',
@@ -293,7 +294,9 @@ const translations: Record<Language, Record<string, string>> = {
     'common.description': '描述',
     'common.expand': '展开',
     'common.collapse': '收起',
-    'common.selectAll': '请选择所有适用项'
+    'common.selectAll': '请选择所有适用项',
+    'common.purchasePrice': '买入价 / 本金 (Purchase Price)',
+    'common.originalLoanAmount': '原始贷款额度 (Original Loan Amount)'
   }
 };
 

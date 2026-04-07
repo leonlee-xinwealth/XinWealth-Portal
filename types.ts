@@ -113,11 +113,13 @@ export interface FinancialItem {
   // Loan fields for Property and Vehicle
   isUnderLoan?: boolean;
   outstandingBalance?: string;
+  originalLoanAmount?: string; // New: Original Loan Amount
   interestRate?: string;
   tenure?: string;
   loanCommencementYear?: string;
   loanCommencementMonth?: string;
   monthlyInstallment?: string;
+  purchasePrice?: string; // New: Purchase Price / Principal
 }
 
 export interface ExpenseItem {
@@ -129,15 +131,33 @@ export interface ExpenseItem {
 }
 
 export interface KYCIncomeData {
-  monthlySalary: string;
+  salary: string;  
   salaryMonth: string;
   salaryYear: string;
-  annualBonus: string;
+
+  bonus: string;
   bonusMonth: string;
   bonusYear: string;
-  rentalIncome: IncomeItem[];
-  dividendIncome: IncomeItem[];
-  otherIncome: IncomeItem[];
+
+  directorFee: string;
+  directorFeeMonth: string;
+  directorFeeYear: string;
+
+  commission: string;
+  commissionMonth: string;
+  commissionYear: string;
+
+  dividendCompany: string;
+  dividendCompanyMonth: string;
+  dividendCompanyYear: string;
+
+  dividendInvestment: string;
+  dividendInvestmentMonth: string;
+  dividendInvestmentYear: string;
+
+  rentalIncome: string;
+  rentalIncomeMonth: string;
+  rentalIncomeYear: string;
 }
 
 export interface KYCAssetsData {
@@ -234,15 +254,13 @@ export const initialKYCData: KYCData = {
   occupation: '',
   pdpaAccepted: false,
   income: {
-    monthlySalary: '',
-    salaryMonth: new Date().getMonth().toString(),
-    salaryYear: new Date().getFullYear().toString(),
-    annualBonus: '',
-    bonusMonth: new Date().getMonth().toString(),
-    bonusYear: new Date().getFullYear().toString(),
-    rentalIncome: [],
-    dividendIncome: [],
-    otherIncome: []
+    salary: '', salaryMonth: new Date().getMonth().toString(), salaryYear: new Date().getFullYear().toString(),
+    bonus: '', bonusMonth: new Date().getMonth().toString(), bonusYear: new Date().getFullYear().toString(),
+    directorFee: '', directorFeeMonth: new Date().getMonth().toString(), directorFeeYear: new Date().getFullYear().toString(),
+    commission: '', commissionMonth: new Date().getMonth().toString(), commissionYear: new Date().getFullYear().toString(),
+    dividendCompany: '', dividendCompanyMonth: new Date().getMonth().toString(), dividendCompanyYear: new Date().getFullYear().toString(),
+    dividendInvestment: '', dividendInvestmentMonth: new Date().getMonth().toString(), dividendInvestmentYear: new Date().getFullYear().toString(),
+    rentalIncome: '', rentalIncomeMonth: new Date().getMonth().toString(), rentalIncomeYear: new Date().getFullYear().toString(),
   },
   assets: {
     savingsAccount: '',

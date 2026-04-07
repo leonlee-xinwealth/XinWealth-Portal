@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchRawHealthData, getLatestRecords, getSession } from '../services/larkService';
-import { Loader2, AlertCircle, UploadCloud, TrendingUp, TrendingDown, Edit2, Check, ArrowRight, Save, Plus, Trash2 } from 'lucide-react';
+import { Loader2, AlertCircle, TrendingUp, TrendingDown, Edit2, Check, ArrowRight, Save, Plus, Trash2 } from 'lucide-react';
 
 const StepUpIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -16,7 +16,7 @@ const StepUpIcon = ({ size = 24, className = "" }: { size?: number, className?: 
 );
 
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const INCOME_CATEGORIES = ['Salary', 'Director/Advisory/Professional Fee', 'Commission/Referral Fee', 'Dividend from company', 'Rental Income', 'Interest from investment'];
+const INCOME_CATEGORIES = ['Salary', 'Bonus / One-off Incentives', 'Director / Advisory / Professional Fees', 'Commission / Referral Fee', 'Dividend from Own Company', 'Investment Dividends / Interest', 'Rental Income'];
 const EXPENSE_CATEGORIES = ['Household', 'Transportation', 'Dependants', 'Personal', 'Miscellaneous', 'Other Expenses'];
 
 const LevelUp: React.FC = () => {
@@ -204,7 +204,7 @@ const LevelUp: React.FC = () => {
               <TrendingUp size={20} /> Income
             </h4>
             <div className="space-y-3">
-              {incomes.map((inc, idx) => (
+              {incomes.map((inc) => (
                 <div key={inc.id} className="flex flex-col sm:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200">
                   <select 
                     value={inc.category} 
@@ -243,7 +243,7 @@ const LevelUp: React.FC = () => {
               <TrendingDown size={20} /> Expenses
             </h4>
             <div className="space-y-3">
-              {expenses.map((exp, idx) => (
+              {expenses.map((exp) => (
                 <div key={exp.id} className="flex flex-col sm:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200">
                   <select 
                     value={exp.type} 

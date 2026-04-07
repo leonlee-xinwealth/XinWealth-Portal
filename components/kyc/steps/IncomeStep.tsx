@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { KYCData, IncomeItem, KYCIncomeData } from '../../types';
+import React from 'react';
+import { KYCData, KYCIncomeData } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Wallet, Home, Landmark, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
-import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
+import { Wallet, HelpCircle } from 'lucide-react';
+import { DebouncedNumberInput } from '../FormInputs';
 
 interface IncomeStepProps {
     formData: KYCData;
@@ -29,321 +29,111 @@ const MONTHS = [
 ];
 const YEARS = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - 5 + i).toString());
 
+// Tooltip helper component
+const Tooltip = ({ text }: { text: string }) => (
+    <div className="relative group flex items-center ml-2">
+        <HelpCircle size={16} className="text-gray-400 hover:text-xin-blue cursor-pointer" />
+        <div className="absolute left-1/2 bottom-full mb-2 -translate-x-1/2 w-64 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 z-10 text-center font-medium leading-relaxed scale-95 group-hover:scale-100">
+            {text}
+            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+        </div>
+    </div>
+);
+
 const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
     const isZh = language === 'zh';
-    const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
-    const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
+    const labelClasses = "flex items-center text-sm font-semibold text-gray-700 font-sans";
     const selectClasses = "px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer";
 
-    // Accordion: which card is currently expanded
-    const [expandedCard, setExpandedCard] = useState<string | null>(null);
-    
-    // Safety check just in case formData.income is somehow missing
     const incomeData = formData.income || {
-        monthlySalary: '',
-        salaryMonth: currentMonth,
-        salaryYear: currentYear,
-        annualBonus: '',
-        bonusMonth: '',
-        bonusYear: currentYear,
-        rentalIncome: [],
-        dividendIncome: [],
-        otherIncome: []
+        salary: '', salaryMonth: currentMonth, salaryYear: currentYear,
+        bonus: '', bonusMonth: currentMonth, bonusYear: currentYear,
+        directorFee: '', directorFeeMonth: currentMonth, directorFeeYear: currentYear,
+        commission: '', commissionMonth: currentMonth, commissionYear: currentYear,
+        dividendCompany: '', dividendCompanyMonth: currentMonth, dividendCompanyYear: currentYear,
+        dividendInvestment: '', dividendInvestmentMonth: currentMonth, dividendInvestmentYear: currentYear,
+        rentalIncome: '', rentalIncomeMonth: currentMonth, rentalIncomeYear: currentYear,
     };
 
     const updateIncome = (data: Partial<KYCIncomeData>) => {
         updateData({ income: { ...incomeData, ...data } });
     };
 
-    const addIncomeItem = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>) => {
-        const newItems = [...incomeData[collectionPath], { id: Date.now().toString() + Math.random().toString(), amount: '', description: '', month: currentMonth, year: currentYear }];
-        updateIncome({ [collectionPath]: newItems });
-        // Auto-expand this card
-        setExpandedCard(collectionPath);
-    };
-
-    const removeIncomeItem = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>, idToRemove: string) => {
-        const newItems = incomeData[collectionPath].filter(item => item.id !== idToRemove);
-        updateIncome({ [collectionPath]: newItems });
-        if (newItems.length === 0) setExpandedCard(null);
-    };
-
-    const updateIncomeItemField = (collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>, idToUpdate: string, field: 'amount' | 'description' | 'month' | 'year', value: string) => {
-        const newItems = incomeData[collectionPath].map(item => 
-            item.id === idToUpdate ? { ...item, [field]: value } : item
-        );
-        updateIncome({ [collectionPath]: newItems });
-    };
-
-    // Reusable render function for Passive/Other Income (prevents input focus loss)
-    const renderExpandableIncomeCard = (
-        title: string, 
-        Icon: React.ElementType, 
-        collectionPath: keyof Pick<KYCIncomeData, 'rentalIncome' | 'dividendIncome' | 'otherIncome'>,
-        itemLabel: string,
-        periodSuffix: string
-    ) => {
-        const items = incomeData[collectionPath];
-        const hasItems = items.length > 0;
-        const isOpen = expandedCard === collectionPath;
-
-        if (!hasItems) {
-            return (
-                <div className="border border-gray-200 rounded-lg p-5 mb-6 flex items-center justify-between bg-white shadow-sm hover:border-blue-200 transition-colors">
-                    <div className="flex items-center gap-4">
-                        <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-full text-slate-600">
-                            <Icon size={24} />
-                        </div>
-                        <span className="font-semibold text-gray-800">{title}</span>
-                    </div>
-                    <button 
-                        onClick={() => addIncomeItem(collectionPath)} 
-                        className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors"
-                    >
-                        <PlusCircle size={18} /> {t('income.addBtn')}
-                    </button>
-                </div>
-            );
-        }
-
-        return (
-            <div className="border border-gray-200 rounded-lg mb-6 bg-white shadow-sm overflow-hidden">
-                {/* Header */}
-                <div
-                    className="p-5 flex items-center justify-between border-b border-gray-100 cursor-pointer bg-white"
-                    onClick={() => setExpandedCard(isOpen ? null : collectionPath)}
-                >
-                    <div className="flex items-center gap-4">
-                        <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-full text-slate-600">
-                            <Icon size={24} />
-                        </div>
-                        <span className="font-semibold text-gray-800">{title} ({items.length})</span>
-                    </div>
-                    <button className="text-xin-blue flex items-center gap-1.5 text-sm font-medium hover:text-xin-cyan transition-colors">
-                        {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                        {isOpen ? t('common.collapse') : t('common.expand')}
-                    </button>
-                </div>
-                
-                {/* Body */}
-                {isOpen && (
-                    <div className="bg-slate-50 p-6 space-y-6">
-                        {items.map((item, index) => (
-                            <div key={item.id} className="relative bg-white p-6 rounded-md border border-gray-200 shadow-sm">
-                                <div className="flex justify-end mb-4 border-b border-gray-100 pb-3">
-                                    <button 
-                                        onClick={() => removeIncomeItem(collectionPath, item.id)} 
-                                        className="text-red-500 flex items-center gap-1.5 hover:text-red-700 text-sm font-medium transition-colors"
-                                    >
-                                        <Trash2 size={16} /> {t('common.delete')}
-                                    </button>
-                                </div>
-
-                                <div className="space-y-5">
-                                    <div>
-                                        <label className={labelClasses}>
-                                            {isZh ? `我的 ${itemLabel} 是 ` : `My ${itemLabel} is `} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
-                                        </label>
-                                        <div className="relative mt-1">
-                                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none">
-                                                <span className="text-gray-500 font-medium pb-0.5">RM</span>
-                                            </div>
-                                            <DebouncedNumberInput 
-                                                className="w-full pl-12 pr-16 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
-                                                value={item.amount}
-                                                onChange={(val) => updateIncomeItemField(collectionPath, item.id, 'amount', val)}
-                                            />
-                                            <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium pb-0.5 border-l border-gray-200 pl-3 my-2">
-                                                {periodSuffix}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div>
-                                        <label className={labelClasses}>
-                                            {t('common.description')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
-                                        </label>
-                                        <DebouncedTextInput 
-                                            maxLength={100}
-                                            className={inputClasses}
-                                            value={item.description}
-                                            onChange={(val) => updateIncomeItemField(collectionPath, item.id, 'description', val)}
-                                        />
-                                        <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
-                                    </div>
-
-                                    {/* Month & Year Selector */}
-                                    <div>
-                                        <label className={labelClasses}>
-                                            {isZh ? '所属月份' : 'Period (Month / Year)'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
-                                        </label>
-                                        <div className="flex gap-3 mt-1">
-                                            <select
-                                                className={selectClasses + ' flex-1'}
-                                                value={item.month}
-                                                onChange={(e) => updateIncomeItemField(collectionPath, item.id, 'month', e.target.value)}
-                                            >
-                                                {MONTHS.map(m => (
-                                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                                ))}
-                                            </select>
-                                            <select
-                                                className={selectClasses + ' w-28'}
-                                                value={item.year}
-                                                onChange={(e) => updateIncomeItemField(collectionPath, item.id, 'year', e.target.value)}
-                                            >
-                                                {YEARS.map(y => (
-                                                    <option key={y} value={y}>{y}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                        
-                        <div className="flex justify-center pt-2">
-                            <button 
-                                onClick={() => addIncomeItem(collectionPath)} 
-                                className="text-xin-blue flex items-center gap-2 text-sm font-semibold hover:text-xin-cyan transition-colors bg-slate-50 px-4 py-2 rounded-full border border-xin-cyan/20"
-                            >
-                                <PlusCircle size={18} /> {isZh ? '添加另一项收入' : 'Add Another Income'}
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
-        );
-    };
+    const fields = [
+        { key: 'salary', label: '1. Salary', tooltip: 'Enter your fixed, recurring monthly base pay. Do not include one-time bonuses or variable commissions here.' },
+        { key: 'bonus', label: '2. Bonus / One-off Incentives', tooltip: 'Include annual bonuses, performance rewards, 13th-month salary, or any one-time cash gifts received this month.' },
+        { key: 'directorFee', label: '3. Director / Advisory / Professional Fees', tooltip: 'Fees received for serving on a board of directors, providing formal advisory roles, or specialized consulting services.' },
+        { key: 'commission', label: '4. Commission / Referral Fee', tooltip: 'Variable income earned from sales, successful business introductions, or lead referrals.' },
+        { key: 'dividendCompany', label: '5. Dividend from Own Company', tooltip: 'Profit distributions or interim dividends declared and paid to you from your own private limited company (Sdn Bhd).' },
+        { key: 'dividendInvestment', label: '6. Investment Dividends / Interest', tooltip: 'Passive income earned from public listed stocks, unit trusts, fixed deposits, or digital assets.' },
+        { key: 'rentalIncome', label: '7. Rental Income', tooltip: 'Total monthly rent received from residential, commercial properties, or sub-letting arrangements.' },
+    ];
 
     return (
         <div className="flex flex-col h-full space-y-8 animate-in fade-in duration-300">
             {/* Form Box */}
-            <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
+            <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12 relative overflow-visible">
                 
-                <div className="flex items-center gap-3 mb-8 border-b border-gray-100 pb-5">
+                <div className="flex items-center gap-3 mb-4 border-b border-gray-100 pb-5">
                     <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
                         <Wallet size={24} />
                     </div>
                     <h2 className="text-2xl font-serif text-gray-800">{t('income.title')}</h2>
                 </div>
-                
-                {/* Active Income Section */}
-                <h3 className="text-lg font-semibold text-gray-800 mb-6 border-b border-gray-100 pb-2">{t('income.active')}</h3>
-                
-                <div className="space-y-6">
-                    <div>
-                        <label className={labelClasses}>{t('income.salaryLabel')}</label>
-                        <div className="relative mt-2">
-                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
-                                <span className="text-gray-500 font-medium">RM</span>
-                            </div>
-                            <DebouncedNumberInput 
-                                className="w-full pl-16 pr-20 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
-                                value={incomeData.monthlySalary}
-                                onChange={(val) => updateIncome({ monthlySalary: val })}
-                                placeholder="10,000"
-                            />
-                            <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium border-l border-gray-200 pl-3 my-2">
-                                {t('common.perMonth')}
-                            </div>
-                        </div>
-                        {/* Salary Month/Year */}
-                        <div className="flex gap-3 mt-3">
-                            <select
-                                className={selectClasses + ' flex-1'}
-                                value={incomeData.salaryMonth || currentMonth}
-                                onChange={(e) => updateIncome({ salaryMonth: e.target.value })}
-                            >
-                                {MONTHS.map(m => (
-                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                ))}
-                            </select>
-                            <select
-                                className={selectClasses + ' w-28'}
-                                value={incomeData.salaryYear || currentYear}
-                                onChange={(e) => updateIncome({ salaryYear: e.target.value })}
-                            >
-                                {YEARS.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
 
-                    <div>
-                        <label className={labelClasses}>{t('income.bonusLabel')}</label>
-                        <div className="relative mt-2">
-                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
-                                <span className="text-gray-500 font-medium">RM</span>
-                            </div>
-                            <DebouncedNumberInput 
-                                className="w-full pl-16 pr-20 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
-                                value={incomeData.annualBonus}
-                                onChange={(val) => updateIncome({ annualBonus: val })}
-                                placeholder="8,000"
-                            />
-                            <div className="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none text-gray-400 text-sm font-medium border-l border-gray-200 pl-3 my-2">
-                                {t('common.perYear')}
-                            </div>
-                        </div>
-                        {/* Bonus Month/Year */}
-                        <div className="flex gap-3 mt-3">
-                            <select
-                                className={selectClasses + ' flex-1'}
-                                value={incomeData.bonusMonth || currentMonth}
-                                onChange={(e) => updateIncome({ bonusMonth: e.target.value })}
-                            >
-                                {MONTHS.map(m => (
-                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                ))}
-                            </select>
-                            <select
-                                className={selectClasses + ' w-28'}
-                                value={incomeData.bonusYear || currentYear}
-                                onChange={(e) => updateIncome({ bonusYear: e.target.value })}
-                            >
-                                {YEARS.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </div>
+                <div className="mb-8 p-4 bg-xin-blue/5 border border-xin-blue/10 rounded-lg flex items-start gap-3">
+                    <HelpCircle className="text-xin-blue shrink-0 mt-0.5" size={20} />
+                    <p className="text-sm font-medium text-xin-dark">
+                        {isZh 
+                            ? '请点击“！”了解怎么填写，避免客户自己填写错误。' 
+                            : 'Please click "!" to understand how to fill it out and avoid input errors.'}
+                    </p>
                 </div>
-
-                {/* Passive Income Section */}
-                <h3 className="text-lg font-semibold text-gray-800 mt-12 mb-2 border-b border-gray-100 pb-2">{t('income.passive')}</h3>
-                <p className="text-sm text-gray-600 mb-6 font-medium">{t('common.selectAll')}</p>
                 
-                <div className="space-y-4">
-                    {renderExpandableIncomeCard(
-                        t('income.rentalOpt'),
-                        Home,
-                        "rentalIncome",
-                        isZh ? '每月租金收入' : 'monthly rental property income',
-                        t('common.perMonth')
-                    )}
-                    {renderExpandableIncomeCard(
-                        t('income.dividendOpt'),
-                        Landmark,
-                        "dividendIncome",
-                        isZh ? '每年股息收入' : 'annual dividend income',
-                        t('common.perYear')
-                    )}
-                </div>
-
-                {/* Other Income Section */}
-                <h3 className="text-lg font-semibold text-gray-800 mt-12 mb-6 border-b border-gray-100 pb-2">{t('income.other')}</h3>
-                
-                <div className="space-y-4">
-                    {renderExpandableIncomeCard(
-                        t('income.otherOpt'),
-                        FolderPlus,
-                        "otherIncome",
-                        isZh ? '其他收入' : 'other income',
-                        t('common.perMonth')
-                    )}
+                <div className="space-y-8">
+                    {fields.map((field) => (
+                        <div key={field.key} className="bg-slate-50/50 p-5 rounded-lg border border-slate-100/80 hover:border-xin-blue/30 transition-colors">
+                            <div className="mb-3 flex items-center">
+                                <label className={labelClasses}>{field.label}</label>
+                                <Tooltip text={field.tooltip} />
+                            </div>
+                            
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                    <span className="text-gray-500 font-medium">RM</span>
+                                </div>
+                                <DebouncedNumberInput 
+                                    className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm transition-shadow"
+                                    value={(incomeData as any)[field.key] || ''}
+                                    onChange={(val) => updateIncome({ [field.key]: val })}
+                                    placeholder="0"
+                                />
+                            </div>
+                            
+                            {/* Month/Year Selection */}
+                            <div className="flex gap-3 mt-3">
+                                <select
+                                    className={selectClasses + ' flex-1'}
+                                    value={(incomeData as any)[`${field.key}Month`] || currentMonth}
+                                    onChange={(e) => updateIncome({ [`${field.key}Month`]: e.target.value })}
+                                >
+                                    {MONTHS.map(m => (
+                                        <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                    ))}
+                                </select>
+                                <select
+                                    className={selectClasses + ' w-28'}
+                                    value={(incomeData as any)[`${field.key}Year`] || currentYear}
+                                    onChange={(e) => updateIncome({ [`${field.key}Year`]: e.target.value })}
+                                >
+                                    {YEARS.map(y => (
+                                        <option key={y} value={y}>{y}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    ))}
                 </div>
 
                 {/* Navigation Buttons bottom */}
