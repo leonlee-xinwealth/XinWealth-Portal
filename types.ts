@@ -26,6 +26,30 @@ export interface PortfolioDataPoint {
   fdValue: number; // The value if invested in Fixed Deposit (Calculated at 3%)
 }
 
+export interface AnalyticsItem {
+  id: string;
+  name: string;
+  type: 'Asset' | 'Liability';
+  category: string;
+  initialValue: number;
+  currentValue: number;
+  progress: number; // % Repayment or % Growth
+  monthlyRoi: number;
+  cumulativeCashflow: number;
+  equity?: number; // Asset Value - Liability Value
+  history: {
+    date: string;
+    value: number;
+    cashflow: number;
+  }[];
+}
+
+export interface FinancialAnalytics {
+  items: AnalyticsItem[];
+  totalEquity: number;
+  netWorthTrend: { date: string; assets: number; liabilities: number; netWorth: number }[];
+}
+
 export interface FinancialHealthData {
   basicLiquidityRatio: number;
   liquidAssetToNetWorth: number;
@@ -53,7 +77,8 @@ export interface FinancialHealthData {
     annualPassiveIncome: number;
     annualExpenses: number;
     insurance: any[]; // Add insurance raw data
-  }
+  };
+  analytics?: FinancialAnalytics;
 }
 
 export interface ClientProfile {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchRawHealthData } from '../services/larkService';
+import { fetchRawHealthData, calculateAnalytics } from '../services/larkService';
+import { FinancialAnalytics } from '../types';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
 
@@ -206,6 +207,7 @@ const NetWorth: React.FC = () => {
   
   const [assets, setAssets] = useState<RecordItem[]>([]);
   const [liabilities, setLiabilities] = useState<RecordItem[]>([]);
+  const [analytics, setAnalytics] = useState<FinancialAnalytics | null>(null);
 
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [selectedQuarter, setSelectedQuarter] = useState<string>('Q1');
@@ -232,6 +234,7 @@ const NetWorth: React.FC = () => {
         
         setAssets(combinedAssets || []);
         setLiabilities(parsedLiabilities || []);
+        setAnalytics(calculateAnalytics(data));
         
         // Find latest date for default selection
         let latestYear = '';
@@ -489,20 +492,37 @@ const NetWorth: React.FC = () => {
                                           <span className="font-bold text-xin-blue">{formatCurrency(data.value)}</span>
                                       </div>
                                       <div className="space-y-2 pl-4 border-l-2 border-slate-100">
-                                          {data.items.map((item: any) => (
-                                              <div key={item.id} className="flex justify-between items-start text-sm py-1 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
-                                                  <div className="flex flex-col">
-                                                      <span className="text-slate-700 font-medium">{item.description}</span>
-                                                      {item.purchasePrice > 0 && (
-                                                          <span className="text-xs text-slate-400">Orig. Price: {formatCurrency(item.purchasePrice)}</span>
-                                                      )}
-                                                      {item.originalLoanAmount > 0 && (
-                                                          <span className="text-xs text-slate-400">Orig. Loan: {formatCurrency(item.originalLoanAmount)}</span>
-                                                      )}
-                                                  </div>
-                                                  <span className="text-slate-800 font-bold whitespace-nowrap ml-2 mt-0.5">{formatCurrency(item.value)}</span>
-                                              </div>
-                                          ))}
+                                          {data.items.map((item: any) => {
+                                              const ai = analytics?.items.find(a => a.id === item.id);
+                                              return (
+                                                <div key={item.id} className="flex justify-between items-start text-sm py-1 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                                                    <div className="flex flex-col">
+                                                        <span className="text-slate-700 font-medium">{item.description}</span>
+                                                        <div className="flex items-center gap-2 mt-0.5">
+                                                            {item.purchasePrice > 0 && (
+                                                                <span className="text-[10px] text-slate-400">Orig. Price: {formatCurrency(item.purchasePrice)}</span>
+                                                            )}
+                                                            {item.originalLoanAmount > 0 && (
+                                                                <span className="text-[10px] text-slate-400">Orig. Loan: {formatCurrency(item.originalLoanAmount)}</span>
+                                                            )}
+                                                            {activeTab === 'liabilities' && ai && ai.progress > 0 && (
+                                                                <span className="text-[10px] bg-xin-blue/10 text-xin-blue px-1.5 py-0.5 rounded font-bold">
+                                                                    {Math.round(ai.progress)}% Cleared
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col items-end">
+                                                        <span className="text-slate-800 font-bold whitespace-nowrap ml-2 mt-0.5">{formatCurrency(item.value)}</span>
+                                                        {activeTab === 'liabilities' && ai && ai.equity !== undefined && (
+                                                            <span className="text-[9px] font-bold text-emerald-600 mt-0.5">
+                                                                Equity: {formatCurrency(ai.equity)}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                              );
+                                          })}
                                       </div>
                                   </div>
                               );
@@ -568,32 +588,32 @@ const NetWorth: React.FC = () => {
                   <h3 className="text-xl font-bold text-xin-blue mb-6">Net Worth Trend</h3>
                   <div className="h-[300px]">
                       <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={finalChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                              <XAxis dataKey="time" tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} />
-                              <YAxis 
-                                  tickFormatter={(value) => `RM ${value / 1000}k`} 
-                                  tick={{ fill: '#64748b' }} 
-                                  axisLine={false} 
-                                  tickLine={false} 
-                                  domain={['auto', 'auto']}
-                              />
-                              <Tooltip 
-                                  formatter={(value: number) => formatCurrency(value)}
-                                  labelFormatter={(label) => `Quarter: ${label}`}
-                                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                              />
-                              <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                              <Line 
-                                  type="monotone" 
-                                  dataKey="netWorth" 
-                                  name="Net Worth" 
-                                  stroke="#00C49F" 
-                                  strokeWidth={3}
-                                  dot={{ r: 4, fill: '#00C49F', strokeWidth: 0 }}
-                                  activeDot={{ r: 6, strokeWidth: 0 }}
-                              />
-                          </LineChart>
+                                   <LineChart data={analytics?.netWorthTrend || []} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                                       <XAxis dataKey="date" tick={{ fill: '#64748b' }} axisLine={false} tickLine={false} />
+                                       <YAxis 
+                                           tickFormatter={(value) => `RM ${value / 1000}k`} 
+                                           tick={{ fill: '#64748b' }} 
+                                           axisLine={false} 
+                                           tickLine={false} 
+                                           domain={['auto', 'auto']}
+                                       />
+                                       <Tooltip 
+                                           formatter={(value: number) => formatCurrency(value)}
+                                           labelFormatter={(label) => `Date: ${label}`}
+                                           contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                       />
+                                       <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                                       <Line 
+                                           type="monotone" 
+                                           dataKey="netWorth" 
+                                           name="Net Worth" 
+                                           stroke="#2563eb" 
+                                           strokeWidth={3}
+                                           dot={{ r: 4, fill: '#2563eb', strokeWidth: 0 }}
+                                           activeDot={{ r: 6, strokeWidth: 0 }}
+                                       />
+                                   </LineChart>
                       </ResponsiveContainer>
                   </div>
               </div>
@@ -648,6 +668,45 @@ const NetWorth: React.FC = () => {
             </div>
         )}
       </div>
+
+      {/* Analytics Summary */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <p className="text-sm font-bold text-slate-500 mb-1">Total Assets</p>
+          <p className="text-2xl font-extrabold text-emerald-600">{formatCurrency(assets.reduce((sum, item) => sum + item.value, 0))}</p>
+        </div>
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <p className="text-sm font-bold text-slate-500 mb-1">Total Liabilities</p>
+          <p className="text-2xl font-extrabold text-orange-600">{formatCurrency(liabilities.reduce((sum, item) => sum + item.value, 0))}</p>
+        </div>
+        <div className="bg-xin-blue p-6 rounded-3xl shadow-sm text-white">
+          <p className="text-sm font-bold opacity-80 mb-1">Total Net Worth</p>
+          <p className="text-2xl font-extrabold">{formatCurrency(assets.reduce((sum, item) => sum + item.value, 0) - liabilities.reduce((sum, item) => sum + item.value, 0))}</p>
+        </div>
+      </div>
+
+      {/* Repayment Achievement Progress Circles */}
+      {activeTab === 'liabilities' && analytics && analytics.items.some(i => i.type === 'Liability' && i.progress > 0) && (
+        <div className="mb-8 p-6 bg-slate-50 rounded-3xl border border-slate-100">
+            <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Repayment Achievement</h4>
+            <div className="flex gap-6 overflow-x-auto pb-2 scrollbar-none">
+                {analytics.items.filter(i => i.type === 'Liability' && i.progress > 0).map(item => (
+                    <div key={item.id} className="flex flex-col items-center gap-2 min-w-[100px]">
+                        <div className="relative w-16 h-16">
+                             <svg className="w-full h-full transform -rotate-90">
+                                <circle cx="32" cy="32" r="28" fill="transparent" stroke="#e2e8f0" strokeWidth="4" />
+                                <circle cx="32" cy="32" r="28" fill="transparent" stroke="#2563eb" strokeWidth="4" strokeDasharray={175.9} strokeDashoffset={175.9 * (1 - item.progress / 100)} strokeLinecap="round" />
+                             </svg>
+                             <div className="absolute inset-0 flex items-center justify-center text-xs font-extrabold text-xin-blue">
+                                {Math.round(item.progress)}%
+                             </div>
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-500 text-center truncate w-full">{item.name}</span>
+                    </div>
+                ))}
+            </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-4 mb-8 border-b border-slate-200">

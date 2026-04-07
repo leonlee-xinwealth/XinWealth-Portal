@@ -1,4 +1,4 @@
-import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession } from '../types';
+import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics, AnalyticsItem } from '../types';
 
 /**
  * Connects to Vercel Serverless Functions in the /api folder.
@@ -301,6 +301,143 @@ export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; 
   }
 };
 
+/**
+ * Advanced Financial Analytics Engine
+ * Calculates Equity, Progress, ROI, and Cumulative Cashflow
+ */
+export const calculateAnalytics = (data: any): FinancialAnalytics => {
+  const assets = data.assets || [];
+  const liabilities = data.liabilities || [];
+  const snapshots = data.monthlySnapshot || [];
+  
+  // 1. Group snapshots by parent Net Worth item ID
+  const snapByItemId: Record<string, any[]> = {};
+  snapshots.forEach((s: any) => {
+    const parentIds = s.fields["Net Worth"];
+    if (Array.isArray(parentIds)) {
+      parentIds.forEach((id: any) => {
+        const actualId = typeof id === 'string' ? id : (id.id || id.text);
+        if (actualId) {
+          if (!snapByItemId[actualId]) snapByItemId[actualId] = [];
+          snapByItemId[actualId].push(s);
+        }
+      });
+    }
+  });
+
+  // Sort each item's snapshots by date
+  Object.keys(snapByItemId).forEach(id => {
+    snapByItemId[id].sort((a, b) => {
+      const dateA = new Date(a.fields["Date"] || a.fields["date"]).getTime();
+      const dateB = new Date(b.fields["Date"] || b.fields["date"]).getTime();
+      return dateA - dateB;
+    });
+  });
+
+  // 2. Process each Master Item (Assets + Liabilities)
+  const masterItems = [...assets, ...liabilities];
+  const analyticsItems: AnalyticsItem[] = masterItems.map(item => {
+    const itemSnapshots = snapByItemId[item.id] || [];
+    const latestSnap = itemSnapshots[itemSnapshots.length - 1];
+    
+    // Initial Value from Master
+    const initialValue = safeFloat(item.fields["Original Purchase Price/Principal"] || item.fields["Original Loan Amount"] || 0);
+    
+    // Current Value from latest Snapshot, fallback to Master Value
+    const currentValue = latestSnap 
+      ? safeFloat(latestSnap.fields["Current Value"] || latestSnap.fields["Value"] || 0)
+      : safeFloat(item.fields["Value"] || item.fields["value"] || 0);
+
+    // Cumulative Cashflow
+    const cumulativeCashflow = itemSnapshots.reduce((acc, s) => acc + safeFloat(s.fields["Cashflow"]), 0);
+
+    // ROI Calculation (Simplistic: V_now / V_start - 1, ignoring cashflow timing for now)
+    // Monthly ROI Formula: (V_now - (V_last + Cashflow)) / (V_last + Cashflow)
+    let monthlyRoi = 0;
+    if (itemSnapshots.length >= 2) {
+      const vNow = safeFloat(latestSnap.fields["Current Value"] || 0);
+      const prevSnap = itemSnapshots[itemSnapshots.length - 2];
+      const vPrev = safeFloat(prevSnap.fields["Current Value"] || 0);
+      const cashflow = safeFloat(latestSnap.fields["Cashflow"] || 0);
+      
+      if (vPrev + cashflow !== 0) {
+        monthlyRoi = (vNow - (vPrev + cashflow)) / (vPrev + cashflow);
+      }
+    }
+
+    // Repayment Progress for Liabilities
+    const isLiability = item.fields["Type"] === "Liability";
+    let progress = 0;
+    if (isLiability && initialValue > 0) {
+      progress = ((initialValue - currentValue) / initialValue) * 100;
+    }
+
+    return {
+      id: item.id,
+      name: item.fields["Description"] || "Unknown",
+      type: item.fields["Type"] || "Asset",
+      category: item.fields["Category"] || "Other",
+      initialValue,
+      currentValue,
+      progress,
+      monthlyRoi: parseFloat((monthlyRoi * 100).toFixed(2)),
+      cumulativeCashflow,
+      history: itemSnapshots.map(s => ({
+        date: s.fields["Date"] || s.fields["date"],
+        value: safeFloat(s.fields["Current Value"] || s.fields["Value"] || 0),
+        cashflow: safeFloat(s.fields["Cashflow"] || 0)
+      }))
+    };
+  });
+
+  // 3. Equity Calculation (Asset.Value - LinkedLiability.Value)
+  analyticsItems.forEach(ai => {
+    if (ai.type === 'Liability') {
+      const masterRecord = liabilities.find((l: any) => l.id === ai.id);
+      const linkedAssetIds = masterRecord?.fields["Linked Asset"];
+      if (Array.isArray(linkedAssetIds) && linkedAssetIds.length > 0) {
+        const assetId = typeof linkedAssetIds[0] === 'string' ? linkedAssetIds[0] : linkedAssetIds[0].id;
+        const linkedAsset = analyticsItems.find(a => a.id === assetId);
+        if (linkedAsset) {
+          ai.equity = linkedAsset.currentValue - ai.currentValue;
+        }
+      }
+    }
+  });
+
+  // 4. Trend Analysis
+  const dates = Array.from(new Set(snapshots.map((s: any) => s.fields["Date"] || s.fields["date"]))) as string[];
+  dates.sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
+
+  const netWorthTrend = dates.map(d => {
+    let assetsSum = 0;
+    let liabilitiesSum = 0;
+    
+    analyticsItems.forEach(item => {
+      const hist = item.history.find((h: any) => h.date === d);
+      if (hist) {
+        if (item.type === 'Asset') assetsSum += hist.value;
+        else liabilitiesSum += hist.value;
+      }
+    });
+
+    return {
+      date: d,
+      assets: assetsSum,
+      liabilities: liabilitiesSum,
+      netWorth: assetsSum - liabilitiesSum
+    };
+  });
+
+  const totalEquity = analyticsItems.reduce((acc, item) => acc + (item.equity || 0), 0);
+
+  return {
+    items: analyticsItems,
+    totalEquity,
+    netWorthTrend
+  };
+};
+
 export const fetchRawHealthData = async (): Promise<any> => {
   const user = getSession();
   if (!user || (!user.name && !user.email)) throw new Error("No user session found. Please sign out and sign in again.");
@@ -457,7 +594,6 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
 
   data.incomes?.forEach((item: any) => {
     let val = getValue(item, ["Amount", "amount"]);
-    const cat = item.fields["Category"] || "";
     const year = item.fields["Year"] || item.fields["year"] || "";
     const month = item.fields["Month"] || item.fields["month"] || "";
 
@@ -535,6 +671,7 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
       annualPassiveIncome,
       annualExpenses,
       insurance: data.insurance || []
-    }
+    },
+    analytics: calculateAnalytics(data)
   };
 };
