@@ -163,7 +163,7 @@ export default async function handler(req, res) {
         "Description": item.description || "",
         "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
       };
-      if (item.purchasePrice) fieldData["Purchase Price"] = parseFloat(String(item.purchasePrice).replace(/,/g, '')) || 0;
+      if (item.purchasePrice) fieldData["Original Purchase Price/Principal"] = parseFloat(String(item.purchasePrice).replace(/,/g, '')) || 0;
       if (item.month != null) fieldData["Month"] = getMonthName(item.month);
       if (item.year) fieldData["Year"] = String(item.year);
       return fieldData;

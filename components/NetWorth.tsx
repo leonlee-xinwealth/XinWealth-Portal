@@ -143,6 +143,8 @@ interface RecordItem {
   category: string;
   description: string;
   value: number;
+  purchasePrice: number;
+  originalLoanAmount: number;
 }
 
 const getQuarter = (monthStr: string): string => {
@@ -160,7 +162,7 @@ const getQuarter = (monthStr: string): string => {
     return 'Q1'; // Default fallback
 };
 
-const mapRecords = (rawArray: any[], valueFields: string[], defaultCategory?: string): RecordItem[] => {
+const mapRecords = (rawArray: any[], _valueFields?: string[], defaultCategory?: string): RecordItem[] => {
     return (rawArray || []).map(item => {
       if (!item || !item.fields) {
           return {
@@ -171,7 +173,9 @@ const mapRecords = (rawArray: any[], valueFields: string[], defaultCategory?: st
             timestamp: 0,
             category: defaultCategory || 'Unknown',
             description: 'Unknown',
-            value: 0
+            value: 0,
+            purchasePrice: 0,
+            originalLoanAmount: 0
           };
       }
       
@@ -188,7 +192,9 @@ const mapRecords = (rawArray: any[], valueFields: string[], defaultCategory?: st
         timestamp: d.timestamp || 0,
         category: defaultCategory || extractString(item, ["Category", "category", "Type", "type"]),
         description: extractString(item, ["Description", "description", "Name", "name", "Item", "item", "Fund Name", "fund name", "Investment Name", "investment name"]),
-        value: extractValue(item, valueFields)
+        value: extractValue(item, ["Value", "value", "Amount", "amount", "Current Value", "current value", "Outstanding Amount", "outstanding amount", "End Value", "end value"]),
+        purchasePrice: extractValue(item, ["Original Purchase Price/Principal", "Purchase Price", "purchase price", "Original Purchase Price"]),
+        originalLoanAmount: extractValue(item, ["Original Loan Amount", "original loan amount"])
       };
     });
   };
@@ -484,9 +490,17 @@ const NetWorth: React.FC = () => {
                                       </div>
                                       <div className="space-y-2 pl-4 border-l-2 border-slate-100">
                                           {data.items.map((item: any) => (
-                                              <div key={item.id} className="flex justify-between text-sm">
-                                                  <span className="text-slate-500">{item.description}</span>
-                                                  <span className="text-slate-700 font-medium">{formatCurrency(item.value)}</span>
+                                              <div key={item.id} className="flex justify-between items-start text-sm py-1 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors">
+                                                  <div className="flex flex-col">
+                                                      <span className="text-slate-700 font-medium">{item.description}</span>
+                                                      {item.purchasePrice > 0 && (
+                                                          <span className="text-xs text-slate-400">Orig. Price: {formatCurrency(item.purchasePrice)}</span>
+                                                      )}
+                                                      {item.originalLoanAmount > 0 && (
+                                                          <span className="text-xs text-slate-400">Orig. Loan: {formatCurrency(item.originalLoanAmount)}</span>
+                                                      )}
+                                                  </div>
+                                                  <span className="text-slate-800 font-bold whitespace-nowrap ml-2 mt-0.5">{formatCurrency(item.value)}</span>
                                               </div>
                                           ))}
                                       </div>
