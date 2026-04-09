@@ -13,7 +13,7 @@ const translations: Record<Language, Record<string, string>> = {
     'nav.welcome': 'Welcome',
     'nav.basic': 'Basic Information',
     'nav.assets': 'Net Worth',
-    'nav.liabilities': 'Monthly Snapshot',
+    'nav.liabilities': 'Liabilities',
     'nav.expenses': 'Cash Outflow',
     'nav.investments': 'Investments',
     'nav.review': 'Review Summary',
@@ -43,7 +43,7 @@ const translations: Record<Language, Record<string, string>> = {
     'basic.continue': 'Continue',
     'basic.back': 'Back',
 
-    'income.title': 'Our Cash Inflow',
+    'income.title': 'Cash Inflow',
     'income.active': 'Active Cash Inflow',
     'income.monthly': 'Monthly Gross Salary',
     'income.salaryLabel': 'I am earning a gross monthly salary of:',
@@ -79,7 +79,7 @@ const translations: Record<Language, Record<string, string>> = {
     'assets.addBtn': 'Add Asset',
     'assets.value': 'Current Value',
 
-    'liabilities.title': 'Monthly Snapshot (Liabilities)',
+    'liabilities.title': 'Liabilities',
     'liabilities.mortgages': 'Mortgage Loan',
     'liabilities.car': 'Car Loan',
     'liabilities.study': 'Study Loan',
@@ -90,7 +90,7 @@ const translations: Record<Language, Record<string, string>> = {
     'liabilities.addBtn': 'Add Loan',
     'liabilities.balance': 'Outstanding Balance',
 
-    'expenses.title': 'Our Cash Outflow',
+    'expenses.title': 'Cash Outflow',
     'expenses.household': 'Household',
     'expenses.transport': 'Transportation',
     'expenses.dependants': 'Dependants',
@@ -158,7 +158,7 @@ const translations: Record<Language, Record<string, string>> = {
     'nav.basic': '基本信息',
     'nav.income': '现金流入 (Cash Inflow)',
     'nav.assets': '净资产 (Net Worth)',
-    'nav.liabilities': '月度快照 (Monthly Snapshot)',
+    'nav.liabilities': '债务 (Liabilities)',
     'nav.expenses': '现金流出 (Cash Outflow)',
     'nav.investments': '投资',
     'nav.review': '检查确认',
@@ -188,7 +188,7 @@ const translations: Record<Language, Record<string, string>> = {
     'basic.continue': '继续',
     'basic.back': '返回',
 
-    'income.title': '我们的现金流入',
+    'income.title': '现金流入 (Cash Inflow)',
     'income.active': '主动现金流入 (Active Inflow)',
     'income.monthly': '每月税前薪水',
     'income.salaryLabel': '我的每月税前薪水是：',
@@ -224,7 +224,7 @@ const translations: Record<Language, Record<string, string>> = {
     'assets.addBtn': '添加资产',
     'assets.value': '当前价值 (Current Value)',
 
-    'liabilities.title': '月度快照 (Monthly Snapshot)',
+    'liabilities.title': '债务 (Liabilities)',
     'liabilities.mortgages': '房屋贷款',
     'liabilities.car': '汽车贷款',
     'liabilities.study': '教育贷款',
@@ -235,7 +235,7 @@ const translations: Record<Language, Record<string, string>> = {
     'liabilities.addBtn': '添加贷款',
     'liabilities.balance': '未结清余额',
 
-    'expenses.title': '我们的现金流出',
+    'expenses.title': '现金流出 (Cash Outflow)',
     'expenses.household': '家庭开销 (Household)',
     'expenses.transport': '交通开销 (Transportation)',
     'expenses.dependants': '受抚养人 (Dependants)',

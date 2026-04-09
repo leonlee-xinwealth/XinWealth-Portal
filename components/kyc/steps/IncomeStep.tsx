@@ -66,8 +66,6 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
         { key: 'directorFee', label: '3. Director / Advisory / Professional Fees', tooltip: 'Fees received for serving on a board of directors, providing formal advisory roles, or specialized consulting services.' },
         { key: 'commission', label: '4. Commission / Referral Fee', tooltip: 'Variable income earned from sales, successful business introductions, or lead referrals.' },
         { key: 'dividendCompany', label: '5. Dividend from Own Company', tooltip: 'Profit distributions or interim dividends declared and paid to you from your own private limited company (Sdn Bhd).' },
-        { key: 'dividendInvestment', label: '6. Investment Dividends / Interest', tooltip: 'Passive income earned from public listed stocks, unit trusts, fixed deposits, or digital assets.' },
-        { key: 'rentalIncome', label: '7. Rental Income', tooltip: 'Total monthly rent received from residential, commercial properties, or sub-letting arrangements.' },
     ];
 
     return (

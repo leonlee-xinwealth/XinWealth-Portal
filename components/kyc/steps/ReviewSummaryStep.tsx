@@ -13,16 +13,19 @@ interface ReviewSummaryStepProps {
 const parseAmount = (val: string) => parseInt(val.replace(/,/g, '') || '0', 10);
 
 const calculateAnnualIncome = (income: any) => {
+    if (!income) return 0;
     let total = 0;
-    total += parseAmount(income.monthlySalary) * 12;
-    total += parseAmount(income.annualBonus);
     
-    // Assuming rental is monthly
-    income.rentalIncome?.forEach((item: any) => total += parseAmount(item.amount) * 12);
-    // Assuming dividend is annual
-    income.dividendIncome?.forEach((item: any) => total += parseAmount(item.amount));
-    // Assuming other is monthly
-    income.otherIncome?.forEach((item: any) => total += parseAmount(item.amount) * 12);
+    // Monthly * 12
+    total += parseAmount(income.salary) * 12;
+    total += parseAmount(income.directorFee) * 12;
+    total += parseAmount(income.commission) * 12;
+    total += parseAmount(income.rentalIncome) * 12;
+    
+    // Annual
+    total += parseAmount(income.bonus);
+    total += parseAmount(income.dividendCompany);
+    total += parseAmount(income.dividendInvestment);
     
     return total;
 };
@@ -240,16 +243,16 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                         />
                         {annualIncome > 0 ? (
                             <div className="space-y-2">
-                                {formData.income.monthlySalary && (
+                                {formData.income?.salary && (
                                     <div className="flex justify-between text-sm">
                                         <span className="font-semibold text-gray-700">{t('review.grossIncome')}</span>
-                                        <span className="font-medium text-gray-900">RM {formData.income.monthlySalary}{isZh ? '/月' : '/month'}</span>
+                                        <span className="font-medium text-gray-900">RM {formData.income.salary}{isZh ? '/月' : '/month'}</span>
                                     </div>
                                 )}
-                                {formData.income.annualBonus && (
+                                {formData.income?.bonus && (
                                     <div className="flex justify-between text-sm">
                                         <span className="font-semibold text-gray-700">{t('review.bonus')}</span>
-                                        <span className="font-medium text-gray-900">RM {formData.income.annualBonus}{isZh ? '/年' : '/year'}</span>
+                                        <span className="font-medium text-gray-900">RM {formData.income.bonus}{isZh ? '/年' : '/year'}</span>
                                     </div>
                                 )}
                             </div>

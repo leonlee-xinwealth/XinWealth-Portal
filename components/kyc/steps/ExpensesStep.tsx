@@ -14,20 +14,16 @@ interface ExpensesStepProps {
 const HOUSEHOLD_OPTIONS = [
     { value: 'All - Household', labelEn: 'All - Household', labelZh: '全部 - 家庭' },
     { value: 'Tel/ Mobile/ Internet', labelEn: 'Tel/ Mobile/ Internet', labelZh: '电话/手机/网络' },
-    { value: 'Property Tax', labelEn: 'Property Tax', labelZh: '房产税' },
     { value: 'Home Maintenance', labelEn: 'Home Maintenance', labelZh: '房屋维护' },
     { value: 'Utilities Bills', labelEn: 'Utilities Bills', labelZh: '水电费' },
     { value: 'Groceries/Marketing', labelEn: 'Groceries/Marketing', labelZh: '杂货/买菜' },
-    { value: "Maid's Levy/ Salary", labelEn: "Maid's Levy/ Salary", labelZh: '女佣税/薪水' },
-    { value: 'Rental Expense', labelEn: 'Rental Expense', labelZh: '租金支出' }
+    { value: "Maid's Levy/ Salary", labelEn: "Maid's Levy/ Salary", labelZh: '女佣税/薪水' }
 ];
 
 const TRANSPORT_OPTIONS = [
     { value: 'All - Transport', labelEn: 'All - Transport', labelZh: '全部 - 交通' },
-    { value: 'Road Tax', labelEn: 'Road Tax', labelZh: '路税' },
     { value: 'Parking Fee', labelEn: 'Parking Fee', labelZh: '停车费' },
     { value: 'Petrol', labelEn: 'Petrol', labelZh: '汽油' },
-    { value: 'Servicing', labelEn: 'Servicing', labelZh: '保养/维修' },
     { value: 'Bus/ MRT/ Taxi/ Car Share', labelEn: 'Bus/ MRT/ Taxi/ Car Share', labelZh: '巴士/地铁/出租车/共享汽车' },
     { value: 'Car Insurance', labelEn: 'Car Insurance', labelZh: '汽车保险' }
 ];
