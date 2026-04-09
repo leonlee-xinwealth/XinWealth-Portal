@@ -37,6 +37,11 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing required parameters' });
   }
 
+  const getMonthName = (index) => {
+    const idx = parseInt(index);
+    return isNaN(idx) ? index : MONTH_NAMES[idx] || index;
+  };
+
   try {
     // 2. Get Access Token
     const tokenRes = await fetch("https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal", {
@@ -58,8 +63,6 @@ export default async function handler(req, res) {
       const records = items.map(item => ({
         fields: {
           ...item,
-          "Month": targetMonth,
-          "Year": String(targetYear),
           "Client": [clientId]
         }
       }));
@@ -77,28 +80,36 @@ export default async function handler(req, res) {
     const incomeRecords = (incomes || []).map(item => ({
       "Category": item.category,
       "Description": item.description || "",
-      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
+      "Month": getMonthName(item.month || targetMonth),
+      "Year": String(item.year || targetYear)
     }));
 
     // Prepare Expenses
     const expenseRecords = (expenses || []).map(item => ({
-      "Category": item.type, // Map the dropdown selection (Household, etc.) to Category
-      "Type": item.description || "", // Map user's description to Type, as Expenses table doesn't have a Description field
-      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+      "Category": item.type, 
+      "Type": item.description || "", 
+      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
+      "Month": getMonthName(item.month || targetMonth),
+      "Year": String(item.year || targetYear)
     }));
 
     // Prepare Assets
     const assetRecords = (assets || []).map(item => ({
       "Category": item.category,
       "Description": item.description || "",
-      "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+      "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
+      "Month": getMonthName(item.month || targetMonth),
+      "Year": String(item.year || targetYear)
     }));
 
     // Prepare Liabilities
     const liabilityRecords = (liabilities || []).map(item => ({
       "Category": item.category,
       "Description": item.description || "",
-      "Outstanding Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
+      "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
+      "Month": getMonthName(item.month || targetMonth),
+      "Year": String(item.year || targetYear)
     }));
 
     // Execute in parallel

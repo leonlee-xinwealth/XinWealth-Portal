@@ -1,6 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { fetchRawHealthData, getLatestRecords, getSession } from '../services/larkService';
-import { Loader2, AlertCircle, TrendingUp, TrendingDown, Edit2, Check, ArrowRight, Save, Plus, Trash2 } from 'lucide-react';
+import { Loader2, AlertCircle, Edit2, Check, ArrowRight, Save, Plus, Trash2, HelpCircle, Wallet, Receipt, Home, Car, Baby, Package, FolderPlus, Info, User, ChevronDown, ChevronUp } from 'lucide-react';
+import { useLanguage } from '../context/LanguageContext';
+import { DebouncedNumberInput } from './kyc/FormInputs';
+
+const Tooltip = ({ text }: { text: string }) => (
+  <div className="relative group flex items-center ml-2">
+      <HelpCircle size={16} className="text-gray-400 hover:text-xin-blue cursor-pointer" />
+      <div className="absolute left-1/2 bottom-full mb-2 -translate-x-1/2 w-64 p-3 bg-gray-800 text-white text-xs rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-200 z-10 text-center font-medium leading-relaxed scale-95 group-hover:scale-100">
+          {text}
+          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+      </div>
+  </div>
+);
 
 const StepUpIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -15,22 +27,99 @@ const StepUpIcon = ({ size = 24, className = "" }: { size?: number, className?: 
   </svg>
 );
 
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-const INCOME_CATEGORIES = ['Salary', 'Bonus / One-off Incentives', 'Director / Advisory / Professional Fees', 'Commission / Referral Fee', 'Dividend from Own Company', 'Investment Dividends / Interest', 'Rental Income'];
-const EXPENSE_CATEGORIES = ['Household', 'Transportation', 'Dependants', 'Personal', 'Miscellaneous', 'Other Expenses'];
+const MONTH_NAMES = [
+  { value: '0', en: 'January', zh: '1月' },
+  { value: '1', en: 'February', zh: '2月' },
+  { value: '2', en: 'March', zh: '3月' },
+  { value: '3', en: 'April', zh: '4月' },
+  { value: '4', en: 'May', zh: '5月' },
+  { value: '5', en: 'June', zh: '6月' },
+  { value: '6', en: 'July', zh: '7月' },
+  { value: '7', en: 'August', zh: '8月' },
+  { value: '8', en: 'September', zh: '9月' },
+  { value: '9', en: 'October', zh: '10月' },
+  { value: '10', en: 'November', zh: '11月' },
+  { value: '11', en: 'December', zh: '12月' }
+];
+
+const INCOME_FIELDS = [
+  { key: 'salary', label: '1. Salary', category: 'Salary', tooltip: 'Enter your fixed, recurring monthly base pay. Do not include one-time bonuses or variable commissions here.' },
+  { key: 'bonus', label: '2. Bonus / One-off Incentives', category: 'Bonus / One-off Incentives', tooltip: 'Include annual bonuses, performance rewards, 13th-month salary, or any one-time cash gifts received this month.' },
+  { key: 'directorFee', label: '3. Director / Advisory / Professional Fees', category: 'Director / Advisory / Professional Fees', tooltip: 'Fees received for serving on a board of directors, providing formal advisory roles, or specialized consulting services.' },
+  { key: 'commission', label: '4. Commission / Referral Fee', category: 'Commission / Referral Fee', tooltip: 'Variable income earned from sales, successful business introductions, or lead referrals.' },
+  { key: 'dividendCompany', label: '5. Dividend from Own Company', category: 'Dividend from Own Company', tooltip: 'Profit distributions or interim dividends declared and paid to you from your own private limited company (Sdn Bhd).' },
+  { key: 'dividendInvestment', label: '6. Investment Dividends / Interest', category: 'Investment Dividends / Interest', tooltip: 'Passive income earned from public listed stocks, unit trusts, fixed deposits, or digital assets.' },
+  { key: 'rentalIncome', label: '7. Rental Income', category: 'Rental Income', tooltip: 'Total monthly rent received from residential, commercial properties, or sub-letting arrangements.' },
+];
+
+const HOUSEHOLD_OPTIONS = [
+  { value: 'All - Household', labelEn: 'All - Household', labelZh: '全部 - 家庭' },
+  { value: 'Tel/ Mobile/ Internet', labelEn: 'Tel/ Mobile/ Internet', labelZh: '电话/手机/网络' },
+  { value: 'Property Tax', labelEn: 'Property Tax', labelZh: '房产税' },
+  { value: 'Home Maintenance', labelEn: 'Home Maintenance', labelZh: '房屋维护' },
+  { value: 'Utilities Bills', labelEn: 'Utilities Bills', labelZh: '水电费' },
+  { value: 'Groceries/Marketing', labelEn: 'Groceries/Marketing', labelZh: '杂货/买菜' },
+  { value: "Maid's Levy/ Salary", labelEn: "Maid's Levy/ Salary", labelZh: '女佣税/薪水' },
+  { value: 'Rental Expense', labelEn: 'Rental Expense', labelZh: '租金支出' }
+];
+
+const TRANSPORT_OPTIONS = [
+  { value: 'All - Transport', labelEn: 'All - Transport', labelZh: '全部 - 交通' },
+  { value: 'Road Tax', labelEn: 'Road Tax', labelZh: '路税' },
+  { value: 'Parking Fee', labelEn: 'Parking Fee', labelZh: '停车费' },
+  { value: 'Petrol', labelEn: 'Petrol', labelZh: '汽油' },
+  { value: 'Servicing', labelEn: 'Servicing', labelZh: '保养/维修' },
+  { value: 'Bus/ MRT/ Taxi/ Car Share', labelEn: 'Bus/ MRT/ Taxi/ Car Share', labelZh: '巴士/地铁/出租车/共享汽车' },
+  { value: 'Car Insurance', labelEn: 'Car Insurance', labelZh: '汽车保险' }
+];
+
+const DEPENDANTS_OPTIONS = [
+  { value: 'All - Dependants', labelEn: 'All - Dependants', labelZh: '全部 - 赡养/抚养' },
+  { value: 'Child Care', labelEn: 'Child Care', labelZh: '儿童保育' },
+  { value: "Children's School Fee", labelEn: "Children's School Fee", labelZh: '子女学费' },
+  { value: 'Upgrading Class', labelEn: 'Upgrading Class', labelZh: '补习班/提升班' },
+  { value: 'Dependant Allowances', labelEn: 'Dependant Allowances', labelZh: '家属津贴' },
+  { value: 'Child Expenses', labelEn: 'Child Expenses', labelZh: '子女开销' },
+  { value: 'Parent Allowance', labelEn: 'Parent Allowance', labelZh: '父母津贴' }
+];
+
+const PERSONAL_OPTIONS = [
+  { value: 'All - Personal', labelEn: 'All - Personal', labelZh: '全部 - 个人' },
+  { value: 'Entertainment', labelEn: 'Entertainment', labelZh: '娱乐' },
+  { value: 'Dining Out', labelEn: 'Dining Out', labelZh: '外出就餐' },
+  { value: 'Personal Care/ Clothing', labelEn: 'Personal Care/ Clothing', labelZh: '个人护理/服装' },
+  { value: 'Vacation/ Travel', labelEn: 'Vacation/ Travel', labelZh: '度假/旅游' },
+  { value: 'Donations/ Charity/ Gifts', labelEn: 'Donations/ Charity/ Gifts', labelZh: '捐款/慈善/礼物' },
+  { value: 'Income Tax Expense', labelEn: 'Income Tax Expense', labelZh: '所得税支出' },
+  { value: 'School Fees', labelEn: 'School Fees', labelZh: '学费' }
+];
+
+const MISC_OPTIONS = [
+  { value: 'All - Miscellaneous', labelEn: 'All - Miscellaneous', labelZh: '全部 - 杂项' },
+  { value: 'Medical Cost', labelEn: 'Medical Cost', labelZh: '医疗费用' }
+];
+
+const OTHER_EXPENSES_OPTIONS = [
+  { value: 'Loan Repayment', labelEn: 'Loan Repayment', labelZh: '贷款偿还' }
+];
+
+const YEARS = Array.from({ length: 5 }, (_, i) => (new Date().getFullYear() - 2 + i).toString());
 
 const LevelUp: React.FC = () => {
+  const { t, language } = useLanguage();
+  const isZh = language === 'zh';
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [step, setStep] = useState(1);
+  const [expandedCard, setExpandedCard] = useState<string | null>(null);
 
-  const [targetMonth, setTargetMonth] = useState(MONTH_NAMES[new Date().getMonth()]);
+  const [targetMonth, setTargetMonth] = useState(new Date().getMonth().toString());
   const [targetYear, setTargetYear] = useState(new Date().getFullYear().toString());
 
-  const [incomes, setIncomes] = useState<{ id: string; category: string; description: string; amount: number }[]>([]);
-  const [expenses, setExpenses] = useState<{ id: string; type: string; description: string; amount: number }[]>([]);
+  const [incomes, setIncomes] = useState<{ id: string; key: string; category: string; description: string; amount: string; month: string; year: string }[]>([]);
+  const [expenses, setExpenses] = useState<{ id: string; category: string; type: string; description?: string; amount: string; month: string; year: string }[]>([]);
   const [assets, setAssets] = useState<{ id: string; category: string; description: string; amount: number; isEditing?: boolean; tempAmount?: string }[]>([]);
   const [liabilities, setLiabilities] = useState<{ id: string; category: string; description: string; amount: number; monthlyInstallment: number; isEditing?: boolean; tempAmount?: string }[]>([]);
 
@@ -69,9 +158,19 @@ const LevelUp: React.FC = () => {
       setAssets(initAssets);
       setLiabilities(initLiabilities);
 
-      // Pre-fill one empty row for each income/expense category to make it easy
-      setIncomes(INCOME_CATEGORIES.map(cat => ({ id: Math.random().toString(), category: cat, description: '', amount: 0 })));
-      setExpenses(EXPENSE_CATEGORIES.map(type => ({ id: Math.random().toString(), type, description: '', amount: 0 })));
+      // Initialize incomes with fixed fields
+      setIncomes(INCOME_FIELDS.map(f => ({ 
+        id: f.key, 
+        key: f.key,
+        category: f.category, 
+        description: '', 
+        amount: '', 
+        month: targetMonth, 
+        year: targetYear 
+      })));
+      
+      // Expenses start empty as they are dynamic categorized lists
+      setExpenses([]);
 
     } catch (err: any) {
       setError(err.message || 'Failed to load latest data');
@@ -80,12 +179,32 @@ const LevelUp: React.FC = () => {
     }
   };
 
-  const handleAddRow = (setter: any, template: any) => {
-    setter((prev: any) => [...prev, { id: Math.random().toString(), ...template }]);
+  const addExpenseItem = (category: string, defaultType: string) => {
+    const newItem = { 
+      id: Date.now().toString() + Math.random().toString(), 
+      category, 
+      type: defaultType, 
+      amount: '', 
+      month: targetMonth, 
+      year: targetYear 
+    };
+    setExpenses(prev => [...prev, newItem]);
+    setExpandedCard(category);
   };
 
-  const handleRemoveRow = (setter: any, id: string) => {
-    setter((prev: any) => prev.filter((item: any) => item.id !== id));
+  const removeExpenseItem = (id: string) => {
+    setExpenses(prev => {
+        const newItems = prev.filter(item => item.id !== id);
+        return newItems;
+    });
+  };
+
+  const updateExpenseItem = (id: string, field: string, value: string) => {
+    setExpenses(prev => prev.map(item => item.id === id ? { ...item, [field]: value } : item));
+  };
+
+  const updateIncomeItem = (key: string, field: string, value: string) => {
+    setIncomes(prev => prev.map(item => item.key === key ? { ...item, [field]: value } : item));
   };
 
   const handleUpdateAmount = (setter: any, id: string, newAmount: number) => {
@@ -96,6 +215,10 @@ const LevelUp: React.FC = () => {
       return item;
     }));
   };
+
+  const selectClasses = "px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer";
+
+
 
   const handleSubmit = async () => {
     const session = getSession();
@@ -108,8 +231,8 @@ const LevelUp: React.FC = () => {
     const payload = {
       targetMonth,
       targetYear,
-      incomes: incomes.filter(i => i.amount > 0),
-      expenses: expenses.filter(e => e.amount > 0),
+      incomes: incomes.filter(i => parseFloat(String(i.amount).replace(/,/g, '')) > 0),
+      expenses: expenses.filter(e => parseFloat(String(e.amount).replace(/,/g, '')) > 0),
       assets,
       liabilities
     };
@@ -128,7 +251,8 @@ const LevelUp: React.FC = () => {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Submission failed');
       
-      setSuccessMsg(`Successfully leveled up for ${targetMonth} ${targetYear}!`);
+      const monthObj = MONTH_NAMES.find(m => m.value === targetMonth);
+      setSuccessMsg(`Successfully leveled up for ${isZh ? monthObj?.zh : monthObj?.en} ${targetYear}!`);
       setTimeout(() => {
         window.location.reload();
       }, 2000);
@@ -137,6 +261,129 @@ const LevelUp: React.FC = () => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const renderExpandableExpenseCard = ( 
+    title: string, 
+    Icon: React.ElementType, 
+    category: string,
+    options: { value: string, labelEn: string, labelZh: string }[],
+    defaultType: string 
+  ) => {
+    const items = expenses.filter(e => e.category === category);
+    const hasItems = items.length > 0;
+    const isOpen = expandedCard === category;
+
+    return (
+        <div className="border border-slate-200 rounded-2xl mb-4 bg-white shadow-sm overflow-hidden transition-all">
+            {/* Header */}
+            <div 
+                className="p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors"
+                onClick={() => setExpandedCard(isOpen ? null : category)}
+            >
+                <div className="flex items-center gap-4">
+                    <div className="bg-slate-50 border border-slate-100 p-2.5 rounded-full text-slate-600">
+                        <Icon size={24} />
+                    </div>
+                    <span className="font-bold text-slate-800">{isZh ? t(`expenses.${category.toLowerCase()}`) || title : title} {hasItems ? `(${items.length})` : ''}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {!hasItems && (
+                     <button 
+                        onClick={(e) => { e.stopPropagation(); addExpenseItem(category, defaultType); }} 
+                        className="text-xin-blue flex items-center gap-1.5 text-sm font-bold hover:text-xin-cyan transition-colors"
+                    >
+                        <Plus size={18} /> {t('expenses.add') || 'Add'}
+                    </button>
+                  )}
+                  {hasItems && (
+                    <div className="text-xin-blue flex items-center gap-1.5 text-sm font-bold">
+                        {isOpen ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                    </div>
+                  )}
+                </div>
+            </div>
+            
+            {/* Body */}
+            {isOpen && (
+                <div className="bg-slate-50/50 p-6 pt-2 space-y-4 border-t border-slate-100">
+                    {items.map((item) => (
+                        <div key={item.id} className="relative bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                            <div className="flex flex-col md:flex-row md:items-center gap-4">
+                                {/* Type Dropdown */}
+                                <div className="w-full md:w-5/12">
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{t('common.type') || 'Type'}</label>
+                                    <select
+                                        className={selectClasses + " w-full !py-2"}
+                                        value={item.type}
+                                        onChange={(e) => updateExpenseItem(item.id, 'type', e.target.value)}
+                                    >
+                                        {options.map(opt => (
+                                            <option key={opt.value} value={opt.value}>{isZh ? opt.labelZh : opt.labelEn}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {/* Amount Input */}
+                                <div className="w-full md:w-4/12">
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{t('common.amount') || 'Amount'}</label>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-slate-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                            <span className="text-slate-500 font-bold text-xs">RM</span>
+                                        </div>
+                                        <DebouncedNumberInput 
+                                            className="w-full pl-16 pr-4 py-2 border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-xin-cyan/20 focus:border-xin-cyan bg-white shadow-sm font-bold text-slate-700"
+                                            value={item.amount}
+                                            onChange={(val) => updateExpenseItem(item.id, 'amount', val)}
+                                            placeholder="0"
+                                        />
+                                    </div>
+                                </div>
+
+                                {/* Month/Year & Delete */}
+                                <div className="w-full md:w-3/12">
+                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{isZh ? '月份 / 年份' : 'Month / Year'}</label>
+                                    <div className="flex items-center gap-2">
+                                      <select
+                                          className={selectClasses + ' flex-1 !py-2'}
+                                          value={item.month}
+                                          onChange={(e) => updateExpenseItem(item.id, 'month', e.target.value)}
+                                      >
+                                          {MONTH_NAMES.map(m => (
+                                              <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                          ))}
+                                      </select>
+                                      <select
+                                          className={selectClasses + ' w-20 !py-2'}
+                                          value={item.year}
+                                          onChange={(e) => updateExpenseItem(item.id, 'year', e.target.value)}
+                                      >
+                                          {YEARS.map(y => (
+                                              <option key={y} value={y}>{y}</option>
+                                          ))}
+                                      </select>
+                                      <button 
+                                          onClick={() => removeExpenseItem(item.id)} 
+                                          className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                                      >
+                                          <Trash2 size={18} />
+                                      </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    
+                    <button 
+                        onClick={() => addExpenseItem(category, defaultType)} 
+                        className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-slate-400 hover:text-xin-blue hover:border-xin-blue/30 hover:bg-xin-blue/5 transition-all flex items-center justify-center gap-2 text-sm font-bold font-sans"
+                    >
+                        <Plus size={16} /> {isZh ? '添加明细' : 'Add Detail'}
+                    </button>
+                </div>
+            )}
+        </div>
+    );
   };
 
   if (loading) {
@@ -164,14 +411,14 @@ const LevelUp: React.FC = () => {
           <select 
             value={targetMonth} 
             onChange={(e) => setTargetMonth(e.target.value)}
-            className="bg-transparent font-bold text-slate-700 focus:outline-none"
+            className="bg-transparent font-bold text-slate-700 focus:outline-none cursor-pointer"
           >
-            {MONTH_NAMES.map(m => <option key={m} value={m}>{m}</option>)}
+            {MONTH_NAMES.map(m => <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>)}
           </select>
           <select 
             value={targetYear} 
             onChange={(e) => setTargetYear(e.target.value)}
-            className="bg-transparent font-bold text-slate-700 focus:outline-none"
+            className="bg-transparent font-bold text-slate-700 focus:outline-none cursor-pointer"
           >
             {[0, -1, -2].map(offset => {
               const y = (new Date().getFullYear() + offset).toString();
@@ -197,91 +444,99 @@ const LevelUp: React.FC = () => {
 
       {/* STEP 1: Income & Expenses */}
       {step === 1 && (
-        <div className="space-y-8 animate-fade-in">
-          {/* Incomes */}
-          <div className="bg-emerald-50/30 p-6 rounded-2xl border border-emerald-100">
-            <h4 className="text-lg font-bold text-emerald-800 mb-4 flex items-center gap-2">
-              <TrendingUp size={20} /> Income
-            </h4>
-            <div className="space-y-3">
-              {incomes.map((inc) => (
-                <div key={inc.id} className="flex flex-col sm:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200">
-                  <select 
-                    value={inc.category} 
-                    onChange={(e) => setIncomes(prev => prev.map(p => p.id === inc.id ? { ...p, category: e.target.value } : p))}
-                    className="w-full sm:w-1/3 text-sm bg-transparent font-medium text-slate-700 focus:outline-none border-b border-slate-100 pb-1"
-                  >
-                    {INCOME_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <input 
-                    type="text" placeholder="Description (Optional)" 
-                    value={inc.description}
-                    onChange={(e) => setIncomes(prev => prev.map(p => p.id === inc.id ? { ...p, description: e.target.value } : p))}
-                    className="w-full sm:w-1/3 text-sm bg-transparent focus:outline-none border-b border-slate-100 pb-1"
-                  />
-                  <div className="w-full sm:w-1/3 flex items-center gap-2">
-                    <span className="text-sm font-bold text-slate-400">RM</span>
-                    <input 
-                      type="number" min="0" placeholder="0"
-                      value={inc.amount || ''}
-                      onChange={(e) => setIncomes(prev => prev.map(p => p.id === inc.id ? { ...p, amount: parseFloat(e.target.value) || 0 } : p))}
-                      className="w-full text-right font-bold text-emerald-600 focus:outline-none border-b border-slate-100 pb-1"
-                    />
-                    <button onClick={() => handleRemoveRow(setIncomes, inc.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
+        <div className="space-y-10 animate-fade-in">
+          {/* Section: Income */}
+          <div>
+            <div className="flex items-center gap-3 mb-6 border-b border-slate-100 pb-4">
+              <div className="bg-emerald-50 p-2 rounded-lg text-emerald-600">
+                <Wallet size={24} />
+              </div>
+              <h4 className="text-xl font-bold text-slate-800">{t('income.title') || 'Income'}</h4>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {INCOME_FIELDS.map((field) => {
+                const inc = incomes.find(i => i.key === field.key);
+                if (!inc) return null;
+                return (
+                  <div key={field.key} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:border-emerald-200 transition-colors">
+                    <div className="mb-3 flex items-center justify-between">
+                        <div className="flex items-center">
+                          <label className="text-sm font-bold text-slate-700">{field.label}</label>
+                          <Tooltip text={field.tooltip} />
+                        </div>
+                    </div>
+                    
+                    <div className="relative mb-3">
+                        <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-slate-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                            <span className="text-slate-400 font-bold text-xs">RM</span>
+                        </div>
+                        <DebouncedNumberInput 
+                            className="w-full pl-16 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-xin-cyan/20 focus:border-xin-cyan bg-white shadow-sm transition-shadow font-bold text-slate-700"
+                            value={inc.amount}
+                            onChange={(val) => updateIncomeItem(field.key, 'amount', val)}
+                            placeholder="0"
+                        />
+                    </div>
+                    
+                    <div className="flex gap-2">
+                        <select
+                            className={selectClasses + ' flex-1 !py-1.5'}
+                            value={inc.month}
+                            onChange={(e) => updateIncomeItem(field.key, 'month', e.target.value)}
+                        >
+                            {MONTH_NAMES.map(m => (
+                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                            ))}
+                        </select>
+                        <select
+                            className={selectClasses + ' w-24 !py-1.5'}
+                            value={inc.year}
+                            onChange={(e) => updateIncomeItem(field.key, 'year', e.target.value)}
+                        >
+                            {YEARS.map(y => (
+                                <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                    </div>
                   </div>
-                </div>
-              ))}
-              <button onClick={() => handleAddRow(setIncomes, { category: 'Salary', description: '', amount: 0 })} className="text-sm font-bold text-emerald-600 flex items-center gap-1 hover:underline mt-2">
-                <Plus size={16} /> Add Income
-              </button>
+                );
+              })}
             </div>
           </div>
 
-          {/* Expenses */}
-          <div className="bg-orange-50/30 p-6 rounded-2xl border border-orange-100">
-            <h4 className="text-lg font-bold text-orange-800 mb-4 flex items-center gap-2">
-              <TrendingDown size={20} /> Expenses
-            </h4>
-            <div className="space-y-3">
-              {expenses.map((exp) => (
-                <div key={exp.id} className="flex flex-col sm:flex-row items-center gap-3 bg-white p-3 rounded-xl border border-slate-200">
-                  <select 
-                    value={exp.type} 
-                    onChange={(e) => setExpenses(prev => prev.map(p => p.id === exp.id ? { ...p, type: e.target.value } : p))}
-                    className="w-full sm:w-1/3 text-sm bg-transparent font-medium text-slate-700 focus:outline-none border-b border-slate-100 pb-1"
-                  >
-                    {EXPENSE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <input 
-                    type="text" placeholder="Description (Optional)" 
-                    value={exp.description}
-                    onChange={(e) => setExpenses(prev => prev.map(p => p.id === exp.id ? { ...p, description: e.target.value } : p))}
-                    className="w-full sm:w-1/3 text-sm bg-transparent focus:outline-none border-b border-slate-100 pb-1"
-                  />
-                  <div className="w-full sm:w-1/3 flex items-center gap-2">
-                    <span className="text-sm font-bold text-slate-400">RM</span>
-                    <input 
-                      type="number" min="0" placeholder="0"
-                      value={exp.amount || ''}
-                      onChange={(e) => setExpenses(prev => prev.map(p => p.id === exp.id ? { ...p, amount: parseFloat(e.target.value) || 0 } : p))}
-                      className="w-full text-right font-bold text-orange-600 focus:outline-none border-b border-slate-100 pb-1"
-                    />
-                    <button onClick={() => handleRemoveRow(setExpenses, exp.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16}/></button>
-                  </div>
-                </div>
-              ))}
-              <button onClick={() => handleAddRow(setExpenses, { type: 'Household', description: '', amount: 0 })} className="text-sm font-bold text-orange-600 flex items-center gap-1 hover:underline mt-2">
-                <Plus size={16} /> Add Expense
-              </button>
+          {/* Section: Expenses */}
+          <div>
+            <div className="flex items-center gap-3 mb-6 border-b border-slate-100 pb-4">
+              <div className="bg-orange-50 p-2 rounded-lg text-orange-600">
+                <Receipt size={24} />
+              </div>
+              <h4 className="text-xl font-bold text-slate-800">{t('expenses.title') || 'Expenses'}</h4>
+            </div>
+
+            <div className="bg-blue-50/50 p-4 rounded-xl flex items-start gap-3 mb-6">
+              <Info size={18} className="text-xin-blue flex-shrink-0 mt-0.5" />
+              <p className="text-xs font-medium text-slate-600 italic">
+                {isZh ? '您可以按类别添加支出明细，确保财务追踪更加精准。' : 'Add expense details by category to ensure more accurate financial tracking.'}
+              </p>
+            </div>
+            
+            <div className="space-y-2">
+                {renderExpandableExpenseCard(t('expenses.household') || 'Household', Home, "Household", HOUSEHOLD_OPTIONS, "All - Household")}
+                {renderExpandableExpenseCard(t('expenses.transport') || 'Transportation', Car, "Transportation", TRANSPORT_OPTIONS, "All - Transport")}
+                {renderExpandableExpenseCard(t('expenses.dependants') || 'Dependants', Baby, "Dependants", DEPENDANTS_OPTIONS, "All - Dependants")}
+                {renderExpandableExpenseCard(t('expenses.personal') || 'Personal', User, "Personal", PERSONAL_OPTIONS, "All - Personal")}
+                {renderExpandableExpenseCard(t('expenses.misc') || 'Miscellaneous', Package, "Miscellaneous", MISC_OPTIONS, "All - Miscellaneous")}
+                {renderExpandableExpenseCard(t('expenses.others') || 'Other Expenses', FolderPlus, "Other Expenses", OTHER_EXPENSES_OPTIONS, "Loan Repayment")}
             </div>
           </div>
 
-          <div className="flex justify-end pt-4 border-t border-slate-100">
+          <div className="flex justify-end pt-8 border-t border-slate-100">
             <button 
               onClick={() => setStep(2)}
-              className="flex items-center gap-2 bg-xin-blue text-white px-6 py-3 rounded-full font-bold hover:bg-xin-blue/90 shadow-md transition-all"
+              className="flex items-center gap-3 bg-xin-blue text-white px-8 py-3.5 rounded-full font-bold hover:bg-xin-blue/90 shadow-xl shadow-xin-blue/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
             >
-              Next: Update Assets & Liabilities <ArrowRight size={18} />
+              Next: Update Assets & Liabilities <ArrowRight size={20} />
             </button>
           </div>
         </div>
@@ -406,17 +661,20 @@ const LevelUp: React.FC = () => {
         <div className="space-y-8 animate-fade-in">
           <div className="bg-xin-blue/5 p-6 rounded-2xl border border-xin-blue/20 text-center">
             <h4 className="text-2xl font-bold text-xin-blue mb-2">Review Your Data</h4>
-            <p className="text-slate-600">Please confirm your snapshot for <strong>{targetMonth} {targetYear}</strong> before submitting.</p>
+            <p className="text-slate-600">Please confirm your snapshot for <strong>{(() => {
+                const monthObj = MONTH_NAMES.find(m => m.value === targetMonth);
+                return isZh ? monthObj?.zh : monthObj?.en;
+            })()} {targetYear}</strong> before submitting.</p>
           </div>
 
           <div className="grid grid-cols-2 gap-6">
             <div className="bg-emerald-50 p-6 rounded-2xl">
               <span className="text-xs font-bold text-emerald-600 uppercase">Total Income Entered</span>
-              <p className="text-3xl font-bold text-slate-800">RM {incomes.reduce((acc, curr) => acc + (curr.amount || 0), 0).toLocaleString()}</p>
+              <p className="text-3xl font-bold text-slate-800">RM {incomes.reduce((acc, curr) => acc + (parseFloat(String(curr.amount).replace(/,/g, '')) || 0), 0).toLocaleString()}</p>
             </div>
             <div className="bg-orange-50 p-6 rounded-2xl">
               <span className="text-xs font-bold text-orange-600 uppercase">Total Expenses Entered</span>
-              <p className="text-3xl font-bold text-slate-800">RM {expenses.reduce((acc, curr) => acc + (curr.amount || 0), 0).toLocaleString()}</p>
+              <p className="text-3xl font-bold text-slate-800">RM {expenses.reduce((acc, curr) => acc + (parseFloat(String(curr.amount).replace(/,/g, '')) || 0), 0).toLocaleString()}</p>
             </div>
             <div className="bg-blue-50 p-6 rounded-2xl">
               <span className="text-xs font-bold text-blue-600 uppercase">Total Assets</span>
