@@ -224,44 +224,43 @@ const LevelUp: React.FC = () => {
   }), [incomes, expenses, assets, investments, liabilities]);
 
   const ItemSection = ({ title, icon: Icon, items, setter, options, total, type }: any) => (
-    <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-all mb-6">
-      <div className="p-5 flex items-center justify-between border-b border-slate-100 bg-slate-50/50">
-        <div className="flex items-center gap-3">
-          <div className="bg-white p-2.5 rounded-xl border border-slate-200 text-xin-blue shadow-sm">
-            <Icon size={24} />
+    <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-md hover:shadow-lg transition-all mb-8">
+      <div className="p-6 flex items-center justify-between border-b border-slate-100 bg-slate-50/50">
+        <div className="flex items-center gap-4">
+          <div className="bg-white p-3 rounded-2xl border border-slate-200 text-xin-blue shadow-sm">
+            <Icon size={28} />
           </div>
-          <div>
-            <h4 className="font-bold text-slate-800">{isZh ? t(`levelUp.${title.toLowerCase()}`) || title : title}</h4>
-            <div className="text-[10px] font-bold text-slate-400 tracking-widest uppercase mt-0.5">{isZh ? '总计' : 'Total'}: RM {total.toLocaleString()}</div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
+            <h4 className="text-xl font-black text-slate-800 tracking-tight">{isZh ? t(`levelUp.${title.toLowerCase().replace(/\s+/g, '')}`) || title : title}</h4>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{isZh ? '总计' : 'Total'}:</span>
+              <span className={`text-2xl font-black ${type === 'outflow' || type === 'liabilities' ? 'text-rose-500' : 'text-emerald-500'}`}>
+                RM {total.toLocaleString()}
+              </span>
+            </div>
           </div>
         </div>
-        <button 
-          onClick={() => addItem(setter, options[0].value)}
-          className="bg-xin-blue text-white p-2 rounded-lg hover:bg-xin-cyan transition-colors shadow-sm"
-        >
-          <Plus size={20} />
-        </button>
       </div>
       
-      <div className="p-5 space-y-4">
+      <div className="p-6 space-y-5">
         {items.length === 0 && (
-          <div className="text-center py-6 text-slate-400 text-sm italic font-medium">
-            {isZh ? '无记录。点击 + 添加。' : 'No items. Click + to add.'}
+          <div className="text-center py-10 text-slate-400 text-sm italic font-medium bg-slate-50/20 rounded-2xl border border-dashed border-slate-200">
+            {isZh ? '目前无记录。点击下方按钮添加。' : 'No records yet. Click the button below to add.'}
           </div>
         )}
         {items.map((item: any) => (
-          <div key={item.id} className="relative bg-slate-50/30 p-4 rounded-xl border border-slate-100 space-y-3 group">
+          <div key={item.id} className="relative bg-slate-50/20 p-5 rounded-2xl border border-slate-100 space-y-4 group hover:bg-white hover:border-xin-blue/10 transition-all">
             <button 
               onClick={() => removeItem(setter, item.id)}
-              className="absolute -top-2 -right-2 bg-red-50 text-red-500 p-1.5 rounded-full border border-red-100 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 hover:text-white"
+              className="absolute -top-2 -right-2 bg-white text-red-400 p-2 rounded-full border border-slate-100 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500 hover:text-white z-10"
             >
-              <Trash2 size={14} />
+              <Trash2 size={16} />
             </button>
-            <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-5 text-left">
               <div className="md:col-span-4">
-                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block tracking-wider">{isZh ? '类别' : 'Category'}</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase mb-1.5 block tracking-widest">{isZh ? '类别' : 'Category'}</label>
                 <select 
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none transition-all"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none transition-all cursor-pointer"
                   value={item.category}
                   onChange={(e) => updateItem(setter, item.id, 'category', e.target.value)}
                 >
@@ -269,20 +268,20 @@ const LevelUp: React.FC = () => {
                 </select>
               </div>
               <div className="md:col-span-4">
-                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block tracking-wider">{isZh ? '备注' : 'Description'}</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase mb-1.5 block tracking-widest">{isZh ? '备注' : 'Description'}</label>
                 <DebouncedTextInput 
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold text-slate-700 focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none transition-all"
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none transition-all"
                   value={item.description}
                   onChange={(val) => updateItem(setter, item.id, 'description', val)}
                   placeholder={isZh ? '输入备注...' : 'Enter description...'}
                 />
               </div>
               <div className="md:col-span-4">
-                <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block tracking-wider">{isZh ? '金额' : 'Amount'}</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase mb-1.5 block tracking-widest">{isZh ? '金额 (RM)' : 'Amount (RM)'}</label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-[10px] font-bold text-slate-400">RM</div>
+                  <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-xs font-black text-slate-400">RM</div>
                   <DebouncedNumberInput 
-                    className="w-full bg-white border border-slate-200 rounded-lg pl-10 pr-3 py-2 text-sm font-bold text-slate-800 focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none transition-all"
+                    className="w-full bg-white border border-slate-200 rounded-xl pl-12 pr-4 py-2.5 text-sm font-black text-slate-800 shadow-sm focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none transition-all"
                     value={item.amount}
                     onChange={(val) => updateItem(setter, item.id, 'amount', val)}
                     placeholder="0"
@@ -292,6 +291,15 @@ const LevelUp: React.FC = () => {
             </div>
           </div>
         ))}
+
+        <div className="flex justify-center pt-2">
+          <button 
+            onClick={() => addItem(setter, options[0].value)}
+            className="flex items-center gap-2 bg-white text-xin-blue border-2 border-dashed border-slate-200 px-8 py-3.5 rounded-2xl font-black text-sm hover:border-xin-blue/30 hover:bg-xin-blue/5 hover:text-xin-cyan transition-all w-full md:w-auto"
+          >
+            <Plus size={18} /> {isZh ? '添加一个项目' : 'Add item'}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -375,38 +383,36 @@ const LevelUp: React.FC = () => {
       </div>
 
       {/* Summary Footer */}
-      <div className="bg-slate-900 text-white rounded-3xl p-8 shadow-2xl relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-64 h-64 bg-xin-blue/10 rounded-full blur-3xl -mr-32 -mt-32" />
+      <div className="bg-slate-900 text-white rounded-3xl p-10 shadow-2xl relative overflow-hidden border border-slate-800">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-xin-blue/5 rounded-full blur-3xl -mr-48 -mt-48" />
         
-        <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 w-full md:w-auto">
+        <div className="flex flex-col md:flex-row items-center justify-between gap-10 relative z-10">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-10 w-full md:w-auto">
             <div>
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{isZh ? '总流入' : 'Total Inflow'}</div>
-              <div className="text-xl font-black text-emerald-400">RM {totals.inflow.toLocaleString()}</div>
+              <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '现金流入' : 'Cash Inflow'}</div>
+              <div className="text-2xl font-black text-emerald-400">RM {totals.inflow.toLocaleString()}</div>
             </div>
             <div>
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{isZh ? '总流出' : 'Total Outflow'}</div>
-              <div className="text-xl font-black text-rose-400">RM {totals.outflow.toLocaleString()}</div>
+              <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '现金流出' : 'Cash Outflow'}</div>
+              <div className="text-2xl font-black text-white font-sans">RM {totals.outflow.toLocaleString()}</div>
             </div>
             <div>
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{isZh ? '净现金流' : 'Net Cashflow'}</div>
-              <div className={`text-xl font-black ${totals.inflow - totals.outflow >= 0 ? 'text-xin-cyan' : 'text-rose-500'}`}>
-                RM {(totals.inflow - totals.outflow).toLocaleString()}
-              </div>
+              <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '总资产' : 'Total Assets'}</div>
+              <div className="text-2xl font-black text-xin-gold">RM {(totals.assets + totals.investments).toLocaleString()}</div>
             </div>
             <div>
-              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{isZh ? '净资产' : 'Net Worth'}</div>
-              <div className="text-xl font-black text-xin-blue">RM {(totals.assets + totals.investments - totals.liabilities).toLocaleString()}</div>
+              <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '总负债' : 'Total Liabilities'}</div>
+              <div className="text-2xl font-black text-rose-500">RM {totals.liabilities.toLocaleString()}</div>
             </div>
           </div>
           
           <button 
             onClick={handleSubmit}
             disabled={submitting}
-            className="w-full md:w-auto bg-gradient-to-r from-xin-blue to-xin-cyan text-white px-12 py-4 rounded-2xl font-black text-lg hover:scale-[1.05] active:scale-[0.98] transition-all shadow-xl shadow-xin-blue/20 flex items-center justify-center gap-3 disabled:opacity-50"
+            className="w-full md:w-auto bg-gradient-to-r from-xin-blue to-xin-cyan text-white px-12 py-5 rounded-2xl font-black text-xl hover:scale-[1.05] active:scale-[0.98] transition-all shadow-2xl shadow-xin-blue/30 flex items-center justify-center gap-3 disabled:opacity-50"
           >
             {submitting ? <Loader2 size={24} className="animate-spin" /> : <Save size={24} />}
-            {submitting ? (isZh ? '正在保存...' : 'Saving Changes...') : (isZh ? '确认并上传' : 'Confirm & Upload')}
+            {submitting ? (isZh ? '正在上传...' : 'Uploading...') : (isZh ? '确认并上传' : 'Confirm & Upload')}
           </button>
         </div>
       </div>
