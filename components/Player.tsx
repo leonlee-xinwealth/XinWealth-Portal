@@ -193,7 +193,7 @@ const Player: React.FC = () => {
   const title = 'Wealth Awakener';
 
   // Formatters
-  const formatCurrency = (val: number) => `RM ${val.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
+  const formatCurrency = (val: number) => `RM ${(Number(val) || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
   const formatPercent = (val: number) => `${val.toFixed(1)}%`;
 
   const handleEditToggle = () => {

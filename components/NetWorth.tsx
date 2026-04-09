@@ -132,7 +132,7 @@ const formatCurrency = (value: number) => {
     currency: 'MYR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(value || 0);
+  }).format(Number(value) || 0).replace('MYR', 'RM');
 };
 
 interface RecordItem {
@@ -727,7 +727,7 @@ const NetWorth: React.FC = () => {
       </div>
 
       {/* Content */}
-      {activeTab === 'networth' ? renderNetWorth() : renderAssetsOrLiabilities()}
+      {activeTab === 'networth' ? (renderNetWorth ? renderNetWorth() : null) : (renderAssetsOrLiabilities ? renderAssetsOrLiabilities() : null)}
       
     </div>
   );

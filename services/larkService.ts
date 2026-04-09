@@ -313,6 +313,7 @@ export const calculateAnalytics = (data: any): FinancialAnalytics => {
   // 1. Group snapshots by parent Net Worth item ID
   const snapByItemId: Record<string, any[]> = {};
   snapshots.forEach((s: any) => {
+    if (!s || !s.fields) return;
     const parentIds = s.fields["Net Worth"];
     if (Array.isArray(parentIds)) {
       parentIds.forEach((id: any) => {
@@ -406,7 +407,7 @@ export const calculateAnalytics = (data: any): FinancialAnalytics => {
   });
 
   // 4. Trend Analysis
-  const dates = Array.from(new Set(snapshots.map((s: any) => s.fields["Date"] || s.fields["date"]))) as string[];
+  const dates = Array.from(new Set(snapshots.filter((s: any) => s && s.fields && (s.fields["Date"] || s.fields["date"])).map((s: any) => s.fields["Date"] || s.fields["date"]))) as string[];
   dates.sort((a,b) => new Date(a).getTime() - new Date(b).getTime());
 
   const netWorthTrend = dates.map(d => {
