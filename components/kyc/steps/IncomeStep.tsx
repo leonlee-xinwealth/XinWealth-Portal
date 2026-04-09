@@ -73,11 +73,35 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
             {/* Form Box */}
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12 relative overflow-visible">
                 
-                <div className="flex items-center gap-3 mb-4 border-b border-gray-100 pb-5">
-                    <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
-                        <Wallet size={24} />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-gray-100 pb-5">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
+                            <Wallet size={24} />
+                        </div>
+                        <h2 className="text-2xl font-serif text-gray-800">{t('income.title')}</h2>
                     </div>
-                    <h2 className="text-2xl font-serif text-gray-800">{t('income.title')}</h2>
+
+                    {/* Global Date Selector */}
+                    <div className="flex gap-2">
+                        <select
+                            className={selectClasses}
+                            value={formData.globalMonth}
+                            onChange={(e) => updateData({ globalMonth: e.target.value })}
+                        >
+                            {MONTHS.map(m => (
+                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                            ))}
+                        </select>
+                        <select
+                            className={selectClasses}
+                            value={formData.globalYear}
+                            onChange={(e) => updateData({ globalYear: e.target.value })}
+                        >
+                            {YEARS.map(y => (
+                                <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
 
                 <div className="mb-8 p-4 bg-xin-blue/5 border border-xin-blue/10 rounded-lg flex items-start gap-3">
@@ -107,28 +131,6 @@ const IncomeStep: React.FC<IncomeStepProps> = ({ formData, updateData, onNext, o
                                     onChange={(val) => updateIncome({ [field.key]: val })}
                                     placeholder="0"
                                 />
-                            </div>
-                            
-                            {/* Month/Year Selection */}
-                            <div className="flex gap-3 mt-3">
-                                <select
-                                    className={selectClasses + ' flex-1'}
-                                    value={(incomeData as any)[`${field.key}Month`] || currentMonth}
-                                    onChange={(e) => updateIncome({ [`${field.key}Month`]: e.target.value })}
-                                >
-                                    {MONTHS.map(m => (
-                                        <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                    ))}
-                                </select>
-                                <select
-                                    className={selectClasses + ' w-28'}
-                                    value={(incomeData as any)[`${field.key}Year`] || currentYear}
-                                    onChange={(e) => updateIncome({ [`${field.key}Year`]: e.target.value })}
-                                >
-                                    {YEARS.map(y => (
-                                        <option key={y} value={y}>{y}</option>
-                                    ))}
-                                </select>
                             </div>
                         </div>
                     ))}

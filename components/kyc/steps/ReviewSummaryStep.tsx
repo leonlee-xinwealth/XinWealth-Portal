@@ -140,7 +140,7 @@ const SectionHeader = ({ icon: Icon, title, onEdit, totalLabel, totalValue, step
             <div>
                 <h3 className="text-lg font-bold text-gray-800 leading-tight">{title}</h3>
                 <button onClick={() => onEdit(stepId)} className="text-sm text-xin-blue hover:underline">
-                    [{totalLabel ? title : title}] {/* Temporarily hack since title is passed in to be translatable but we want to translate "[Edit Details]" string */}
+                    {Icon === User ? '[Edit Details]' : '[Edit Details]'}
                 </button>
             </div>
         </div>
@@ -150,6 +150,13 @@ const SectionHeader = ({ icon: Icon, title, onEdit, totalLabel, totalValue, step
                 <div className="text-lg font-bold text-gray-800">{totalValue}</div>
             </div>
         )}
+    </div>
+);
+
+const ItemRow = ({ label, value }: { label: string, value: string }) => (
+    <div className="flex justify-between text-sm py-1 border-b border-gray-50 last:border-0">
+        <span className="text-gray-600">{label}</span>
+        <span className="font-medium text-gray-900">{value}</span>
     </div>
 );
 
@@ -168,18 +175,33 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
     const totalExpenses = calculateTotalExpenses(formData);
     const totalInvestments = calculateTotalInvestments(formData.investments);
 
-    const formatCurrency = (val: number) => `RM ${val.toLocaleString('en-US')}`;
+    const formatCurrency = (val: number | string) => {
+        const num = typeof val === 'string' ? parseAmount(val) : val;
+        return `RM ${num.toLocaleString('en-US')}`;
+    };
+
+    const MONTH_LABELS: any = {
+        '0': { en: 'January', zh: '1月' }, '1': { en: 'February', zh: '2月' }, '2': { en: 'March', zh: '3月' },
+        '3': { en: 'April', zh: '4月' }, '4': { en: 'May', zh: '5月' }, '5': { en: 'June', zh: '6月' },
+        '6': { en: 'July', zh: '7月' }, '7': { en: 'August', zh: '8月' }, '8': { en: 'September', zh: '9月' },
+        '9': { en: 'October', zh: '10月' }, '10': { en: 'November', zh: '11月' }, '11': { en: 'December', zh: '12月' }
+    };
+
+    const selectedMonth = MONTH_LABELS[formData.globalMonth || '0'][isZh ? 'zh' : 'en'];
+    const selectedYear = formData.globalYear || new Date().getFullYear().toString();
 
     return (
         <div className="flex flex-col h-full space-y-8 animate-in fade-in duration-300">
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
                 
-                <div className="flex items-center gap-3 mb-2">
-                    <h2 className="text-2xl font-serif text-gray-800">{t('review.title')}</h2>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b border-gray-100 pb-6">
+                    <div>
+                        <h2 className="text-2xl font-serif text-gray-800">{t('review.title')}</h2>
+                        <p className="text-sm text-gray-500 mt-1">
+                            {isZh ? `所有填写的财务数据均属于 ${selectedMonth} ${selectedYear}` : `All financial data entered belongs to ${selectedMonth} ${selectedYear}`}
+                        </p>
+                    </div>
                 </div>
-                <p className="text-lg text-gray-700 font-medium mb-10 border-b border-gray-100 pb-6">
-                    {t('review.subtitle')}
-                </p>
 
                 {/* Profile Section */}
                 <div className="mb-10">
@@ -229,59 +251,66 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                 </div>
 
                 {/* Financial 2-Column Grid */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-x-10 gap-y-12">
                     
                     {/* Income */}
-                    <div>
+                    <div className="bg-slate-50/30 p-5 rounded-xl border border-slate-100">
                         <SectionHeader 
                             icon={Wallet} 
                             title={t('review.income')} 
                             onEdit={onEditStep} 
                             stepId="income" 
                             totalLabel={t('review.total')} 
-                            totalValue={`${formatCurrency(annualIncome)}${isZh ? '/年' : '/year'}`} 
+                            totalValue={formatCurrency(annualIncome)} 
                         />
-                        {annualIncome > 0 ? (
-                            <div className="space-y-2">
-                                {formData.income?.salary && (
-                                    <div className="flex justify-between text-sm">
-                                        <span className="font-semibold text-gray-700">{t('review.grossIncome')}</span>
-                                        <span className="font-medium text-gray-900">RM {formData.income.salary}{isZh ? '/月' : '/month'}</span>
-                                    </div>
-                                )}
-                                {formData.income?.bonus && (
-                                    <div className="flex justify-between text-sm">
-                                        <span className="font-semibold text-gray-700">{t('review.bonus')}</span>
-                                        <span className="font-medium text-gray-900">RM {formData.income.bonus}{isZh ? '/年' : '/year'}</span>
-                                    </div>
-                                )}
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
-                        )}
+                        <div className="space-y-1 mt-4">
+                            {formData.income?.salary && <ItemRow label={isZh ? "工资 (月)" : "Salary (Monthly)"} value={formatCurrency(formData.income.salary)} />}
+                            {formData.income?.directorFee && <ItemRow label={isZh ? "董事费 (月)" : "Director Fee (Monthly)"} value={formatCurrency(formData.income.directorFee)} />}
+                            {formData.income?.commission && <ItemRow label={isZh ? "佣金 (月)" : "Commission (Monthly)"} value={formatCurrency(formData.income.commission)} />}
+                            {formData.income?.rentalIncome && <ItemRow label={isZh ? "租金收入 (月)" : "Rental Income (Monthly)"} value={formatCurrency(formData.income.rentalIncome)} />}
+                            {formData.income?.bonus && <ItemRow label={isZh ? "奖金 (年)" : "Bonus (Annual)"} value={formatCurrency(formData.income.bonus)} />}
+                            {formData.income?.dividendCompany && <ItemRow label={isZh ? "公司股息 (年)" : "Company Dividends (Annual)"} value={formatCurrency(formData.income.dividendCompany)} />}
+                            {formData.income?.dividendInvestment && <ItemRow label={isZh ? "投资股息 (年)" : "Investment Dividends (Annual)"} value={formatCurrency(formData.income.dividendInvestment)} />}
+                        </div>
                     </div>
 
                     {/* Expenses */}
-                    <div>
+                    <div className="bg-slate-50/30 p-5 rounded-xl border border-slate-100">
                         <SectionHeader 
                             icon={Receipt} 
                             title={t('review.expenses')} 
                             onEdit={onEditStep} 
                             stepId="expenses" 
                             totalLabel={t('review.total')} 
-                            totalValue={`${formatCurrency(totalExpenses)}${isZh ? '/年' : '/year'}`} 
+                            totalValue={formatCurrency(totalExpenses)} 
                         />
-                        {totalExpenses > 0 ? (
-                            <div className="space-y-2">
-                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
-                        )}
+                        <div className="space-y-1 mt-4">
+                            {Object.entries(formData.expenses || {}).map(([key, items]: [string, any]) => 
+                                items.map((item: any) => (
+                                    <ItemRow 
+                                        key={item.id} 
+                                        label={`${item.type}${item.description ? ` (${item.description})` : ''}`} 
+                                        value={formatCurrency(item.amount)} 
+                                    />
+                                ))
+                            )}
+                            {/* Dynamically added expenses from loans */}
+                            {formData.assets?.properties?.filter((p: any) => p.isUnderLoan && p.monthlyInstallment).map((p: any) => (
+                                <ItemRow key={p.id} label={`${isZh ? '房贷' : 'Property Loan'}: ${p.description}`} value={formatCurrency(p.monthlyInstallment)} />
+                            ))}
+                            {formData.assets?.vehicles?.filter((v: any) => v.isUnderLoan && v.monthlyInstallment).map((v: any) => (
+                                <ItemRow key={v.id} label={`${isZh ? '车贷' : 'Vehicle Loan'}: ${v.description}`} value={formatCurrency(v.monthlyInstallment)} />
+                            ))}
+                            {Object.entries(formData.liabilities || {}).map(([key, items]: [string, any]) => 
+                                items.filter((l: any) => l.isUnderLoan && l.monthlyInstallment).map((l: any) => (
+                                    <ItemRow key={l.id} label={`${isZh ? '贷款' : 'Loan'}: ${l.description}`} value={formatCurrency(l.monthlyInstallment)} />
+                                ))
+                            )}
+                        </div>
                     </div>
 
                     {/* Assets */}
-                    <div>
+                    <div className="bg-slate-50/30 p-5 rounded-xl border border-slate-100">
                         <SectionHeader 
                             icon={Home} 
                             title={t('review.assets')} 
@@ -290,17 +319,24 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                             totalLabel={t('review.total')} 
                             totalValue={formatCurrency(totalAssets)} 
                         />
-                        {totalAssets > 0 ? (
-                            <div className="space-y-2">
-                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
-                        )}
+                        <div className="space-y-1 mt-4">
+                            {formData.assets?.savingsAccount && <ItemRow label={t('assets.savingsAccount')} value={formatCurrency(formData.assets.savingsAccount)} />}
+                            {formData.assets?.fixedDeposit && <ItemRow label={t('assets.fixedDeposit')} value={formatCurrency(formData.assets.fixedDeposit)} />}
+                            {formData.assets?.moneyMarketFund && <ItemRow label={t('assets.moneyMarketFund')} value={formatCurrency(formData.assets.moneyMarketFund)} />}
+                            {formData.assets?.epfSejahtera && <ItemRow label={t('assets.epf.account2')} value={formatCurrency(formData.assets.epfSejahtera)} />}
+                            {formData.assets?.epfPersaraan && <ItemRow label={t('assets.epf.account1')} value={formatCurrency(formData.assets.epfPersaraan)} />}
+                            {formData.assets?.epfFleksibel && <ItemRow label={t('assets.epf.account3')} value={formatCurrency(formData.assets.epfFleksibel)} />}
+                            
+                            {['properties', 'vehicles', 'otherAssets'].map(key => 
+                                formData.assets[key]?.map((item: any) => (
+                                    <ItemRow key={item.id} label={item.description} value={formatCurrency(item.amount)} />
+                                ))
+                            )}
+                        </div>
                     </div>
 
                     {/* Investments */}
-                    <div>
+                    <div className="bg-slate-50/30 p-5 rounded-xl border border-slate-100">
                         <SectionHeader 
                             icon={TrendingUp} 
                             title={t('review.investments')} 
@@ -309,17 +345,17 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                             totalLabel={t('review.total')} 
                             totalValue={formatCurrency(totalInvestments)} 
                         />
-                        {totalInvestments > 0 ? (
-                            <div className="space-y-2">
-                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
-                        )}
+                        <div className="space-y-1 mt-4">
+                            {Object.entries(formData.investments || {}).map(([key, items]: [string, any]) => 
+                                items.map((item: any) => (
+                                    <ItemRow key={item.id} label={`${key.toUpperCase()}: ${item.description}`} value={formatCurrency(item.amount)} />
+                                ))
+                            )}
+                        </div>
                     </div>
 
                     {/* Liabilities */}
-                    <div>
+                    <div className="bg-slate-50/30 p-5 rounded-xl border border-slate-100">
                         <SectionHeader 
                             icon={Umbrella} 
                             title={t('review.liabilities')} 
@@ -328,19 +364,26 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                             totalLabel={t('review.total')} 
                             totalValue={formatCurrency(totalLiabilities)} 
                         />
-                        {totalLiabilities > 0 ? (
-                            <div className="space-y-2">
-                                <p className="text-sm text-gray-700">{t('review.hiddenDetails')}</p>
-                            </div>
-                        ) : (
-                            <p className="text-sm text-gray-500">{t('review.noData')}</p>
-                        )}
+                        <div className="space-y-1 mt-4">
+                            {Object.entries(formData.liabilities || {}).map(([key, items]: [string, any]) => 
+                                items.map((item: any) => (
+                                    <ItemRow key={item.id} label={item.description} value={formatCurrency(item.outstandingBalance || item.amount)} />
+                                ))
+                            )}
+                            {/* Dynamically added liabilities from assets */}
+                            {formData.assets?.properties?.filter((p: any) => p.isUnderLoan).map((p: any) => (
+                                <ItemRow key={p.id} label={`${isZh ? '房贷未分销' : 'Property Loan Balance'}: ${p.description}`} value={formatCurrency(p.outstandingBalance)} />
+                            ))}
+                            {formData.assets?.vehicles?.filter((v: any) => v.isUnderLoan).map((v: any) => (
+                                <ItemRow key={v.id} label={`${isZh ? '车贷未分销' : 'Vehicle Loan Balance'}: ${v.description}`} value={formatCurrency(v.outstandingBalance)} />
+                            ))}
+                        </div>
                     </div>
 
                 </div>
 
                 {/* Navigation Buttons bottom */}
-                <div className="mt-12 pt-6 flex justify-between items-center bg-white">
+                <div className="mt-12 pt-6 flex justify-between items-center bg-white border-t border-gray-100">
                     <button 
                         onClick={onPrev} 
                         className="px-6 py-2.5 border border-gray-300 rounded-md text-gray-600 font-medium hover:bg-gray-50 flex items-center gap-2 transition-colors"
@@ -349,7 +392,7 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                     </button>
                     <button 
                         onClick={onNext} 
-                        className="px-10 py-2.5 bg-gradient-to-r from-xin-blue to-xin-blueLight text-white font-medium rounded-md hover:from-xin-dark hover:to-xin-blue flex items-center gap-2 transition-colors shadow-sm"
+                        className="px-10 py-2.5 bg-gradient-to-r from-xin-blue to-xin-blueLight text-white font-medium rounded-md hover:from-xin-dark hover:to-xin-blue flex items-center gap-3 transition-colors shadow-lg hover:shadow-xin-blue/20"
                     >
                         {t('review.confirm')} <span>&gt;</span>
                     </button>
@@ -359,5 +402,7 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
         </div>
     );
 };
+
+export default ReviewSummaryStep;
 
 export default ReviewSummaryStep;

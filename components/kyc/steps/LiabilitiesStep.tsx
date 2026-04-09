@@ -347,32 +347,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                                         <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
                                     </div>
 
-                                    {/* Month & Year Selector */}
-                                    <div>
-                                        <label className={labelClasses}>
-                                            {isZh ? '所属月份' : 'Period (Month / Year)'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
-                                        </label>
-                                        <div className="flex gap-3 mt-1">
-                                            <select
-                                                className={selectClasses + ' flex-1'}
-                                                value={item.month}
-                                                onChange={(e) => updateLoanItemField(collectionPath, item.id, 'month', e.target.value)}
-                                            >
-                                                {MONTHS.map(m => (
-                                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                                ))}
-                                            </select>
-                                            <select
-                                                className={selectClasses + ' w-28'}
-                                                value={item.year}
-                                                onChange={(e) => updateLoanItemField(collectionPath, item.id, 'year', e.target.value)}
-                                            >
-                                                {YEARS.map(y => (
-                                                    <option key={y} value={y}>{y}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    </div>
+
                                 </div>
                             </div>
                         ))}
@@ -396,8 +371,35 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
             {/* Form Box */}
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
                 
-                <div className="flex items-center gap-3 mb-8 border-b border-gray-100 pb-5">
-                    <h2 className="text-2xl font-serif text-gray-800">{t('liabilities.title')}</h2>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-gray-100 pb-5">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
+                            <GraduationCap size={24} />
+                        </div>
+                        <h2 className="text-2xl font-serif text-gray-800">{t('liabilities.title')}</h2>
+                    </div>
+
+                    {/* Global Date Selector */}
+                    <div className="flex gap-2">
+                        <select
+                            className={selectClasses}
+                            value={formData.globalMonth}
+                            onChange={(e) => updateData({ globalMonth: e.target.value })}
+                        >
+                            {MONTHS.map(m => (
+                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                            ))}
+                        </select>
+                        <select
+                            className={selectClasses}
+                            value={formData.globalYear}
+                            onChange={(e) => updateData({ globalYear: e.target.value })}
+                        >
+                            {YEARS.map(y => (
+                                <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 
                 <div className="space-y-4">

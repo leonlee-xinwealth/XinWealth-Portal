@@ -12,6 +12,7 @@ const translations: Record<Language, Record<string, string>> = {
   en: {
     'nav.welcome': 'Welcome',
     'nav.basic': 'Basic Information',
+    'nav.income': 'Cash Inflow',
     'nav.assets': 'Net Worth',
     'nav.liabilities': 'Liabilities',
     'nav.expenses': 'Cash Outflow',

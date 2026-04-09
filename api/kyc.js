@@ -130,8 +130,8 @@ export default async function handler(req, res) {
           category: mapping.category,
           description: mapping.desc,
           amount: income[mapping.key],
-          month: income[`${mapping.key}Month`],
-          year: income[`${mapping.key}Year`]
+          month: basic.globalMonth,
+          year: basic.globalYear
         });
       }
     }
@@ -150,43 +150,42 @@ export default async function handler(req, res) {
     // 5. Build Net Worth Items
     const allNetWorthItems = [
       // Assets
-      ...(assets.properties || []).map(p => ({ ...p, mainType: "Asset", n_category: "Property" })),
-      ...(assets.vehicles || []).map(v => ({ ...v, mainType: "Asset", n_category: "Vehicle" })),
-      ...(assets.otherAssets || []).map(o => ({ ...o, mainType: "Asset", n_category: "Other" })),
+      ...(assets.properties || []).map(p => ({ ...p, mainType: "Asset", n_category: "Property", month: basic.globalMonth, year: basic.globalYear })),
+      ...(assets.vehicles || []).map(v => ({ ...v, mainType: "Asset", n_category: "Vehicle", month: basic.globalMonth, year: basic.globalYear })),
+      ...(assets.otherAssets || []).map(o => ({ ...o, mainType: "Asset", n_category: "Other", month: basic.globalMonth, year: basic.globalYear })),
       
       // Investments
-      ...(investments.etf || []).map(i => ({ ...i, mainType: "Investment", n_category: "ETF" })),
-      ...(investments.stocks || []).map(i => ({ ...i, mainType: "Investment", n_category: "Stocks" })),
-      ...(investments.bonds || []).map(i => ({ ...i, mainType: "Investment", n_category: "Bonds" })),
-      ...(investments.unitTrusts || []).map(i => ({ ...i, mainType: "Investment", n_category: "Unit Trust" })),
-      ...(investments.fixedDeposits || []).map(i => ({ ...i, mainType: "Investment", n_category: "Investment Properties" })),
-      ...(investments.forex || []).map(i => ({ ...i, mainType: "Investment", n_category: "Forex" })),
-      ...(investments.moneyMarket || []).map(i => ({ ...i, mainType: "Investment", n_category: "Money Market" })),
-      ...(investments.otherInvestments || []).map(i => ({ ...i, mainType: "Investment", n_category: "Other" })),
+      ...(investments.etf || []).map(i => ({ ...i, mainType: "Investment", n_category: "ETF", month: basic.globalMonth, year: basic.globalYear })),
+      ...(investments.stocks || []).map(i => ({ ...i, mainType: "Investment", n_category: "Stocks", month: basic.globalMonth, year: basic.globalYear })),
+      ...(investments.bonds || []).map(i => ({ ...i, mainType: "Investment", n_category: "Bonds", month: basic.globalMonth, year: basic.globalYear })),
+      ...(investments.unitTrusts || []).map(i => ({ ...i, mainType: "Investment", n_category: "Unit Trust", month: basic.globalMonth, year: basic.globalYear })),
+      ...(investments.fixedDeposits || []).map(i => ({ ...i, mainType: "Investment", n_category: "Investment Properties", month: basic.globalMonth, year: basic.globalYear })),
+      ...(investments.forex || []).map(i => ({ ...i, mainType: "Investment", n_category: "Forex", month: basic.globalMonth, year: basic.globalYear })),
+      ...(investments.moneyMarket || []).map(i => ({ ...i, mainType: "Investment", n_category: "Money Market", month: basic.globalMonth, year: basic.globalYear })),
+      ...(investments.otherInvestments || []).map(i => ({ ...i, mainType: "Investment", n_category: "Other", month: basic.globalMonth, year: basic.globalYear })),
       
       // Liabilities (standalone)
-      ...(liabilities.studyLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Study Loan" })),
-      ...(liabilities.personalLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Personal Loan" })),
-      ...(liabilities.renovationLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Renovation Loan" })),
-      ...(liabilities.otherLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Other Loan" }))
+      ...(liabilities.studyLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Study Loan", month: basic.globalMonth, year: basic.globalYear })),
+      ...(liabilities.personalLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Personal Loan", month: basic.globalMonth, year: basic.globalYear })),
+      ...(liabilities.renovationLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Renovation Loan", month: basic.globalMonth, year: basic.globalYear })),
+      ...(liabilities.otherLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Other Loan", month: basic.globalMonth, year: basic.globalYear }))
     ];
 
-    const pushSimpleAsset = (val, desc, cat, m, y) => {
-        if (val) allNetWorthItems.push({ description: desc, amount: val, mainType: "Asset", n_category: cat, month: m, year: y });
+    const pushSimpleAsset = (val, desc, cat) => {
+        if (val) allNetWorthItems.push({ description: desc, amount: val, mainType: "Asset", n_category: cat, month: basic.globalMonth, year: basic.globalYear });
     };
-    pushSimpleAsset(assets.savingsAccount, "Savings/Current Account", "Savings", assets.savingsAccountMonth, assets.savingsAccountYear);
-    pushSimpleAsset(assets.fixedDeposit, "Fixed Deposit", "Savings", assets.fixedDepositMonth, assets.fixedDepositYear);
-    pushSimpleAsset(assets.moneyMarketFund, "Money Market Fund For Savings", "Savings", assets.moneyMarketFundMonth, assets.moneyMarketFundYear);
-    pushSimpleAsset(assets.epfPersaraan, "EPF Account 1 (Akaun Persaraan)", "EPF", assets.epfPersaraanMonth, assets.epfPersaraanYear);
-    pushSimpleAsset(assets.epfSejahtera, "EPF Account 2 (Akaun Sejahtera)", "EPF", assets.epfSejahteraMonth, assets.epfSejahteraYear);
-    pushSimpleAsset(assets.epfFleksibel, "EPF Account 3 (Akaun Fleksibel)", "EPF", assets.epfFleksibelMonth, assets.epfFleksibelYear);
+    pushSimpleAsset(assets.savingsAccount, "Savings/Current Account", "Savings");
+    pushSimpleAsset(assets.fixedDeposit, "Fixed Deposit", "Savings");
+    pushSimpleAsset(assets.moneyMarketFund, "Money Market Fund For Savings", "Savings");
+    pushSimpleAsset(assets.epfPersaraan, "EPF Account 1 (Akaun Persaraan)", "EPF");
+    pushSimpleAsset(assets.epfSejahtera, "EPF Account 2 (Akaun Sejahtera)", "EPF");
+    pushSimpleAsset(assets.epfFleksibel, "EPF Account 3 (Akaun Fleksibel)", "EPF");
 
-    // Create duplicate Liability rows for Assets/Investments that have loans, so Net Worth formula works correctly.
-    // We flag these with isDuplicateLiability = true so we don't accidentally create a second snapshot for them.
+    // Create duplicate Liability rows for Assets/Investments that have loans
     const allLiabilityDupes = [
-      ...(assets.properties || []).filter(p => p.isUnderLoan).map(p => ({ ...p, isDuplicateLiability: true, amount: p.outstandingBalance, mainType: "Liability", n_category: "Mortgage" })),
-      ...(assets.vehicles || []).filter(v => v.isUnderLoan).map(v => ({ ...v, isDuplicateLiability: true, amount: v.outstandingBalance, mainType: "Liability", n_category: "Car Loan" })),
-      ...(investments.fixedDeposits || []).filter(i => i.isUnderLoan).map(i => ({ ...i, isDuplicateLiability: true, amount: i.outstandingBalance, mainType: "Liability", n_category: "Mortgage" }))
+      ...(assets.properties || []).filter(p => p.isUnderLoan).map(p => ({ ...p, isDuplicateLiability: true, amount: p.outstandingBalance, mainType: "Liability", n_category: "Mortgage", month: basic.globalMonth, year: basic.globalYear })),
+      ...(assets.vehicles || []).filter(v => v.isUnderLoan).map(v => ({ ...v, isDuplicateLiability: true, amount: v.outstandingBalance, mainType: "Liability", n_category: "Car Loan", month: basic.globalMonth, year: basic.globalYear })),
+      ...(investments.fixedDeposits || []).filter(i => i.isUnderLoan).map(i => ({ ...i, isDuplicateLiability: true, amount: i.outstandingBalance, mainType: "Liability", n_category: "Mortgage", month: basic.globalMonth, year: basic.globalYear }))
     ];
 
     const combinedNetWorthItems = [...allNetWorthItems, ...allLiabilityDupes];
@@ -217,11 +216,9 @@ export default async function handler(req, res) {
             
             // If they have any snapshot-worthy metrics:
             if (outBal > 0 || mInc > 0 || mExp > 0 || mRepay > 0) {
-                // Ensure Date logic matches user expectations. We use the month/year of the asset itself as the snapshot period.
-                const fallbackTime = new Date().getTime();
-                const snapYear = parseInt(item.year || new Date().getFullYear().toString());
-                const snapMonth = parseInt(item.month || new Date().getMonth().toString());
-                const snapshotDate = new Date(snapYear, snapMonth, 1).getTime() || fallbackTime;
+                const snapYear = parseInt(basic.globalYear || new Date().getFullYear().toString());
+                const snapMonth = parseInt(basic.globalMonth || new Date().getMonth().toString());
+                const snapshotDate = new Date(snapYear, snapMonth, 1).getTime();
 
                 snapshotsToCreate.push({
                     linkId: createdNetWorthRecords[index].record_id,
@@ -249,12 +246,12 @@ export default async function handler(req, res) {
 
     // 7. Create Standard Expenses (Standalone ones)
     const allExpenses = [
-      ...(expenses.household || []).map(e => ({ ...e, category: "Household" })),
-      ...(expenses.transportation || []).map(e => ({ ...e, category: "Transportation" })),
-      ...(expenses.dependants || []).map(e => ({ ...e, category: "Dependants" })),
-      ...(expenses.personal || []).map(e => ({ ...e, category: "Personal" })),
-      ...(expenses.miscellaneous || []).map(e => ({ ...e, category: "Miscellaneous" })),
-      ...(expenses.otherExpenses || []).map(e => ({ ...e, category: "Other" }))
+      ...(expenses.household || []).map(e => ({ ...e, category: "Household", month: basic.globalMonth, year: basic.globalYear })),
+      ...(expenses.transportation || []).map(e => ({ ...e, category: "Transportation", month: basic.globalMonth, year: basic.globalYear })),
+      ...(expenses.dependants || []).map(e => ({ ...e, category: "Dependants", month: basic.globalMonth, year: basic.globalYear })),
+      ...(expenses.personal || []).map(e => ({ ...e, category: "Personal", month: basic.globalMonth, year: basic.globalYear })),
+      ...(expenses.miscellaneous || []).map(e => ({ ...e, category: "Miscellaneous", month: basic.globalMonth, year: basic.globalYear })),
+      ...(expenses.otherExpenses || []).map(e => ({ ...e, category: "Other", month: basic.globalMonth, year: basic.globalYear }))
     ];
 
     await createSubRecords(tableExpenses, allExpenses, item => {

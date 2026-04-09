@@ -11,12 +11,29 @@ interface InvestmentsStepProps {
     onPrev: () => void;
 }
 
+const MONTHS = [
+    { value: '0', en: 'January', zh: '1月' },
+    { value: '1', en: 'February', zh: '2月' },
+    { value: '2', en: 'March', zh: '3月' },
+    { value: '3', en: 'April', zh: '4月' },
+    { value: '4', en: 'May', zh: '5月' },
+    { value: '5', en: 'June', zh: '6月' },
+    { value: '6', en: 'July', zh: '7月' },
+    { value: '7', en: 'August', zh: '8月' },
+    { value: '8', en: 'September', zh: '9月' },
+    { value: '9', en: 'October', zh: '10月' },
+    { value: '10', en: 'November', zh: '11月' },
+    { value: '11', en: 'December', zh: '12月' }
+];
+const YEARS = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - 5 + i).toString());
+
 const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
     const [expandedCard, setExpandedCard] = useState<string | null>(null);
     const isZh = language === 'zh';
     const inputClasses = "w-full mt-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan transition-colors bg-white shadow-sm";
     const labelClasses = "block text-sm font-medium text-gray-700 font-sans";
+    const selectClasses = "px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer";
     
     // Safety check just in case formData.investments is somehow missing
     const investmentsData = formData.investments || {
@@ -298,31 +315,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                                                 </div>
                                                 <div>
                                                     <label className={labelClasses}>{isZh ? '贷款开始时间' : 'Loan Commencement'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
-                                                    <div className="flex gap-2 mt-1">
-                                                        <select
-                                                            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer flex-1"
-                                                            value={item.loanCommencementMonth || new Date().getMonth().toString()}
-                                                            onChange={(e) => updateInvestmentItemField(collectionPath, item.id, 'loanCommencementMonth', e.target.value)}
-                                                        >
-                                                            {[
-                                                                { value: '0', en: 'January', zh: '1月' }, { value: '1', en: 'February', zh: '2月' }, { value: '2', en: 'March', zh: '3月' },
-                                                                { value: '3', en: 'April', zh: '4月' }, { value: '4', en: 'May', zh: '5月' }, { value: '5', en: 'June', zh: '6月' },
-                                                                { value: '6', en: 'July', zh: '7月' }, { value: '7', en: 'August', zh: '8月' }, { value: '8', en: 'September', zh: '9月' },
-                                                                { value: '9', en: 'October', zh: '10月' }, { value: '10', en: 'November', zh: '11月' }, { value: '11', en: 'December', zh: '12月' }
-                                                            ].map(m => (
-                                                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                                            ))}
-                                                        </select>
-                                                        <select
-                                                            className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm cursor-pointer w-24"
-                                                            value={item.loanCommencementYear || new Date().getFullYear().toString()}
-                                                            onChange={(e) => updateInvestmentItemField(collectionPath, item.id, 'loanCommencementYear', e.target.value)}
-                                                        >
-                                                            {Array.from({ length: 30 }, (_, i) => (new Date().getFullYear() - 25 + i).toString()).map(y => (
-                                                                <option key={y} value={y}>{y}</option>
-                                                            ))}
-                                                        </select>
-                                                    </div>
+
                                                 </div>
                                                 <div>
                                                     <label className={labelClasses}>{isZh ? '计算出的结束时间 / 可修改' : 'Loan End (Calculated / Editable)'}</label>
@@ -390,11 +383,35 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
             {/* Form Box */}
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
                 
-                <div className="flex items-center gap-3 mb-8 border-b border-gray-100 pb-5">
-                    <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
-                        <LineChart size={24} />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-gray-100 pb-5">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
+                            <LineChart size={24} />
+                        </div>
+                        <h2 className="text-2xl font-serif text-gray-800">{t('investments.title')}</h2>
                     </div>
-                    <h2 className="text-2xl font-serif text-gray-800">{t('investments.title')}</h2>
+
+                    {/* Global Date Selector */}
+                    <div className="flex gap-2">
+                        <select
+                            className={selectClasses}
+                            value={formData.globalMonth}
+                            onChange={(e) => updateData({ globalMonth: e.target.value })}
+                        >
+                            {MONTHS.map(m => (
+                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                            ))}
+                        </select>
+                        <select
+                            className={selectClasses}
+                            value={formData.globalYear}
+                            onChange={(e) => updateData({ globalYear: e.target.value })}
+                        >
+                            {YEARS.map(y => (
+                                <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
                 
                 <div className="space-y-4">

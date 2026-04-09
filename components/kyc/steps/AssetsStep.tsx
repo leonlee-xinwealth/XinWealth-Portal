@@ -301,32 +301,7 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                         </div>
                                     </div>
 
-                                    {/* Month & Year Selector */}
-                                    <div>
-                                        <label className={labelClasses}>
-                                            {isZh ? '所属月份' : 'Period (Month / Year)'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span>
-                                        </label>
-                                        <div className="flex gap-3 mt-1">
-                                            <select
-                                                className={selectClasses + ' flex-1'}
-                                                value={item.month}
-                                                onChange={(e) => updateAssetItemField(collectionPath, item.id, 'month', e.target.value)}
-                                            >
-                                                {MONTHS.map(m => (
-                                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                                ))}
-                                            </select>
-                                            <select
-                                                className={selectClasses + ' w-28'}
-                                                value={item.year}
-                                                onChange={(e) => updateAssetItemField(collectionPath, item.id, 'year', e.target.value)}
-                                            >
-                                                {YEARS.map(y => (
-                                                    <option key={y} value={y}>{y}</option>
-                                                ))}
-                                            </select>
-                                        </div>
-                                    </div>
+
 
                                     {/* Loan Details */}
                                     <div className="pt-4 border-t border-gray-100">
@@ -479,11 +454,35 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
             {/* Form Box */}
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
 
-                <div className="flex items-center gap-3 mb-8 border-b border-gray-100 pb-5">
-                    <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
-                        <Building2 size={24} />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-gray-100 pb-5">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
+                            <Building2 size={24} />
+                        </div>
+                        <h2 className="text-2xl font-serif text-gray-800">{t('assets.title')}</h2>
                     </div>
-                    <h2 className="text-2xl font-serif text-gray-800">{t('assets.title')}</h2>
+
+                    {/* Global Date Selector */}
+                    <div className="flex gap-2">
+                        <select
+                            className={selectClasses}
+                            value={formData.globalMonth}
+                            onChange={(e) => updateData({ globalMonth: e.target.value })}
+                        >
+                            {MONTHS.map(m => (
+                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                            ))}
+                        </select>
+                        <select
+                            className={selectClasses}
+                            value={formData.globalYear}
+                            onChange={(e) => updateData({ globalYear: e.target.value })}
+                        >
+                            {YEARS.map(y => (
+                                <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
 
                 {/* Savings Section */}
@@ -502,27 +501,6 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                 onChange={(val) => updateAssets({ savingsAccount: val })}
                             />
                         </div>
-                        {/* Month/Year */}
-                        <div className="flex gap-3 mt-3">
-                            <select
-                                className={selectClasses + ' flex-1'}
-                                value={assetsData.savingsAccountMonth}
-                                onChange={(e) => updateAssets({ savingsAccountMonth: e.target.value })}
-                            >
-                                {MONTHS.map(m => (
-                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                ))}
-                            </select>
-                            <select
-                                className={selectClasses + ' w-28'}
-                                value={assetsData.savingsAccountYear}
-                                onChange={(e) => updateAssets({ savingsAccountYear: e.target.value })}
-                            >
-                                {YEARS.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
-                        </div>
                     </div>
                     
                     <div>
@@ -537,27 +515,6 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                 onChange={(val) => updateAssets({ fixedDeposit: val })}
                             />
                         </div>
-                        {/* Month/Year */}
-                        <div className="flex gap-3 mt-3">
-                            <select
-                                className={selectClasses + ' flex-1'}
-                                value={assetsData.fixedDepositMonth}
-                                onChange={(e) => updateAssets({ fixedDepositMonth: e.target.value })}
-                            >
-                                {MONTHS.map(m => (
-                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                ))}
-                            </select>
-                            <select
-                                className={selectClasses + ' w-28'}
-                                value={assetsData.fixedDepositYear}
-                                onChange={(e) => updateAssets({ fixedDepositYear: e.target.value })}
-                            >
-                                {YEARS.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
-                        </div>
                     </div>
 
                     <div>
@@ -571,27 +528,6 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                 value={assetsData.moneyMarketFund}
                                 onChange={(val) => updateAssets({ moneyMarketFund: val })}
                             />
-                        </div>
-                        {/* Month/Year */}
-                        <div className="flex gap-3 mt-3">
-                            <select
-                                className={selectClasses + ' flex-1'}
-                                value={assetsData.moneyMarketFundMonth}
-                                onChange={(e) => updateAssets({ moneyMarketFundMonth: e.target.value })}
-                            >
-                                {MONTHS.map(m => (
-                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                ))}
-                            </select>
-                            <select
-                                className={selectClasses + ' w-28'}
-                                value={assetsData.moneyMarketFundYear}
-                                onChange={(e) => updateAssets({ moneyMarketFundYear: e.target.value })}
-                            >
-                                {YEARS.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
                         </div>
                     </div>
                 </div>
@@ -612,27 +548,6 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                 onChange={(val) => updateAssets({ epfPersaraan: val })}
                             />
                         </div>
-                        {/* Month/Year */}
-                        <div className="flex gap-3 mt-3">
-                            <select
-                                className={selectClasses + ' flex-1'}
-                                value={assetsData.epfPersaraanMonth}
-                                onChange={(e) => updateAssets({ epfPersaraanMonth: e.target.value })}
-                            >
-                                {MONTHS.map(m => (
-                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                ))}
-                            </select>
-                            <select
-                                className={selectClasses + ' w-28'}
-                                value={assetsData.epfPersaraanYear}
-                                onChange={(e) => updateAssets({ epfPersaraanYear: e.target.value })}
-                            >
-                                {YEARS.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
-                        </div>
                     </div>
 
                     <div>
@@ -646,27 +561,6 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                 value={assetsData.epfSejahtera}
                                 onChange={(val) => updateAssets({ epfSejahtera: val })}
                             />
-                        </div>
-                        {/* Month/Year */}
-                        <div className="flex gap-3 mt-3">
-                            <select
-                                className={selectClasses + ' flex-1'}
-                                value={assetsData.epfSejahteraMonth}
-                                onChange={(e) => updateAssets({ epfSejahteraMonth: e.target.value })}
-                            >
-                                {MONTHS.map(m => (
-                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                ))}
-                            </select>
-                            <select
-                                className={selectClasses + ' w-28'}
-                                value={assetsData.epfSejahteraYear}
-                                onChange={(e) => updateAssets({ epfSejahteraYear: e.target.value })}
-                            >
-                                {YEARS.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
                         </div>
                     </div>
 
@@ -686,27 +580,6 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                     updateAssets({ epfFleksibel: formattedValue });
                                 }}
                             />
-                        </div>
-                        {/* Month/Year */}
-                        <div className="flex gap-3 mt-3">
-                            <select
-                                className={selectClasses + ' flex-1'}
-                                value={assetsData.epfFleksibelMonth}
-                                onChange={(e) => updateAssets({ epfFleksibelMonth: e.target.value })}
-                            >
-                                {MONTHS.map(m => (
-                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                ))}
-                            </select>
-                            <select
-                                className={selectClasses + ' w-28'}
-                                value={assetsData.epfFleksibelYear}
-                                onChange={(e) => updateAssets({ epfFleksibelYear: e.target.value })}
-                            >
-                                {YEARS.map(y => (
-                                    <option key={y} value={y}>{y}</option>
-                                ))}
-                            </select>
                         </div>
                     </div>
                 </div>

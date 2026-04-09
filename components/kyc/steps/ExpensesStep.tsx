@@ -66,23 +66,7 @@ const getSuffixForType = (type: string) => {
     return '/month';
 };
 
-const currentMonth = new Date().getMonth().toString();
-const currentYear = new Date().getFullYear().toString();
-const MONTHS = [
-    { value: '0', en: 'January', zh: '1月' },
-    { value: '1', en: 'February', zh: '2月' },
-    { value: '2', en: 'March', zh: '3月' },
-    { value: '3', en: 'April', zh: '4月' },
-    { value: '4', en: 'May', zh: '5月' },
-    { value: '5', en: 'June', zh: '6月' },
-    { value: '6', en: 'July', zh: '7月' },
-    { value: '7', en: 'August', zh: '8月' },
-    { value: '8', en: 'September', zh: '9月' },
-    { value: '9', en: 'October', zh: '10月' },
-    { value: '10', en: 'November', zh: '11月' },
-    { value: '11', en: 'December', zh: '12月' }
-];
-const YEARS = Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - 5 + i).toString());
+
 
 const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
@@ -220,26 +204,8 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                                         </div>
                                     </div>
 
-                                    {/* Month/Year & Delete */}
-                                    <div className="w-full md:w-3/12 flex items-start gap-2">
-                                        <select
-                                            className={selectClasses + ' flex-1 !mt-0'}
-                                            value={item.month || currentMonth}
-                                            onChange={(e) => updateExpenseItemField(collectionPath, item.id, 'month', e.target.value)}
-                                        >
-                                            {MONTHS.map(m => (
-                                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                            ))}
-                                        </select>
-                                        <select
-                                            className={selectClasses + ' w-20 !mt-0'}
-                                            value={item.year || currentYear}
-                                            onChange={(e) => updateExpenseItemField(collectionPath, item.id, 'year', e.target.value)}
-                                        >
-                                            {YEARS.map(y => (
-                                                <option key={y} value={y}>{y}</option>
-                                            ))}
-                                        </select>
+                                    {/* Delete Button column */}
+                                    <div className="w-full md:w-1/12 flex items-start justify-end">
                                         <button 
                                             onClick={() => removeExpenseItem(collectionPath, item.id)} 
                                             className="text-red-500 hover:text-red-700 p-2 mt-px bg-red-50 hover:bg-red-100 rounded-md transition-colors flex-shrink-0"
@@ -271,11 +237,40 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
             {/* Form Box */}
             <div className="bg-white p-6 lg:p-10 rounded-xl shadow-sm border border-gray-100 pb-12">
                 
-                <div className="flex items-center gap-3 mb-6 border-b border-gray-100 pb-5">
-                    <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
-                        <Receipt size={24} />
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 border-b border-gray-100 pb-5">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-slate-50 border border-xin-gold/20 p-2 rounded-md text-xin-blue">
+                            <Receipt size={24} />
+                        </div>
+                        <h2 className="text-2xl font-serif text-gray-800">{t('expenses.title')}</h2>
                     </div>
-                    <h2 className="text-2xl font-serif text-gray-800">{t('expenses.title')}</h2>
+
+                    {/* Global Date Selector */}
+                    <div className="flex gap-2">
+                        <select
+                            className={selectClasses}
+                            value={formData.globalMonth}
+                            onChange={(e) => updateData({ globalMonth: e.target.value })}
+                        >
+                            {[
+                                { value: '0', en: 'January', zh: '1月' }, { value: '1', en: 'February', zh: '2月' }, { value: '2', en: 'March', zh: '3月' },
+                                { value: '3', en: 'April', zh: '4月' }, { value: '4', en: 'May', zh: '5月' }, { value: '5', en: 'June', zh: '6月' },
+                                { value: '6', en: 'July', zh: '7月' }, { value: '7', en: 'August', zh: '8月' }, { value: '8', en: 'September', zh: '9月' },
+                                { value: '9', en: 'October', zh: '10月' }, { value: '10', en: 'November', zh: '11月' }, { value: '11', en: 'December', zh: '12月' }
+                            ].map(m => (
+                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                            ))}
+                        </select>
+                        <select
+                            className={selectClasses}
+                            value={formData.globalYear}
+                            onChange={(e) => updateData({ globalYear: e.target.value })}
+                        >
+                            {Array.from({ length: 10 }, (_, i) => (new Date().getFullYear() - 5 + i).toString()).map(y => (
+                                <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
 
                 {/* Info Banner */}

@@ -242,6 +242,8 @@ export interface KYCInvestmentsData {
 }
 
 export interface KYCData {
+  globalMonth: string;
+  globalYear: string;
   // Basic Info
   familyName: string;
   givenName: string;
@@ -270,6 +272,8 @@ export interface KYCData {
 }
 
 export const initialKYCData: KYCData = {
+  globalMonth: new Date().getMonth().toString(),
+  globalYear: new Date().getFullYear().toString(),
   familyName: '',
   givenName: '',
   salutation: '',
