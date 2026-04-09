@@ -54,9 +54,7 @@ const KYCLayoutContent: React.FC = () => {
 
 const KYCLayout: React.FC = () => {
     return (
-        <LanguageProvider>
-            <KYCLayoutContent />
-        </LanguageProvider>
+        <KYCLayoutContent />
     );
 };
 
