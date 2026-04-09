@@ -404,5 +404,3 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
 };
 
 export default ReviewSummaryStep;
-
-export default ReviewSummaryStep;
