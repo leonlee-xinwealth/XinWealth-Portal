@@ -135,6 +135,9 @@ export interface FinancialItem {
   description: string;
   month?: string;
   year?: string;
+  // Cashflow for Assets and Investments
+  monthlyIncome?: string;
+  monthlyExpenses?: string;
   // Loan fields for Property and Vehicle
   isUnderLoan?: boolean;
   outstandingBalance?: string;
@@ -143,6 +146,8 @@ export interface FinancialItem {
   tenure?: string;
   loanCommencementYear?: string;
   loanCommencementMonth?: string;
+  loanEndYear?: string;
+  loanEndMonth?: string;
   monthlyInstallment?: string;
   purchasePrice?: string; // New: Purchase Price / Principal
 }

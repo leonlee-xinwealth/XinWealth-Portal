@@ -98,8 +98,27 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
             
             const updatedItem = { ...item, [field]: value };
             
-            if (collectionPath === 'properties' || collectionPath === 'vehicles') {
-                if (updatedItem.isUnderLoan) {
+            if (updatedItem.isUnderLoan) {
+                // Auto calculate loan end date if tenure or start date changes
+                if (field === 'tenure' || field === 'loanCommencementMonth' || field === 'loanCommencementYear') {
+                    const startY = parseInt(updatedItem.loanCommencementYear || new Date().getFullYear().toString());
+                    const startM = parseInt(updatedItem.loanCommencementMonth || new Date().getMonth().toString());
+                    const t = parseFloat(updatedItem.tenure || '0');
+                    if (t > 0) {
+                        let endM = startM + t * 12;
+                        let endY = startY + Math.floor(endM / 12);
+                        endM = endM % 12;
+                        updatedItem.loanEndMonth = endM.toString();
+                        updatedItem.loanEndYear = endY.toString();
+                    } else {
+                        updatedItem.loanEndMonth = '';
+                        updatedItem.loanEndYear = '';
+                    }
+                }
+
+                // Auto calculate monthly installment if loan inputs change
+                const loanFields = ['outstandingBalance', 'originalLoanAmount', 'interestRate', 'tenure', 'loanCommencementYear', 'loanCommencementMonth'];
+                if (loanFields.includes(field as string)) {
                     const balance = parseFloat(updatedItem.outstandingBalance?.toString().replace(/,/g, '') || '0');
                     const rate = parseFloat(updatedItem.interestRate || '0');
                     const tenure = parseFloat(updatedItem.tenure || '0');
@@ -123,15 +142,18 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                         } else {
                             updatedItem.monthlyInstallment = '0';
                         }
-                    } else {
-                        updatedItem.monthlyInstallment = '';
+                    } else if (field !== 'monthlyInstallment') {
+                        // don't clear if user is editing monthlyInstallment directly
+                        // updatedItem.monthlyInstallment = '';
                     }
-                } else {
-                    updatedItem.monthlyInstallment = '';
-                    updatedItem.outstandingBalance = '';
-                    updatedItem.interestRate = '';
-                    updatedItem.tenure = '';
                 }
+            } else {
+                updatedItem.monthlyInstallment = '';
+                updatedItem.outstandingBalance = '';
+                updatedItem.interestRate = '';
+                updatedItem.tenure = '';
+                updatedItem.loanEndMonth = '';
+                updatedItem.loanEndYear = '';
             }
             
             return updatedItem;
@@ -247,6 +269,38 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                         <p className="text-xs text-gray-500 mt-1.5 font-medium">{t('common.maxChars')}</p>
                                     </div>
 
+                                    <div>
+                                        <label className={labelClasses}>
+                                            {isZh ? '当月产生现金流入 (如果没有则为 0)' : 'Monthly Cash Inflow (0 if none)'}
+                                        </label>
+                                        <div className="relative mt-1">
+                                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                                <span className="text-gray-500 font-medium">RM</span>
+                                            </div>
+                                            <DebouncedNumberInput
+                                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
+                                                value={item.monthlyIncome || '0'}
+                                                onChange={(val) => updateAssetItemField(collectionPath, item.id, 'monthlyIncome', val)}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className={labelClasses}>
+                                            {isZh ? '当月产生现金流出 (维修费、税务等)' : 'Monthly Cash Outflow (Maintenance, Tax, etc.)'}
+                                        </label>
+                                        <div className="relative mt-1">
+                                            <div className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none border-r border-gray-200 pr-3 my-px bg-slate-50 rounded-l-md">
+                                                <span className="text-gray-500 font-medium">RM</span>
+                                            </div>
+                                            <DebouncedNumberInput
+                                                className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
+                                                value={item.monthlyExpenses || '0'}
+                                                onChange={(val) => updateAssetItemField(collectionPath, item.id, 'monthlyExpenses', val)}
+                                            />
+                                        </div>
+                                    </div>
+
                                     {/* Month & Year Selector */}
                                     <div>
                                         <label className={labelClasses}>
@@ -274,107 +328,134 @@ const AssetsStep: React.FC<AssetsStepProps> = ({ formData, updateData, onNext, o
                                         </div>
                                     </div>
 
-                                    {/* Loan Details for Property/Vehicle */}
-                                    {(collectionPath === 'properties' || collectionPath === 'vehicles') && (
-                                        <div className="pt-4 border-t border-gray-100">
-                                            <div className="flex items-center gap-2 mb-4">
-                                                <input 
-                                                    type="checkbox" 
-                                                    id={`loan-${item.id}`}
-                                                    className="w-4 h-4 text-xin-cyan bg-gray-100 border-gray-300 rounded focus:ring-xin-cyan"
-                                                    checked={!!item.isUnderLoan}
-                                                    onChange={(e) => updateAssetItemField(collectionPath, item.id, 'isUnderLoan', e.target.checked)}
-                                                />
-                                                <label htmlFor={`loan-${item.id}`} className="text-sm font-medium text-gray-700 cursor-pointer">
-                                                    {isZh ? '仍在贷款中？' : 'Is it still under loan?'}
-                                                </label>
-                                            </div>
-                                            
-                                            {item.isUnderLoan && (
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 bg-slate-50/50 p-4 rounded-lg border border-slate-100">
-                                                    <div>
-                                                        <label className={labelClasses}>{t('common.originalLoanAmount')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
-                                                        <div className="relative mt-1">
-                                                            <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none border-r border-gray-200 pr-2 my-px bg-slate-50 rounded-l-md">
-                                                                <span className="text-gray-500 text-sm font-medium">RM</span>
-                                                            </div>
-                                                            <DebouncedNumberInput
-                                                                className="w-full pl-12 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
-                                                                value={item.originalLoanAmount || ''}
-                                                                onChange={(val) => updateAssetItemField(collectionPath, item.id, 'originalLoanAmount', val)}
-                                                            />
+                                    {/* Loan Details */}
+                                    <div className="pt-4 border-t border-gray-100">
+                                        <div className="flex items-center gap-2 mb-4">
+                                            <input 
+                                                type="checkbox" 
+                                                id={`loan-${item.id}`}
+                                                className="w-4 h-4 text-xin-cyan bg-gray-100 border-gray-300 rounded focus:ring-xin-cyan"
+                                                checked={!!item.isUnderLoan}
+                                                onChange={(e) => updateAssetItemField(collectionPath, item.id, 'isUnderLoan', e.target.checked)}
+                                            />
+                                            <label htmlFor={`loan-${item.id}`} className="text-sm font-medium text-gray-700 cursor-pointer">
+                                                {isZh ? '仍在贷款中？' : 'Is it still under loan?'}
+                                            </label>
+                                        </div>
+                                        
+                                        {item.isUnderLoan && (
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 bg-slate-50/50 p-4 rounded-lg border border-slate-100">
+                                                <div>
+                                                    <label className={labelClasses}>{t('common.originalLoanAmount')} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
+                                                    <div className="relative mt-1">
+                                                        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none border-r border-gray-200 pr-2 my-px bg-slate-50 rounded-l-md">
+                                                            <span className="text-gray-500 text-sm font-medium">RM</span>
                                                         </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className={labelClasses}>{isZh ? '未偿还余额' : 'Outstanding Balance'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
-                                                        <div className="relative mt-1">
-                                                            <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none border-r border-gray-200 pr-2 my-px bg-slate-50 rounded-l-md">
-                                                                <span className="text-gray-500 text-sm font-medium">RM</span>
-                                                            </div>
-                                                            <DebouncedNumberInput
-                                                                className="w-full pl-12 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
-                                                                value={item.outstandingBalance || ''}
-                                                                onChange={(val) => updateAssetItemField(collectionPath, item.id, 'outstandingBalance', val)}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className={labelClasses}>{isZh ? '年利率' : 'Interest Rate'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
-                                                        <div className="relative mt-1">
-                                                            <input
-                                                                type="number"
-                                                                step="0.01"
-                                                                className="w-full pl-3 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
-                                                                value={item.interestRate || ''}
-                                                                onChange={(e) => updateAssetItemField(collectionPath, item.id, 'interestRate', e.target.value)}
-                                                            />
-                                                            <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
-                                                                <span className="text-gray-500 text-sm font-medium">%</span>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div>
-                                                        <label className={labelClasses}>{isZh ? '贷款期限 (年)' : 'Tenure (Years)'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
-                                                        <input
-                                                            type="number"
-                                                            className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
-                                                            value={item.tenure || ''}
-                                                            onChange={(e) => updateAssetItemField(collectionPath, item.id, 'tenure', e.target.value)}
+                                                        <DebouncedNumberInput
+                                                            className="w-full pl-12 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
+                                                            value={item.originalLoanAmount || ''}
+                                                            onChange={(val) => updateAssetItemField(collectionPath, item.id, 'originalLoanAmount', val)}
                                                         />
                                                     </div>
-                                                    <div>
-                                                        <label className={labelClasses}>{isZh ? '贷款开始时间' : 'Loan Commencement'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
-                                                        <div className="flex gap-2 mt-1">
-                                                            <select
-                                                                className={selectClasses + ' flex-1'}
-                                                                value={item.loanCommencementMonth || new Date().getMonth().toString()}
-                                                                onChange={(e) => updateAssetItemField(collectionPath, item.id, 'loanCommencementMonth', e.target.value)}
-                                                            >
-                                                                {MONTHS.map(m => (
-                                                                    <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                                                ))}
-                                                            </select>
-                                                            <select
-                                                                className={selectClasses + ' w-24'}
-                                                                value={item.loanCommencementYear || new Date().getFullYear().toString()}
-                                                                onChange={(e) => updateAssetItemField(collectionPath, item.id, 'loanCommencementYear', e.target.value)}
-                                                            >
-                                                                {Array.from({ length: 30 }, (_, i) => (new Date().getFullYear() - 25 + i).toString()).map(y => (
-                                                                    <option key={y} value={y}>{y}</option>
-                                                                ))}
-                                                            </select>
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>{isZh ? '未偿还余额' : 'Outstanding Balance'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
+                                                    <div className="relative mt-1">
+                                                        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none border-r border-gray-200 pr-2 my-px bg-slate-50 rounded-l-md">
+                                                            <span className="text-gray-500 text-sm font-medium">RM</span>
+                                                        </div>
+                                                        <DebouncedNumberInput
+                                                            className="w-full pl-12 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
+                                                            value={item.outstandingBalance || ''}
+                                                            onChange={(val) => updateAssetItemField(collectionPath, item.id, 'outstandingBalance', val)}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>{isZh ? '年利率' : 'Interest Rate'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
+                                                    <div className="relative mt-1">
+                                                        <input
+                                                            type="number"
+                                                            step="0.01"
+                                                            className="w-full pl-3 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
+                                                            value={item.interestRate || ''}
+                                                            onChange={(e) => updateAssetItemField(collectionPath, item.id, 'interestRate', e.target.value)}
+                                                        />
+                                                        <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                                                            <span className="text-gray-500 text-sm font-medium">%</span>
                                                         </div>
                                                     </div>
-                                                    {item.monthlyInstallment && (
-                                                        <div className="col-span-1 md:col-span-2 mt-2 p-3 bg-xin-blue/5 border border-xin-blue/20 rounded-md flex justify-between items-center">
-                                                            <span className="text-sm font-semibold text-xin-blue">{isZh ? '计算出的每月供款：' : 'Calculated Monthly Installment:'}</span>
-                                                            <span className="text-lg font-bold text-xin-dark">RM {parseInt(item.monthlyInstallment).toLocaleString('en-US')}</span>
-                                                        </div>
-                                                    )}
                                                 </div>
-                                            )}
-                                        </div>
-                                    )}
+                                                <div>
+                                                    <label className={labelClasses}>{isZh ? '贷款开始时间' : 'Loan Commencement'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
+                                                    <div className="flex gap-2 mt-1">
+                                                        <select
+                                                            className={selectClasses + ' flex-1'}
+                                                            value={item.loanCommencementMonth || new Date().getMonth().toString()}
+                                                            onChange={(e) => updateAssetItemField(collectionPath, item.id, 'loanCommencementMonth', e.target.value)}
+                                                        >
+                                                            {MONTHS.map(m => (
+                                                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                                            ))}
+                                                        </select>
+                                                        <select
+                                                            className={selectClasses + ' w-24'}
+                                                            value={item.loanCommencementYear || new Date().getFullYear().toString()}
+                                                            onChange={(e) => updateAssetItemField(collectionPath, item.id, 'loanCommencementYear', e.target.value)}
+                                                        >
+                                                            {Array.from({ length: 30 }, (_, i) => (new Date().getFullYear() - 25 + i).toString()).map(y => (
+                                                                <option key={y} value={y}>{y}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>{isZh ? '预期贷款期限 (年)' : 'Tenure (Years)'}</label>
+                                                    <input
+                                                        type="number"
+                                                        className="w-full mt-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
+                                                        value={item.tenure || ''}
+                                                        onChange={(e) => updateAssetItemField(collectionPath, item.id, 'tenure', e.target.value)}
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className={labelClasses}>{isZh ? '计算出的结束时间 / 可修改' : 'Loan End (Calculated / Editable)'}</label>
+                                                    <div className="flex gap-2 mt-1">
+                                                        <select
+                                                            className={selectClasses + ' flex-1'}
+                                                            value={item.loanEndMonth || ''}
+                                                            onChange={(e) => updateAssetItemField(collectionPath, item.id, 'loanEndMonth', e.target.value)}
+                                                        >
+                                                            <option value="" disabled>-</option>
+                                                            {MONTHS.map(m => (
+                                                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                                            ))}
+                                                        </select>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="YYYY"
+                                                            className="w-24 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
+                                                            value={item.loanEndYear || ''}
+                                                            onChange={(e) => updateAssetItemField(collectionPath, item.id, 'loanEndYear', e.target.value)}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <div className="col-span-1 md:col-span-2">
+                                                    <label className={labelClasses}>{isZh ? '每月供款 (自动计算 / 可修改)' : 'Monthly Installment (Auto / Editable)'}</label>
+                                                    <div className="relative mt-1">
+                                                        <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none border-r border-gray-200 pr-2 my-px bg-slate-50 rounded-l-md">
+                                                            <span className="text-gray-500 text-sm font-medium">RM</span>
+                                                        </div>
+                                                        <DebouncedNumberInput
+                                                            className="w-full pl-12 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm font-bold text-xin-dark"
+                                                            value={item.monthlyInstallment || ''}
+                                                            onChange={(val) => updateAssetItemField(collectionPath, item.id, 'monthlyInstallment', val)}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         ))}

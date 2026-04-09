@@ -60,6 +60,7 @@ const HOUSEHOLD_OPTIONS = [
   { value: 'Utilities Bills', labelEn: 'Utilities Bills', labelZh: '水电费' },
   { value: 'Groceries/Marketing', labelEn: 'Groceries/Marketing', labelZh: '杂货/买菜' },
   { value: "Maid's Levy/ Salary", labelEn: "Maid's Levy/ Salary", labelZh: '女佣税/薪水' },
+  { value: 'Property Management / Sinking Fund', labelEn: 'Property Mgmt/Sinking Fund', labelZh: '物业管理/维修基金' },
   { value: 'Rental Expense', labelEn: 'Rental Expense', labelZh: '租金支出' }
 ];
 
@@ -91,6 +92,7 @@ const PERSONAL_OPTIONS = [
   { value: 'Vacation/ Travel', labelEn: 'Vacation/ Travel', labelZh: '度假/旅游' },
   { value: 'Donations/ Charity/ Gifts', labelEn: 'Donations/ Charity/ Gifts', labelZh: '捐款/慈善/礼物' },
   { value: 'Income Tax Expense', labelEn: 'Income Tax Expense', labelZh: '所得税支出' },
+  { value: 'Insurance Premium', labelEn: 'Insurance Premium', labelZh: '保险费' },
   { value: 'School Fees', labelEn: 'School Fees', labelZh: '学费' }
 ];
 
@@ -118,8 +120,9 @@ const LevelUp: React.FC = () => {
   const [targetMonth, setTargetMonth] = useState(new Date().getMonth().toString());
   const [targetYear, setTargetYear] = useState(new Date().getFullYear().toString());
 
-  const [incomes, setIncomes] = useState<{ id: string; key: string; category: string; description: string; amount: string; month: string; year: string }[]>([]);
-  const [expenses, setExpenses] = useState<{ id: string; category: string; type: string; description?: string; amount: string; month: string; year: string }[]>([]);
+  const [rawHealthData, setRawHealthData] = useState<any>(null);
+  const [incomes, setIncomes] = useState<{ id: string; key: string; category: string; description: string; amount: string }[]>([]);
+  const [expenses, setExpenses] = useState<{ id: string; category: string; type: string; description?: string; amount: string }[]>([]);
   const [assets, setAssets] = useState<{ id: string; category: string; description: string; amount: number; isEditing?: boolean; tempAmount?: string }[]>([]);
   const [liabilities, setLiabilities] = useState<{ id: string; category: string; description: string; amount: number; monthlyInstallment: number; isEditing?: boolean; tempAmount?: string }[]>([]);
 
@@ -157,20 +160,7 @@ const LevelUp: React.FC = () => {
 
       setAssets(initAssets);
       setLiabilities(initLiabilities);
-
-      // Initialize incomes with fixed fields
-      setIncomes(INCOME_FIELDS.map(f => ({ 
-        id: f.key, 
-        key: f.key,
-        category: f.category, 
-        description: '', 
-        amount: '', 
-        month: targetMonth, 
-        year: targetYear 
-      })));
-      
-      // Expenses start empty as they are dynamic categorized lists
-      setExpenses([]);
+      setRawHealthData(data); // Save for pre-filling logic
 
     } catch (err: any) {
       setError(err.message || 'Failed to load latest data');
@@ -179,14 +169,104 @@ const LevelUp: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (!rawHealthData) return;
+    
+    let pMonth = parseInt(targetMonth) - 1;
+    let pYear = parseInt(targetYear);
+    if (pMonth < 0) {
+        pMonth = 11;
+        pYear -= 1;
+    }
+    const prevMonthString = MONTH_NAMES[pMonth].en;
+    const prevMonthZh = MONTH_NAMES[pMonth].zh;
+    const prevMonthValues = [prevMonthString, prevMonthZh, (pMonth + 1).toString().padStart(2, '0')];
+    const prevYearString = pYear.toString();
+
+    const isMatch = (item: any) => {
+        if (!item || !item.fields) return false;
+        
+        let itemMonth = "";
+        let rawMonth = item.fields["Month"] || item.fields["month"];
+        if (Array.isArray(rawMonth) && rawMonth.length > 0) itemMonth = rawMonth[0]?.text || String(rawMonth[0] || "");
+        else if (rawMonth && typeof rawMonth === 'object') itemMonth = rawMonth.text || "";
+        else itemMonth = String(rawMonth || "");
+        
+        let itemYear = "";
+        let rawYear = item.fields["Year"] || item.fields["year"];
+        if (Array.isArray(rawYear) && rawYear.length > 0) itemYear = rawYear[0]?.text || String(rawYear[0] || "");
+        else if (rawYear && typeof rawYear === 'object') itemYear = rawYear.text || "";
+        else itemYear = String(rawYear || "");
+
+        return String(itemYear) === prevYearString && prevMonthValues.some(v => String(itemMonth).toLowerCase().includes(v.toLowerCase()));
+    };
+
+    const extractAmt = (item: any) => {
+        let val = item.fields["Amount"] || item.fields["amount"] || item.fields["Value"] || item.fields["value"];
+        if (Array.isArray(val) && val.length > 0) val = val[0]?.text || String(val[0]);
+        else if (val && typeof val === 'object') val = val.text;
+        return String(val || "").replace(/[^0-9.]/g, '');
+    };
+
+    const getCat = (item: any) => {
+        let val = item.fields["Category"] || item.fields["category"] || item.fields["Type"] || item.fields["type"];
+        if (Array.isArray(val) && val.length > 0) val = val[0]?.text || String(val[0]);
+        else if (val && typeof val === 'object') val = val.text;
+        return String(val || "");
+    };
+
+    const prevIncomes = (rawHealthData.incomes || []).filter(isMatch);
+    const prevExpenses = (rawHealthData.expenses || []).filter(isMatch);
+    
+    const FIXED_INCOME_KEYS = ['salary', 'directorFee', 'rentalIncome'];
+    
+    const newIncomes = INCOME_FIELDS.map(f => {
+        let amount = '';
+        if (FIXED_INCOME_KEYS.includes(f.key)) {
+            const found = prevIncomes.find((i: any) => getCat(i) === f.category);
+            if (found) amount = extractAmt(found);
+        }
+        return { 
+            id: f.key, 
+            key: f.key,
+            category: f.category, 
+            description: '', 
+            amount
+        };
+    });
+    setIncomes(newIncomes);
+
+    const FIXED_EXPENSE_CATS = ['Property Management / Sinking Fund', 'Property Mgmt/Sinking Fund', '物业管理/维修基金', 'Insurance Premium', 'Loan Repayment'];
+    const newExpenses: any[] = [];
+    prevExpenses.forEach((exp: any) => {
+        const cat = getCat(exp);
+        if (FIXED_EXPENSE_CATS.some(fc => cat.includes(fc))) {
+             newExpenses.push({
+                 id: Math.random().toString(),
+                 category: "Auto-Prefilled", 
+                 type: cat,
+                 amount: extractAmt(exp)
+             });
+        }
+    });
+
+    const mapSubCatToMain = (subCat: string) => {
+         if (subCat.includes('Property Management') || subCat.includes('Sinking Fund') || subCat.includes('Property Mgmt') || subCat.includes('基金')) return t('expenses.household') || 'Household';
+         if (subCat.includes('Insurance') || subCat.includes('保险')) return t('expenses.personal') || 'Personal';
+         if (subCat.includes('Loan Repayment') || subCat.includes('贷款')) return t('expenses.others') || 'Other Expenses';
+         return t('expenses.misc') || 'Miscellaneous';
+    };
+    newExpenses.forEach(exp => { exp.category = mapSubCatToMain(exp.type); });
+
+    setExpenses(newExpenses);
+  }, [targetMonth, targetYear, rawHealthData, t]);
+
   const addExpenseItem = (category: string, defaultType: string) => {
     const newItem = { 
       id: Date.now().toString() + Math.random().toString(), 
       category, 
       type: defaultType, 
-      amount: '', 
-      month: targetMonth, 
-      year: targetYear 
+      amount: ''
     };
     setExpenses(prev => [...prev, newItem]);
     setExpandedCard(category);
@@ -340,35 +420,14 @@ const LevelUp: React.FC = () => {
                                     </div>
                                 </div>
 
-                                {/* Month/Year & Delete */}
-                                <div className="w-full md:w-3/12">
-                                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">{isZh ? '月份 / 年份' : 'Month / Year'}</label>
-                                    <div className="flex items-center gap-2">
-                                      <select
-                                          className={selectClasses + ' flex-1 !py-2'}
-                                          value={item.month}
-                                          onChange={(e) => updateExpenseItem(item.id, 'month', e.target.value)}
-                                      >
-                                          {MONTH_NAMES.map(m => (
-                                              <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                                          ))}
-                                      </select>
-                                      <select
-                                          className={selectClasses + ' w-20 !py-2'}
-                                          value={item.year}
-                                          onChange={(e) => updateExpenseItem(item.id, 'year', e.target.value)}
-                                      >
-                                          {YEARS.map(y => (
-                                              <option key={y} value={y}>{y}</option>
-                                          ))}
-                                      </select>
+                                {/* Delete */}
+                                <div className="w-full md:w-3/12 flex items-end">
                                       <button 
                                           onClick={() => removeExpenseItem(item.id)} 
-                                          className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors"
+                                          className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition-colors w-full md:w-auto mt-4 md:mt-0"
                                       >
-                                          <Trash2 size={18} />
+                                          <Trash2 size={18} /> <span className="md:hidden text-sm font-bold ml-2">Delete</span>
                                       </button>
-                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -477,27 +536,6 @@ const LevelUp: React.FC = () => {
                             onChange={(val) => updateIncomeItem(field.key, 'amount', val)}
                             placeholder="0"
                         />
-                    </div>
-                    
-                    <div className="flex gap-2">
-                        <select
-                            className={selectClasses + ' flex-1 !py-1.5'}
-                            value={inc.month}
-                            onChange={(e) => updateIncomeItem(field.key, 'month', e.target.value)}
-                        >
-                            {MONTH_NAMES.map(m => (
-                                <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
-                            ))}
-                        </select>
-                        <select
-                            className={selectClasses + ' w-24 !py-1.5'}
-                            value={inc.year}
-                            onChange={(e) => updateIncomeItem(field.key, 'year', e.target.value)}
-                        >
-                            {YEARS.map(y => (
-                                <option key={y} value={y}>{y}</option>
-                            ))}
-                        </select>
                     </div>
                   </div>
                 );

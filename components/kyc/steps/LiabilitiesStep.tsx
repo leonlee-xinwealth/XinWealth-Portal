@@ -83,33 +83,57 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
             if (field === 'outstandingBalance') updatedItem.amount = value;
 
             if (updatedItem.isUnderLoan) {
-                const balance = parseFloat(updatedItem.outstandingBalance?.toString().replace(/,/g, '') || '0');
-                const rate = parseFloat(updatedItem.interestRate || '0');
-                const tenure = parseFloat(updatedItem.tenure || '0');
-                const startYear = parseInt(updatedItem.loanCommencementYear || new Date().getFullYear().toString());
-                const startMonth = parseInt(updatedItem.loanCommencementMonth || new Date().getMonth().toString());
-                
-                if (balance > 0 && rate > 0 && tenure > 0) {
-                    const elapsedMonths = (new Date().getFullYear() - startYear) * 12 + (new Date().getMonth() - startMonth);
-                    const totalMonths = tenure * 12;
-                    const remainingMonths = totalMonths - elapsedMonths;
-                    
-                    if (remainingMonths > 0) {
-                        let installment = 0;
-                        // Use Flat Rate formula for all other liabilities (Study, Personal, Renovation, Others)
-                        installment = (balance * (1 + (rate / 100) * tenure)) / remainingMonths;
-                        updatedItem.monthlyInstallment = Math.round(installment).toString();
+                // Auto calculate loan end date if tenure or start date changes
+                if (field === 'tenure' || field === 'loanCommencementMonth' || field === 'loanCommencementYear') {
+                    const startY = parseInt(updatedItem.loanCommencementYear || new Date().getFullYear().toString());
+                    const startM = parseInt(updatedItem.loanCommencementMonth || new Date().getMonth().toString());
+                    const t = parseFloat(updatedItem.tenure || '0');
+                    if (t > 0) {
+                        let endM = startM + t * 12;
+                        let endY = startY + Math.floor(endM / 12);
+                        endM = endM % 12;
+                        updatedItem.loanEndMonth = endM.toString();
+                        updatedItem.loanEndYear = endY.toString();
                     } else {
-                        updatedItem.monthlyInstallment = '0';
+                        updatedItem.loanEndMonth = '';
+                        updatedItem.loanEndYear = '';
                     }
-                } else {
-                    updatedItem.monthlyInstallment = '';
+                }
+
+                // Auto calculate monthly installment if loan inputs change
+                const loanFields = ['outstandingBalance', 'amount', 'originalLoanAmount', 'interestRate', 'tenure', 'loanCommencementYear', 'loanCommencementMonth'];
+                if (loanFields.includes(field as string)) {
+                    const balance = parseFloat(updatedItem.outstandingBalance?.toString().replace(/,/g, '') || '0');
+                    const rate = parseFloat(updatedItem.interestRate || '0');
+                    const tenure = parseFloat(updatedItem.tenure || '0');
+                    const startYear = parseInt(updatedItem.loanCommencementYear || new Date().getFullYear().toString());
+                    const startMonth = parseInt(updatedItem.loanCommencementMonth || new Date().getMonth().toString());
+                    
+                    if (balance > 0 && rate > 0 && tenure > 0) {
+                        const elapsedMonths = (new Date().getFullYear() - startYear) * 12 + (new Date().getMonth() - startMonth);
+                        const totalMonths = tenure * 12;
+                        const remainingMonths = totalMonths - elapsedMonths;
+                        
+                        if (remainingMonths > 0) {
+                            let installment = 0;
+                            // Use Flat Rate formula for all other liabilities (Study, Personal, Renovation, Others)
+                            installment = (balance * (1 + (rate / 100) * tenure)) / remainingMonths;
+                            updatedItem.monthlyInstallment = Math.round(installment).toString();
+                        } else {
+                            updatedItem.monthlyInstallment = '0';
+                        }
+                    } else if (field !== 'monthlyInstallment') {
+                        // don't clear if user is editing monthlyInstallment directly
+                    }
                 }
             } else {
                 updatedItem.monthlyInstallment = '';
                 updatedItem.interestRate = '';
                 updatedItem.tenure = '';
+                updatedItem.loanEndMonth = '';
+                updatedItem.loanEndYear = '';
             }
+            
             
             return updatedItem;
         });
@@ -219,7 +243,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                                                     </div>
                                                     <DebouncedNumberInput 
                                                         className="w-full pl-16 pr-4 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
-                                                        value={item.amount}
+                                                        value={item.amount || item.outstandingBalance || ''}
                                                         onChange={(val) => updateLoanItemField(collectionPath, item.id, 'amount', val)}
                                                     />
                                                 </div>
@@ -240,7 +264,7 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                                                 </div>
                                             </div>
                                             <div>
-                                                <label className={labelClasses}>{isZh ? '贷款期限 (年)' : 'Tenure (Years)'} <span className="text-gray-400 italic font-normal text-xs ml-2">{t('common.required')}</span></label>
+                                                <label className={labelClasses}>{isZh ? '贷款期限 (年)' : 'Tenure (Years)'}</label>
                                                 <input
                                                     type="number"
                                                     className="w-full mt-1 px-3 py-2.5 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm"
@@ -271,12 +295,41 @@ const LiabilitiesStep: React.FC<LiabilitiesStepProps> = ({ formData, updateData,
                                                     </select>
                                                 </div>
                                             </div>
-                                            {item.monthlyInstallment && (
-                                                <div className="col-span-1 md:col-span-2 mt-2 p-3 bg-xin-blue/5 border border-xin-blue/20 rounded-md flex justify-between items-center">
-                                                    <span className="text-sm font-semibold text-xin-blue">{isZh ? '计算出的每月供款：' : 'Calculated Monthly Installment:'}</span>
-                                                    <span className="text-lg font-bold text-xin-dark">RM {parseInt(item.monthlyInstallment).toLocaleString('en-US')}</span>
+                                            <div>
+                                                <label className={labelClasses}>{isZh ? '计算出的结束时间 / 可修改' : 'Loan End (Calculated / Editable)'}</label>
+                                                <div className="flex gap-2 mt-1">
+                                                    <select
+                                                        className={selectClasses + ' flex-1'}
+                                                        value={item.loanEndMonth || ''}
+                                                        onChange={(e) => updateLoanItemField(collectionPath, item.id, 'loanEndMonth', e.target.value)}
+                                                    >
+                                                        <option value="" disabled>-</option>
+                                                        {MONTHS.map(m => (
+                                                            <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>
+                                                        ))}
+                                                    </select>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="YYYY"
+                                                        className="w-24 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm text-sm"
+                                                        value={item.loanEndYear || ''}
+                                                        onChange={(e) => updateLoanItemField(collectionPath, item.id, 'loanEndYear', e.target.value)}
+                                                    />
                                                 </div>
-                                            )}
+                                            </div>
+                                            <div className="col-span-1 md:col-span-2">
+                                                <label className={labelClasses}>{isZh ? '每月供款 (自动计算 / 可修改)' : 'Monthly Installment (Auto / Editable)'}</label>
+                                                <div className="relative mt-1">
+                                                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none border-r border-gray-200 pr-2 my-px bg-slate-50 rounded-l-md">
+                                                        <span className="text-gray-500 text-sm font-medium">RM</span>
+                                                    </div>
+                                                    <DebouncedNumberInput
+                                                        className="w-full pl-12 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-xin-cyan focus:border-xin-cyan bg-white shadow-sm font-bold text-xin-dark"
+                                                        value={item.monthlyInstallment || ''}
+                                                        onChange={(val) => updateLoanItemField(collectionPath, item.id, 'monthlyInstallment', val)}
+                                                    />
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
 

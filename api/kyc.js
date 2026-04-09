@@ -89,7 +89,7 @@ export default async function handler(req, res) {
 
     // Helper function to batch create sub-records
     const createSubRecords = async (tableName, items, fieldMapper) => {
-      if (!tableName || !items || items.length === 0) return;
+      if (!tableName || !items || items.length === 0) return [];
       
       const records = items.map(item => ({
         fields: {
@@ -105,7 +105,11 @@ export default async function handler(req, res) {
         body: JSON.stringify({ records })
       });
       const result = await res.json();
-      if (result.code !== 0) console.error(`Batch create failed for ${tableName}:`, result.msg);
+      if (result.code !== 0) {
+          console.error(`Batch create failed for ${tableName}:`, result.msg);
+          return [];
+      }
+      return result.data.records;
     };
 
     // 4. Create Income Records
@@ -143,125 +147,108 @@ export default async function handler(req, res) {
       return fieldData;
     });
 
-    // 5. Create Asset Records
-    const allAssets = [
-      ...(assets.properties || []).map(p => ({ ...p, category: "Property" })),
-      ...(assets.vehicles || []).map(v => ({ ...v, category: "Vehicle" })),
-      ...(assets.otherAssets || []).map(o => ({ ...o, category: "Other" }))
+    // 5. Build Net Worth Items
+    const allNetWorthItems = [
+      // Assets
+      ...(assets.properties || []).map(p => ({ ...p, mainType: "Asset", n_category: "Property" })),
+      ...(assets.vehicles || []).map(v => ({ ...v, mainType: "Asset", n_category: "Vehicle" })),
+      ...(assets.otherAssets || []).map(o => ({ ...o, mainType: "Asset", n_category: "Other" })),
+      
+      // Investments
+      ...(investments.etf || []).map(i => ({ ...i, mainType: "Investment", n_category: "ETF" })),
+      ...(investments.stocks || []).map(i => ({ ...i, mainType: "Investment", n_category: "Stocks" })),
+      ...(investments.bonds || []).map(i => ({ ...i, mainType: "Investment", n_category: "Bonds" })),
+      ...(investments.unitTrusts || []).map(i => ({ ...i, mainType: "Investment", n_category: "Unit Trust" })),
+      ...(investments.fixedDeposits || []).map(i => ({ ...i, mainType: "Investment", n_category: "Investment Properties" })),
+      ...(investments.forex || []).map(i => ({ ...i, mainType: "Investment", n_category: "Forex" })),
+      ...(investments.moneyMarket || []).map(i => ({ ...i, mainType: "Investment", n_category: "Money Market" })),
+      ...(investments.otherInvestments || []).map(i => ({ ...i, mainType: "Investment", n_category: "Other" })),
+      
+      // Liabilities (standalone)
+      ...(liabilities.studyLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Study Loan" })),
+      ...(liabilities.personalLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Personal Loan" })),
+      ...(liabilities.renovationLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Renovation Loan" })),
+      ...(liabilities.otherLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Other Loan" }))
     ];
-    if (assets.savingsAccount) allAssets.push({ description: "Savings/Current Account", amount: assets.savingsAccount, category: "Savings", month: assets.savingsAccountMonth, year: assets.savingsAccountYear });
-    if (assets.fixedDeposit) allAssets.push({ description: "Fixed Deposit", amount: assets.fixedDeposit, category: "Savings", month: assets.fixedDepositMonth, year: assets.fixedDepositYear });
-    if (assets.moneyMarketFund) allAssets.push({ description: "Money Market Fund For Savings", amount: assets.moneyMarketFund, category: "Savings", month: assets.moneyMarketFundMonth, year: assets.moneyMarketFundYear });
-    if (assets.epfPersaraan) allAssets.push({ description: "EPF Account 1 (Akaun Persaraan)", amount: assets.epfPersaraan, category: "EPF", month: assets.epfPersaraanMonth, year: assets.epfPersaraanYear });
-    if (assets.epfSejahtera) allAssets.push({ description: "EPF Account 2 (Akaun Sejahtera)", amount: assets.epfSejahtera, category: "EPF", month: assets.epfSejahteraMonth, year: assets.epfSejahteraYear });
-    if (assets.epfFleksibel) allAssets.push({ description: "EPF Account 3 (Akaun Fleksibel)", amount: assets.epfFleksibel, category: "EPF", month: assets.epfFleksibelMonth, year: assets.epfFleksibelYear });
 
-    await createSubRecords(tableNetWorth, allAssets, item => {
+    const pushSimpleAsset = (val, desc, cat, m, y) => {
+        if (val) allNetWorthItems.push({ description: desc, amount: val, mainType: "Asset", n_category: cat, month: m, year: y });
+    };
+    pushSimpleAsset(assets.savingsAccount, "Savings/Current Account", "Savings", assets.savingsAccountMonth, assets.savingsAccountYear);
+    pushSimpleAsset(assets.fixedDeposit, "Fixed Deposit", "Savings", assets.fixedDepositMonth, assets.fixedDepositYear);
+    pushSimpleAsset(assets.moneyMarketFund, "Money Market Fund For Savings", "Savings", assets.moneyMarketFundMonth, assets.moneyMarketFundYear);
+    pushSimpleAsset(assets.epfPersaraan, "EPF Account 1 (Akaun Persaraan)", "EPF", assets.epfPersaraanMonth, assets.epfPersaraanYear);
+    pushSimpleAsset(assets.epfSejahtera, "EPF Account 2 (Akaun Sejahtera)", "EPF", assets.epfSejahteraMonth, assets.epfSejahteraYear);
+    pushSimpleAsset(assets.epfFleksibel, "EPF Account 3 (Akaun Fleksibel)", "EPF", assets.epfFleksibelMonth, assets.epfFleksibelYear);
+
+    // Create duplicate Liability rows for Assets/Investments that have loans, so Net Worth formula works correctly.
+    // We flag these with isDuplicateLiability = true so we don't accidentally create a second snapshot for them.
+    const allLiabilityDupes = [
+      ...(assets.properties || []).filter(p => p.isUnderLoan).map(p => ({ ...p, isDuplicateLiability: true, amount: p.outstandingBalance, mainType: "Liability", n_category: "Mortgage" })),
+      ...(assets.vehicles || []).filter(v => v.isUnderLoan).map(v => ({ ...v, isDuplicateLiability: true, amount: v.outstandingBalance, mainType: "Liability", n_category: "Car Loan" })),
+      ...(investments.fixedDeposits || []).filter(i => i.isUnderLoan).map(i => ({ ...i, isDuplicateLiability: true, amount: i.outstandingBalance, mainType: "Liability", n_category: "Mortgage" }))
+    ];
+
+    const combinedNetWorthItems = [...allNetWorthItems, ...allLiabilityDupes];
+
+    const createdNetWorthRecords = await createSubRecords(tableNetWorth, combinedNetWorthItems, item => {
       const fieldData = {
-        "Type": "Asset",
-        "Category": item.category,
+        "Type": item.mainType,
+        "Category": item.n_category,
         "Description": item.description || "",
         "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
       };
       if (item.purchasePrice) fieldData["Original Purchase Price/Principal"] = parseFloat(String(item.purchasePrice).replace(/,/g, '')) || 0;
-      if (item.month != null) fieldData["Month"] = getMonthName(item.month);
-      if (item.year) fieldData["Year"] = String(item.year);
-      return fieldData;
-    });
-
-    // 6. Create Investment Records
-    const allInvestments = [
-      ...(investments.etf || []).map(i => ({ ...i, category: "ETF" })),
-      ...(investments.stocks || []).map(i => ({ ...i, category: "Stocks" })),
-      ...(investments.bonds || []).map(i => ({ ...i, category: "Bonds" })),
-      ...(investments.unitTrusts || []).map(i => ({ ...i, category: "Unit Trust" })),
-      ...(investments.fixedDeposits || []).map(i => ({ ...i, category: "Investment Properties" })),
-      ...(investments.forex || []).map(i => ({ ...i, category: "Forex" })),
-      ...(investments.moneyMarket || []).map(i => ({ ...i, category: "Money Market" })),
-      ...(investments.otherInvestments || []).map(i => ({ ...i, category: "Other" }))
-    ];
-
-    await createSubRecords(tableInvestment, allInvestments, item => ({
-      "Category": item.category,
-      "Description": item.description || "",
-      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0
-    }));
-
-    // 7. Create Liability Records
-    const allLiabilities = [
-      ...(assets.properties || []).filter(p => p.isUnderLoan).map(p => ({ ...p, amount: p.outstandingBalance, category: "Mortgage" })),
-      ...(assets.vehicles || []).filter(v => v.isUnderLoan).map(v => ({ ...v, amount: v.outstandingBalance, category: "Car Loan" })),
-      ...(investments.fixedDeposits || []).filter(i => i.isUnderLoan).map(i => ({ ...i, amount: i.outstandingBalance, category: "Mortgage" })),
-      ...(liabilities.studyLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Study Loan" })),
-      ...(liabilities.personalLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Personal Loan" })),
-      ...(liabilities.renovationLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Renovation Loan" })),
-      ...(liabilities.otherLoans || []).map(l => ({ ...l, amount: l.isUnderLoan ? l.outstandingBalance : l.amount, category: "Other Loan" }))
-    ];
-
-    await createSubRecords(tableNetWorth, allLiabilities, item => {
-      const fieldData = {
-        "Type": "Liability",
-        "Category": item.category,
-        "Description": item.description || "",
-        "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0
-      };
       if (item.originalLoanAmount) fieldData["Original Loan Amount"] = parseFloat(String(item.originalLoanAmount).replace(/,/g, '')) || 0;
       if (item.month != null) fieldData["Month"] = getMonthName(item.month);
       if (item.year) fieldData["Year"] = String(item.year);
       return fieldData;
     });
 
-    // 8. Create Expense Records (with month/year period)
+    // 6. Create Monthly Snapshots
+    // Map the created record_ids back to the robust items.
+    const snapshotsToCreate = [];
+    combinedNetWorthItems.forEach((item, index) => {
+        if (!item.isDuplicateLiability && createdNetWorthRecords[index]) {
+            const outBal = parseFloat(String(item.outstandingBalance || '0').replace(/,/g, ''));
+            const mInc = parseFloat(String(item.monthlyIncome || '0').replace(/,/g, ''));
+            const mExp = parseFloat(String(item.monthlyExpenses || '0').replace(/,/g, ''));
+            const mRepay = parseFloat(String(item.monthlyInstallment || '0').replace(/,/g, ''));
+            
+            // If they have any snapshot-worthy metrics:
+            if (outBal > 0 || mInc > 0 || mExp > 0 || mRepay > 0) {
+                // Ensure Date logic matches user expectations. We use the month/year of the asset itself as the snapshot period.
+                const fallbackTime = new Date().getTime();
+                const snapYear = parseInt(item.year || new Date().getFullYear().toString());
+                const snapMonth = parseInt(item.month || new Date().getMonth().toString());
+                const snapshotDate = new Date(snapYear, snapMonth, 1).getTime() || fallbackTime;
+
+                snapshotsToCreate.push({
+                    linkId: createdNetWorthRecords[index].record_id,
+                    date: snapshotDate,
+                    currentValue: outBal,
+                    monthlyIncome: mInc,
+                    monthlyExpenses: mExp,
+                    monthlyRepayment: mRepay
+                });
+            }
+        }
+    });
+
+    const tableMonthlySnapshot = (process.env.LARK_TABLE_MONTHLY_SNAPSHOT || "").trim();
+    if (tableMonthlySnapshot && snapshotsToCreate.length > 0) {
+        await createSubRecords(tableMonthlySnapshot, snapshotsToCreate, snap => ({
+            "Link to Net Worth": [snap.linkId],
+            "Date": snap.date,
+            "Current Value": snap.currentValue,
+            "Monthly Income": snap.monthlyIncome,
+            "Monthly Expenses": snap.monthlyExpenses,
+            "Monthly Repayment": snap.monthlyRepayment
+        }));
+    }
+
+    // 7. Create Standard Expenses (Standalone ones)
     const allExpenses = [
-      ...(assets.properties || []).filter(p => p.isUnderLoan && p.monthlyInstallment).map(p => ({
-        amount: p.monthlyInstallment,
-        category: "Household",
-        type: "Home Loan Installment",
-        month: new Date().getMonth().toString(),
-        year: new Date().getFullYear().toString()
-      })),
-      ...(assets.vehicles || []).filter(v => v.isUnderLoan && v.monthlyInstallment).map(v => ({
-        amount: v.monthlyInstallment,
-        category: "Transportation",
-        type: "Car Loan Installment",
-        month: new Date().getMonth().toString(),
-        year: new Date().getFullYear().toString()
-      })),
-      ...(investments.fixedDeposits || []).filter(i => i.isUnderLoan && i.monthlyInstallment).map(i => ({
-        amount: i.monthlyInstallment,
-        category: "Other",
-        type: "Investment Property Installment",
-        month: new Date().getMonth().toString(),
-        year: new Date().getFullYear().toString()
-      })),
-      ...(liabilities.studyLoans || []).filter(l => l.isUnderLoan && l.monthlyInstallment).map(l => ({
-        amount: l.monthlyInstallment,
-        category: "Other",
-        type: "Study Loan Installment",
-        month: new Date().getMonth().toString(),
-        year: new Date().getFullYear().toString()
-      })),
-      ...(liabilities.personalLoans || []).filter(l => l.isUnderLoan && l.monthlyInstallment).map(l => ({
-        amount: l.monthlyInstallment,
-        category: "Personal",
-        type: "Personal Loan Installment",
-        month: new Date().getMonth().toString(),
-        year: new Date().getFullYear().toString()
-      })),
-      ...(liabilities.renovationLoans || []).filter(l => l.isUnderLoan && l.monthlyInstallment).map(l => ({
-        amount: l.monthlyInstallment,
-        category: "Household",
-        type: "Renovation Loan Installment",
-        month: new Date().getMonth().toString(),
-        year: new Date().getFullYear().toString()
-      })),
-      ...(liabilities.otherLoans || []).filter(l => l.isUnderLoan && l.monthlyInstallment).map(l => ({
-        amount: l.monthlyInstallment,
-        category: "Other",
-        type: "Other Loan Installment",
-        month: new Date().getMonth().toString(),
-        year: new Date().getFullYear().toString()
-      })),
       ...(expenses.household || []).map(e => ({ ...e, category: "Household" })),
       ...(expenses.transportation || []).map(e => ({ ...e, category: "Transportation" })),
       ...(expenses.dependants || []).map(e => ({ ...e, category: "Dependants" })),
