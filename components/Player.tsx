@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth, fetchClientProfile, updateClientInfo, updateSession } from '../services/larkService';
 import { getSession } from '../services/larkService';
 import { FinancialHealthData, ClientProfile, UserSession } from '../types';
-import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins, User, Edit2, X, Check, Save } from 'lucide-react';
+import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins, User, Edit2, X, Check, Save, ArrowBigUpDash } from 'lucide-react';
 import LevelUp from './LevelUp';
 
 const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
@@ -24,32 +24,6 @@ const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?
     <path d="M12 10l2-2l3 2l2-1" />
     <path d="M14 8v5l-3 4l-2 4" />
     <path d="M11 17l4 1l1 4" />
-  </svg>
-);
-
-const LevelUpIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 24 24" 
-    fill="currentColor"
-    className={className}
-  >
-    <path d="M5 20h14v-2H5v2zm7-18L5.33 8.67h4.34V16h4.66V8.67h4.34L12 2z" />
-  </svg>
-);
-
-// Alternative step up icon closer to the screenshot
-const StepUpIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
-  <svg 
-    width={size} 
-    height={size} 
-    viewBox="0 0 24 24" 
-    fill="currentColor"
-    className={className}
-  >
-    <path d="M18 7c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-4.3 2.1c-.3-.5-.8-.8-1.4-.8H9.6c-.6 0-1.1.3-1.4.8l-2.6 4.3v6.6c0 .6.5 1 1.1 1h1.5c.6 0 1.1-.4 1.1-1v-5.2l1.6-2.5v7.7c0 .6.5 1 1.1 1h1.5c.6 0 1.1-.4 1.1-1V14l3.1 3v4c0 .6.5 1 1.1 1h1.5c.6 0 1.1-.4 1.1-1v-5c0-.3-.1-.6-.3-.8l-3.3-3.2.7-3.4 1.9 1.9c.2.2.5.3.8.3h2.6c.6 0 1.1-.4 1.1-1v-1.5c0-.6-.5-1-1.1-1h-1.9l-2.6-2.2z" />
-    <path d="M2 22h4v-4h4v-4h4v-4h4v-4h4V2H2v20zm2-2V4h16v2h-4v4h-4v4H8v4H4z" fillOpacity="0.3" />
   </svg>
 );
 
@@ -389,7 +363,7 @@ const Player: React.FC = () => {
             activeTab === 'levelup' ? 'text-xin-blue' : 'text-slate-400 hover:text-slate-600'
           }`}
         >
-          <StepUpIcon size={20} className="mb-0.5" />
+          <ArrowBigUpDash size={18} />
           Level Up
           {activeTab === 'levelup' && (
             <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-xin-blue rounded-t-full" />

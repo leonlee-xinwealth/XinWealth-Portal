@@ -14,6 +14,7 @@ export default async function handler(req, res) {
   const tableAssets = (process.env.LARK_TABLE_ASSETS || "").trim();
   const tableLiabilities = (process.env.LARK_TABLE_LIABILITIES || "").trim();
   const tableExpenses = (process.env.LARK_TABLE_EXPENSES || "").trim();
+  const tableInvestments = (process.env.LARK_TABLE_INVESTMENT || "").trim();
 
   // 1. Authentication
   const authHeader = req.headers.authorization;
@@ -112,12 +113,22 @@ export default async function handler(req, res) {
       "Year": String(item.year || targetYear)
     }));
 
+    // Prepare Investments
+    const investmentRecords = (investments || []).map(item => ({
+      "Category": item.category,
+      "Description": item.description || "",
+      "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
+      "Month": getMonthName(item.month || targetMonth),
+      "Year": String(item.year || targetYear)
+    }));
+
     // Execute in parallel
     await Promise.all([
       createSubRecords(tableIncomes, incomeRecords),
       createSubRecords(tableExpenses, expenseRecords),
       createSubRecords(tableAssets, assetRecords),
-      createSubRecords(tableLiabilities, liabilityRecords)
+      createSubRecords(tableLiabilities, liabilityRecords),
+      createSubRecords(tableInvestments, investmentRecords)
     ]);
 
     return res.status(200).json({ success: true });
