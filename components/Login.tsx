@@ -4,9 +4,10 @@ import { ArrowRight, Lock, Mail, Loader2 } from 'lucide-react';
 
 interface LoginProps {
   onLoginSuccess: () => void;
+  onNavigateToRegister: () => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
+const Login: React.FC<LoginProps> = ({ onLoginSuccess, onNavigateToRegister }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -102,9 +103,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           </button>
         </form>
 
-        <div className="mt-8 text-center">
+        <div className="mt-8 text-center space-y-3">
             <p className="text-sm text-slate-400 font-light">
               Forgot your credentials? <a href="#" className="text-xin-gold font-bold hover:underline">Contact Advisor</a>
+            </p>
+            <p className="text-sm text-slate-400 font-light">
+              Don't have an account? <button type="button" onClick={onNavigateToRegister} className="text-xin-blue font-bold hover:underline">Register Here</button>
             </p>
         </div>
       </div>
