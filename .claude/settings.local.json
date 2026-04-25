@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(node supabase/scripts/csv-to-supabase.mjs dry-run)",
+      "Bash(node supabase/scripts/csv-to-supabase.mjs run)"
+    ]
+  }
+}
