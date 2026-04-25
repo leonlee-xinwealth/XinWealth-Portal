@@ -12,11 +12,11 @@ export default async function handler(req, res) {
     });
   }
 
-  const { data, error } = await supabaseAdmin.from('clients').select('count', { count: 'exact', head: true });
+  const { data: testRow, error: testError } = await supabaseAdmin.from('clients').select('*').limit(1).maybeSingle();
 
   res.status(200).json({
-    success: !error,
-    db_test: { data, error },
+    success: !testError,
+    db_test: { data: testRow, error: testError },
     env_check: {
       has_url: !!process.env.SUPABASE_URL,
       has_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
