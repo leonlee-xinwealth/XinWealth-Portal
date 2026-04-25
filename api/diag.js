@@ -14,14 +14,18 @@ export default async function handler(req, res) {
 
   const tablesToTest = ['clients', 'profiles', 'assets', 'networth', 'incomes'];
   const results = {};
-  
   for (const table of tablesToTest) {
     const { error } = await supabaseAdmin.from(table).select('id').limit(1);
     results[table] = error ? error.message : 'EXISTS';
   }
 
+  const profiles = await supabaseAdmin.from('profiles').select('*').limit(1).maybeSingle();
+  const assets = await supabaseAdmin.from('assets').select('*').limit(1).maybeSingle();
+
   res.status(200).json({
     success: true,
+    profiles: profiles.data,
+    assets: assets.data,
     table_check: results,
     env_check: {
       has_url: !!process.env.SUPABASE_URL,
