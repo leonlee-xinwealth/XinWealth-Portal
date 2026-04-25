@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './_lib/supabase';
+import { supabaseAdmin } from './_lib/supabase.js';
 import {
   networthRowToFrontend,
   monthlySnapshotRowToFrontend,
@@ -6,7 +6,7 @@ import {
   expenseRowToFrontend,
   investmentRowToFrontend,
   insuranceRowToFrontend
-} from './_lib/shape';
+} from './_lib/shape.js';
 
 export default async function handler(req, res) {
   const { name } = req.query;

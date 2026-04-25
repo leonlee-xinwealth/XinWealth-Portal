@@ -1,5 +1,5 @@
-import { supabaseAdmin } from './_lib/supabase';
-import { investmentRowToFrontend } from './_lib/shape';
+import { supabaseAdmin } from './_lib/supabase.js';
+import { investmentRowToFrontend } from './_lib/shape.js';
 
 export default async function handler(req, res) {
   const { name } = req.query;
