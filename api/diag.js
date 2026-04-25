@@ -12,11 +12,18 @@ export default async function handler(req, res) {
     });
   }
 
-  const { data: testRow, error: testError } = await supabaseAdmin.from('clients').select('*').limit(1).maybeSingle();
+  // Query for all tables in public schema
+  const { data: tables, error: tableError } = await supabaseAdmin.rpc('get_tables_info'); 
+  
+  // If RPC fails (likely), try a raw query to postgrest directly
+  const { data: tablesRaw, error: rawError } = await supabaseAdmin.from('pg_catalog.pg_tables').select('tablename').eq('schemaname', 'public');
 
   res.status(200).json({
-    success: !testError,
-    db_test: { data: testRow, error: testError },
+    success: false,
+    tables: tablesRaw || [],
+    error: rawError,
+    hint: 'Checking schema cache...',
+    db_test: { error: testError },
     env_check: {
       has_url: !!process.env.SUPABASE_URL,
       has_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
