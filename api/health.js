@@ -17,19 +17,19 @@ export default async function handler(req, res) {
 
   if (!supabaseAdmin) {
     return res.status(500).json({ 
-      error: 'Server Config Error: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables in Vercel.' 
+      error: 'Server Config Error: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.' 
     });
   }
 
   try {
-    // Get profile id - search by email or name in profiles table
-    // Since names are split, we'll try email first
+    // 1. Get profile id - search by email or split names
     const { data: profiles, error: profileError } = await supabaseAdmin
       .from('profiles')
       .select('id')
       .or(`email.eq.${name},given_name.ilike.%${name}%,family_name.ilike.%${name}%`);
 
     if (profileError || !profiles || profiles.length === 0) {
+      console.log(`No profile found for search term: ${name}`);
       return res.status(200).json({
         assets: [],
         liabilities: [],
@@ -43,10 +43,10 @@ export default async function handler(req, res) {
 
     const profileId = profiles[0].id;
 
-    // Fetch related data using the profile_id (assuming fk is profile_id in assets, incomes, etc.)
-    // Note: User's schema has 'profile_id' as the foreign key in 'assets'
+    // 2. Fetch all related data in parallel using the correct 'profile_id' FK
     const [
       { data: assets },
+      { data: liabilities },
       { data: incomes },
       { data: expenses },
       { data: investments },
@@ -54,6 +54,7 @@ export default async function handler(req, res) {
       { data: snapshots }
     ] = await Promise.all([
       supabaseAdmin.from('assets').select('*').eq('profile_id', profileId),
+      supabaseAdmin.from('liabilities').select('*').eq('profile_id', profileId),
       supabaseAdmin.from('incomes').select('*').eq('profile_id', profileId),
       supabaseAdmin.from('expenses').select('*').eq('profile_id', profileId),
       supabaseAdmin.from('investments').select('*').eq('profile_id', profileId),
@@ -61,15 +62,10 @@ export default async function handler(req, res) {
       supabaseAdmin.from('portfolio_snapshots').select('*').eq('profile_id', profileId)
     ]);
 
-    // Transform rows for frontend
-    // We filter assets into Asset and Liability based on 'kind' or 'value'
-    // Note: User's assets table has 'kind'.
-    const transformedAssets = (assets || []).filter(a => a.value >= 0).map(networthRowToFrontend);
-    const transformedLiabilities = (assets || []).filter(a => a.value < 0).map(networthRowToFrontend);
-
+    // 3. Transform and return
     return res.status(200).json({
-      assets: transformedAssets,
-      liabilities: transformedLiabilities,
+      assets: (assets || []).map(networthRowToFrontend),
+      liabilities: (liabilities || []).map(networthRowToFrontend),
       incomes: (incomes || []).map(incomeRowToFrontend),
       expenses: (expenses || []).map(expenseRowToFrontend),
       investments: (investments || []).map(investmentRowToFrontend),
