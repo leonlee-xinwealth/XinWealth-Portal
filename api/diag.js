@@ -19,18 +19,28 @@ export default async function handler(req, res) {
     results[table] = error ? error.message : 'EXISTS';
   }
 
-  const profiles = await supabaseAdmin.from('profiles').select('*').limit(1).maybeSingle();
-  const assets = await supabaseAdmin.from('assets').select('*').limit(1).maybeSingle();
+  const tables = ['incomes', 'expenses', 'investments', 'insurance_policies', 'portfolio_snapshots'];
+  const columnChecks = {};
+  
+  for (const table of tables) {
+    // Attempt to query one row to see columns
+    const { data, error } = await supabaseAdmin.from(table).select('*').limit(1).maybeSingle();
+    if (error) {
+       columnChecks[table] = { error: error.message };
+    } else {
+       columnChecks[table] = { 
+         columns: data ? Object.keys(data) : 'TABLE_EMPTY_OR_NO_COLUMNS_FETCHED'
+       };
+    }
+  }
 
   res.status(200).json({
     success: true,
-    profiles: profiles.data,
-    assets: assets.data,
+    columnChecks,
     table_check: results,
     env_check: {
       has_url: !!process.env.SUPABASE_URL,
-      has_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
-      url_start: process.env.SUPABASE_URL ? process.env.SUPABASE_URL.slice(0, 15) : 'none'
+      has_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY
     }
   });
 }
