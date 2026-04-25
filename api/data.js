@@ -5,42 +5,40 @@ export default async function handler(req, res) {
   const { name } = req.query;
 
   if (!name) {
-    return res.status(400).json({ error: 'User name/email is required' });
+    return res.status(400).json({ error: 'User email is required' });
+  }
+
+  if (!supabaseAdmin) {
+    return res.status(500).json({ error: 'Server not configured' });
   }
 
   try {
-    // Optional: if frontend sends token, we could verify it here.
-    // For now, we query the client by email or name using admin client
-    const { data: clients, error: clientError } = await supabaseAdmin
-      .from('clients')
-      .select('id, full_name, email')
-      .or(`email.eq.${name},full_name.eq.${name}`);
+    // Search for profile
+    const { data: profiles, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('email', name)
+      .maybeSingle();
 
-    if (clientError || !clients || clients.length === 0) {
-      return res.status(200).json({ records: [] });
+    if (profileError || !profiles) {
+      return res.status(200).json([]);
     }
 
-    const clientId = clients[0].id;
+    const profileId = profiles.id;
 
-    // Fetch investments for this client
-    const { data: investments, error: investError } = await supabaseAdmin
+    // Fetch investments
+    const { data: investments, error: invError } = await supabaseAdmin
       .from('investments')
       .select('*')
-      .eq('client_id', clientId)
-      .order('year', { ascending: true })
-      .order('month', { ascending: true });
+      .eq('profile_id', profileId)
+      .order('year', { ascending: false })
+      .order('month', { ascending: false });
 
-    if (investError) {
-      throw investError;
-    }
+    if (invError) throw invError;
 
-    const formattedRecords = investments.map(investmentRowToFrontend);
-
-    // Map to the shape that frontend expects (data.records)
-    return res.status(200).json({ records: formattedRecords });
-
+    return res.status(200).json((investments || []).map(investmentRowToFrontend));
   } catch (error) {
-    console.error("Data API Error:", error);
+    console.error('Data API Error:', error);
     return res.status(500).json({ error: error.message });
   }
 }

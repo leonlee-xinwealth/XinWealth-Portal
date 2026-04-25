@@ -22,67 +22,63 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Get client id
-    const { data: clients, error: clientError } = await supabaseAdmin
-      .from('clients')
+    // Get profile id - search by email or name in profiles table
+    // Since names are split, we'll try email first
+    const { data: profiles, error: profileError } = await supabaseAdmin
+      .from('profiles')
       .select('id')
-      .or(`email.eq.${name},full_name.eq.${name}`);
+      .or(`email.eq.${name},given_name.ilike.%${name}%,family_name.ilike.%${name}%`);
 
-    if (clientError || !clients || clients.length === 0) {
+    if (profileError || !profiles || profiles.length === 0) {
       return res.status(200).json({
         assets: [],
         liabilities: [],
         incomes: [],
         expenses: [],
         investments: [],
-        insurance: [],
-        monthlySnapshot: []
+        insurances: [],
+        snapshots: []
       });
     }
 
-    const clientId = clients[0].id;
+    const profileId = profiles[0].id;
 
-    // Fetch all tables concurrently
+    // Fetch related data using the profile_id (assuming fk is profile_id in assets, incomes, etc.)
+    // Note: User's schema has 'profile_id' as the foreign key in 'assets'
     const [
-      { data: networthData },
-      { data: monthlySnapshotData },
-      { data: incomesData },
-      { data: expensesData },
-      { data: investmentsData },
-      { data: insuranceData }
+      { data: assets },
+      { data: incomes },
+      { data: expenses },
+      { data: investments },
+      { data: insurances },
+      { data: snapshots }
     ] = await Promise.all([
-      supabaseAdmin.from('networth').select('*').eq('client_id', clientId).order('year', { ascending: false }).order('month', { ascending: false }),
-      supabaseAdmin.from('monthly_snapshots').select('*').eq('client_id', clientId).order('snapshot_date', { ascending: false }),
-      supabaseAdmin.from('incomes').select('*').eq('client_id', clientId).order('year', { ascending: false }).order('month', { ascending: false }),
-      supabaseAdmin.from('expenses').select('*').eq('client_id', clientId).order('year', { ascending: false }).order('month', { ascending: false }),
-      supabaseAdmin.from('investments').select('*').eq('client_id', clientId).order('year', { ascending: false }).order('month', { ascending: false }),
-      supabaseAdmin.from('insurance').select('*').eq('client_id', clientId)
+      supabaseAdmin.from('assets').select('*').eq('profile_id', profileId),
+      supabaseAdmin.from('incomes').select('*').eq('profile_id', profileId),
+      supabaseAdmin.from('expenses').select('*').eq('profile_id', profileId),
+      supabaseAdmin.from('investments').select('*').eq('profile_id', profileId),
+      supabaseAdmin.from('insurance_policies').select('*').eq('profile_id', profileId),
+      supabaseAdmin.from('portfolio_snapshots').select('*').eq('profile_id', profileId)
     ]);
 
-    const networth = (networthData || []).map(networthRowToFrontend);
-    
-    // Split networth into assets and liabilities based on 'Type'
-    const assets = networth.filter(item => item.fields['Type'] === 'Asset');
-    const liabilities = networth.filter(item => item.fields['Type'] === 'Liability');
-
-    const monthlySnapshot = (monthlySnapshotData || []).map(monthlySnapshotRowToFrontend);
-    const incomes = (incomesData || []).map(incomeRowToFrontend);
-    const expenses = (expensesData || []).map(expenseRowToFrontend);
-    const investments = (investmentsData || []).map(investmentRowToFrontend);
-    const insurance = (insuranceData || []).map(insuranceRowToFrontend);
+    // Transform rows for frontend
+    // We filter assets into Asset and Liability based on 'kind' or 'value'
+    // Note: User's assets table has 'kind'.
+    const transformedAssets = (assets || []).filter(a => a.value >= 0).map(networthRowToFrontend);
+    const transformedLiabilities = (assets || []).filter(a => a.value < 0).map(networthRowToFrontend);
 
     return res.status(200).json({
-        assets,
-        liabilities,
-        incomes,
-        expenses,
-        investments,
-        insurance,
-        monthlySnapshot
+      assets: transformedAssets,
+      liabilities: transformedLiabilities,
+      incomes: (incomes || []).map(incomeRowToFrontend),
+      expenses: (expenses || []).map(expenseRowToFrontend),
+      investments: (investments || []).map(investmentRowToFrontend),
+      insurances: (insurances || []).map(insuranceRowToFrontend),
+      snapshots: (snapshots || []).map(monthlySnapshotRowToFrontend)
     });
 
   } catch (error) {
-    console.error("Health Data API Error:", error);
+    console.error('Health API Error:', error);
     return res.status(500).json({ error: error.message });
   }
 }

@@ -34,12 +34,15 @@ const spread = (custom) =>
 
 export const clientRowToFrontend = (row) => {
   if (!row) return null;
+  // Handle split names in profiles
+  const fullName = row.full_name || `${row.given_name || ''} ${row.family_name || ''}`.trim() || row.email;
+  
   return {
     id: row.id,
     record_id: row.id,
     fields: {
-      'Full Name': row.full_name || '',
-      'Client': row.full_name || '',
+      'Full Name': fullName,
+      'Client': fullName,
       'Family Name': row.family_name || '',
       'Given Name': row.given_name || '',
       'Salutation': row.salutation || '',
@@ -60,16 +63,16 @@ export const clientRowToFrontend = (row) => {
       'Employment': row.employment_status || '',
       'Employment Status': row.employment_status || '',
       'Tax Status': row.tax_status || '',
-      'Advisor': row.advisor || '',
+      'Advisor': row.advisor || row.advisor_id || '',
       'EPF Account Number': row.epf_account_number || '',
       'PPA Account Number': row.ppa_account_number || '',
       'Correspondence Address': row.correspondence_address || '',
       'Correspondence City': row.correspondence_city || '',
       'Correspondence State': row.correspondence_state || '',
       'Correspondence Postal Code': row.correspondence_postal_code || '',
-      'PDPA Accepted': row.pdpa_accepted ? 'Yes' : 'No',
-      'Submission Date': toMs(row.submission_date),
-      ...spread(row.custom_fields)
+      'PDPA Accepted': (row.pdpa_accepted || row.pdpa_accepted_at) ? 'Yes' : 'No',
+      'Submission Date': toMs(row.submission_date || row.created_at),
+      ...spread(row.custom_fields || row.metadata)
     }
   };
 };
@@ -78,12 +81,12 @@ export const incomeRowToFrontend = (row) => ({
   id: row.id,
   record_id: row.id,
   fields: {
-    'Category': row.category || '',
-    'Description': row.description || '',
-    'Amount': Number(row.amount) || 0,
+    'Category': row.category || row.kind || '',
+    'Description': row.description || row.name || '',
+    'Amount': Number(row.amount || row.value) || 0,
     'Month': monthName(row.month),
     'Year': row.year != null ? String(row.year) : '',
-    ...spread(row.custom_fields)
+    ...spread(row.custom_fields || row.metadata)
   }
 });
 
@@ -91,13 +94,13 @@ export const expenseRowToFrontend = (row) => ({
   id: row.id,
   record_id: row.id,
   fields: {
-    'Category': row.category || '',
+    'Category': row.category || row.kind || '',
     'Type': row.type || '',
-    'Description': row.description || '',
-    'Amount': Number(row.amount) || 0,
+    'Description': row.description || row.name || '',
+    'Amount': Number(row.amount || row.value) || 0,
     'Month': monthName(row.month),
     'Year': row.year != null ? String(row.year) : '',
-    ...spread(row.custom_fields)
+    ...spread(row.custom_fields || row.metadata)
   }
 });
 
@@ -105,10 +108,10 @@ export const networthRowToFrontend = (row) => ({
   id: row.id,
   record_id: row.id,
   fields: {
-    'Type': row.type || '',
-    'Category': row.category || '',
-    'Description': row.description || '',
-    'Value': Number(row.value) || 0,
+    'Type': row.type || (row.value < 0 ? 'Liability' : 'Asset'),
+    'Category': row.category || row.kind || '',
+    'Description': row.description || row.name || '',
+    'Value': Math.abs(Number(row.value)) || 0,
     'Original Purchase Price/Principal':
       row.original_purchase_price != null ? Number(row.original_purchase_price) : null,
     'Original Loan Amount':
@@ -116,7 +119,7 @@ export const networthRowToFrontend = (row) => ({
     'Linked Asset': row.linked_asset_id ? [{ id: row.linked_asset_id }] : [],
     'Month': monthName(row.month),
     'Year': row.year != null ? String(row.year) : '',
-    ...spread(row.custom_fields)
+    ...spread(row.custom_fields || row.metadata)
   }
 });
 

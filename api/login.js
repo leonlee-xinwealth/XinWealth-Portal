@@ -26,7 +26,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. Sign in with Supabase Auth
+    // 1. Sign in with Supabase Auth (The standard way)
     const { data: authData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
       email,
       password,
@@ -40,90 +40,92 @@ export default async function handler(req, res) {
     const user = authData.user;
     const session = authData.session;
 
-    // 2. Fetch client record
-    let { data: clientData, error: clientError } = await supabaseAdmin
-      .from('clients')
+    // 2. Fetch profile record from 'profiles' table
+    let { data: profileData, error: profileError } = await supabaseAdmin
+      .from('profiles')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('id', user.id)
       .maybeSingle();
 
-    if (clientError) {
-      console.error("Client Fetch Error (user_id):", clientError);
-      return res.status(500).json({ 
-        error: 'Error fetching client profile',
-        details: clientError.message
-      });
+    if (profileError) {
+      console.error("Profile Fetch Error (id):", profileError);
+      return res.status(500).json({ error: 'Error fetching profile from database', details: profileError.message });
     }
 
-    // Fallback: If not found by user_id, try finding by email and auto-link
-    if (!clientData) {
-      console.log(`Client not found for user_id ${user.id}, attempting email fallback for ${email}`);
+    // Fallback: If not found by id, try finding by email (in case auth user was created separately)
+    if (!profileData) {
+      console.log(`Profile not found for id ${user.id}, attempting email fallback for ${email}`);
       const { data: emailData, error: emailError } = await supabaseAdmin
-        .from('clients')
+        .from('profiles')
         .select('*')
         .eq('email', email)
         .maybeSingle();
 
       if (emailError) {
-        console.error("Client Fetch Error (email):", emailError);
-        return res.status(500).json({ 
-          error: 'Error fetching client profile by email',
-          details: emailError.message
-        });
+        console.error("Profile Fetch Error (email):", emailError);
       }
 
       if (emailData) {
-        console.log(`Found client by email, linking to user_id ${user.id}`);
-        const { error: linkError } = await supabaseAdmin
-          .from('clients')
-          .update({ user_id: user.id })
-          .eq('id', emailData.id);
-
-        if (linkError) {
-          console.error("Auto-link Error:", linkError);
-        }
-        clientData = emailData;
+        profileData = emailData;
       } else {
-        return res.status(404).json({ error: 'Client profile not found. Please ensure your email is registered.' });
+        // Create a minimal profile if one doesn't exist yet (Auto-onboarding)
+        const { data: newProfile, error: createError } = await supabaseAdmin
+          .from('profiles')
+          .insert({
+            id: user.id,
+            email: user.email,
+            given_name: user.email.split('@')[0],
+            role: 'client'
+          })
+          .select()
+          .single();
+        
+        if (createError) {
+          console.error("Auto-create Profile Error:", createError);
+          return res.status(404).json({ error: 'Profile not found and could not be auto-created.' });
+        }
+        profileData = newProfile;
       }
     }
 
     // 3. Return session shape (matching frontend expectations)
-    let currentAge = clientData.age || 30;
-    if (!clientData.age && clientData.date_of_birth) {
-      const birthYear = new Date(clientData.date_of_birth).getFullYear();
-      if (!isNaN(birthYear)) {
-        currentAge = new Date().getFullYear() - birthYear;
+    // Map family_name + given_name to name
+    const fullName = `${profileData.given_name || ''} ${profileData.family_name || ''}`.trim() || profileData.email;
+
+    // Calculate age from date_of_birth
+    let currentAge = profileData.age || 30;
+    if (profileData.date_of_birth) {
+      const birthDate = new Date(profileData.date_of_birth);
+      if (!isNaN(birthDate.getTime())) {
+        currentAge = new Date().getFullYear() - birthDate.getFullYear();
       }
     }
 
-    // Include custom_fields in the response if any mapping is needed, 
-    // though the frontend relies on the exact keys returned here.
     return res.status(200).json({
       success: true,
-      token: session.access_token, // JWT token from Supabase Auth
+      token: session.access_token,
       refresh_token: session.refresh_token,
-      name: clientData.full_name,
-      email: clientData.email,
-      recordId: clientData.id,
+      name: fullName,
+      email: profileData.email,
+      recordId: profileData.id,
       currentAge,
-      retirementAge: clientData.retirement_age || 55,
-      familyName: clientData.family_name || "",
-      givenName: clientData.given_name || "",
-      advisor: clientData.advisor || "",
-      occupation: clientData.occupation || "",
-      dob: clientData.date_of_birth || "",
-      nric: clientData.nric || "",
-      gender: clientData.gender || "",
-      maritalStatus: clientData.marital_status || "",
-      nationality: clientData.nationality || "",
-      residency: clientData.residency || "",
-      epfAccountNumber: clientData.epf_account_number || "",
-      ppaAccountNumber: clientData.ppa_account_number || "",
-      correspondenceAddress: clientData.correspondence_address || "",
-      correspondencePostalCode: clientData.correspondence_postal_code || "",
-      correspondenceCity: clientData.correspondence_city || "",
-      correspondenceState: clientData.correspondence_state || ""
+      retirementAge: profileData.retirement_age || 55,
+      familyName: profileData.family_name || "",
+      givenName: profileData.given_name || "",
+      advisor: profileData.advisor_id || "", // Note: in profiles it is advisor_id
+      occupation: profileData.occupation || "",
+      dob: profileData.date_of_birth || "",
+      nric: profileData.nric || "",
+      gender: profileData.gender || "",
+      maritalStatus: profileData.marital_status || "",
+      nationality: profileData.nationality || "",
+      residency: profileData.residency || "",
+      epfAccountNumber: profileData.epf_account_number || "",
+      ppaAccountNumber: profileData.ppa_account_number || "",
+      correspondenceAddress: profileData.correspondence_address || "",
+      correspondencePostalCode: profileData.correspondence_postal_code || "",
+      correspondenceCity: profileData.correspondence_city || "",
+      correspondenceState: profileData.correspondence_state || ""
     });
 
   } catch (error) {
