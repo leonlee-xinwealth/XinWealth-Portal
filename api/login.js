@@ -49,7 +49,10 @@ export default async function handler(req, res) {
 
     if (clientError) {
       console.error("Client Fetch Error (user_id):", clientError);
-      return res.status(500).json({ error: 'Error fetching client profile' });
+      return res.status(500).json({ 
+        error: 'Error fetching client profile',
+        details: clientError.message
+      });
     }
 
     // Fallback: If not found by user_id, try finding by email and auto-link
@@ -63,7 +66,10 @@ export default async function handler(req, res) {
 
       if (emailError) {
         console.error("Client Fetch Error (email):", emailError);
-        return res.status(500).json({ error: 'Error fetching client profile by email' });
+        return res.status(500).json({ 
+          error: 'Error fetching client profile by email',
+          details: emailError.message
+        });
       }
 
       if (emailData) {
