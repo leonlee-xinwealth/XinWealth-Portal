@@ -6,7 +6,6 @@ import {
   ShieldCheck, 
   Activity, 
   LogOut, 
-  Menu, 
   X, 
   Calculator,
   Target,

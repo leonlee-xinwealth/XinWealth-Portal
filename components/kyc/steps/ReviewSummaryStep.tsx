@@ -1,5 +1,5 @@
 import React from 'react';
-import { KYCData, ExpenseItem, FinancialItem } from '../../types';
+import { KYCData, ExpenseItem, FinancialItem } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { User, Wallet, Home, Umbrella, Receipt, TrendingUp } from 'lucide-react';
 
@@ -328,7 +328,7 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                             {formData.assets?.epfFleksibel && <ItemRow label={t('assets.epf.account3')} value={formatCurrency(formData.assets.epfFleksibel)} />}
                             
                             {['properties', 'vehicles', 'otherAssets'].map(key => 
-                                formData.assets[key]?.map((item: any) => (
+                                (formData.assets as any)[key]?.map((item: any) => (
                                     <ItemRow key={item.id} label={item.description} value={formatCurrency(item.amount)} />
                                 ))
                             )}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { KYCData } from '../../types';
+import { KYCData } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { DebouncedTextInput } from '../FormInputs';
 

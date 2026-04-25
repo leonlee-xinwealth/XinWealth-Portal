@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KYCData, FinancialItem, KYCInvestmentsData } from '../../types';
+import { KYCData, FinancialItem, KYCInvestmentsData } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Trash2, ChevronDown, ChevronUp, PlusCircle, TrendingUp, Briefcase, DollarSign, Wallet, LineChart, Building2, FolderPlus, Home } from 'lucide-react';
 import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
@@ -186,7 +186,7 @@ const InvestmentsStep: React.FC<InvestmentsStepProps> = ({ formData, updateData,
                 {/* Body */}
                 {isOpen && (
                     <div className="bg-slate-50 p-6 space-y-6">
-                        {items.map((item: FinancialItem, index: number) => (
+                        {items.map((item: FinancialItem) => (
                             <div key={item.id} className="relative bg-white p-6 rounded-md border border-gray-200 shadow-sm">
                                 <div className="flex justify-end mb-4 border-b border-gray-100 pb-3">
                                     <button 

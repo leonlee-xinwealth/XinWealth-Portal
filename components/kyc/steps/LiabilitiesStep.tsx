@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { KYCData, FinancialItem, KYCLiabilitiesData } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Home, Car, GraduationCap, Percent, HardHat, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
-import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
+import { GraduationCap, Percent, HardHat, FolderPlus, Trash2, ChevronDown, ChevronUp, PlusCircle } from 'lucide-react';
+import { DebouncedNumberInput } from '../FormInputs';
 
 interface LiabilitiesStepProps {
     formData: KYCData;
@@ -11,8 +11,7 @@ interface LiabilitiesStepProps {
     onPrev: () => void;
 }
 
-const currentMonth = new Date().getMonth().toString();
-const currentYear = new Date().getFullYear().toString();
+
 const MONTHS = [
     { value: '0', en: 'January', zh: '1月' },
     { value: '1', en: 'February', zh: '2月' },

@@ -45,11 +45,11 @@ export default async function handler(req, res) {
       { data: investmentsData },
       { data: insuranceData }
     ] = await Promise.all([
-      supabaseAdmin.from('networth').select('*').eq('client_id', clientId),
-      supabaseAdmin.from('monthly_snapshots').select('*').eq('client_id', clientId),
-      supabaseAdmin.from('incomes').select('*').eq('client_id', clientId),
-      supabaseAdmin.from('expenses').select('*').eq('client_id', clientId),
-      supabaseAdmin.from('investments').select('*').eq('client_id', clientId),
+      supabaseAdmin.from('networth').select('*').eq('client_id', clientId).order('year', { ascending: false }).order('month', { ascending: false }),
+      supabaseAdmin.from('monthly_snapshots').select('*').eq('client_id', clientId).order('snapshot_date', { ascending: false }),
+      supabaseAdmin.from('incomes').select('*').eq('client_id', clientId).order('year', { ascending: false }).order('month', { ascending: false }),
+      supabaseAdmin.from('expenses').select('*').eq('client_id', clientId).order('year', { ascending: false }).order('month', { ascending: false }),
+      supabaseAdmin.from('investments').select('*').eq('client_id', clientId).order('year', { ascending: false }).order('month', { ascending: false }),
       supabaseAdmin.from('insurance').select('*').eq('client_id', clientId)
     ]);
 

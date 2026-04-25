@@ -9,8 +9,8 @@ interface PDPAStepProps {
     onClose: () => void;
 }
 
-const PDPAStep: React.FC<PDPAStepProps> = ({ pdpaAccepted, updateData, onNext, onClose }) => {
-    const { t, language } = useLanguage();
+const PDPAStep: React.FC<PDPAStepProps> = ({ updateData, onNext, onClose }) => {
+    const { language } = useLanguage();
     const isZh = language === 'zh';
     
     const handleAccept = () => {

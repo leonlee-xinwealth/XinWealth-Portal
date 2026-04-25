@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchRawHealthData, getLatestRecords, getSession, submitLevelUp } from '../services/apiService';
+import { fetchRawHealthData, getLatestRecords, getSession } from '../services/apiService';
 import { 
-  Loader2, AlertCircle, Edit2, Check, ArrowRight, Save, Plus, Trash2, 
-  HelpCircle, Wallet, Receipt, Home, Car, Baby, Package, FolderPlus, 
-  Info, User, ChevronDown, ChevronUp, TrendingUp, Umbrella, Briefcase,
-  Building2, PiggyBank, CreditCard, ArrowBigUpDash
+  Loader2, AlertCircle, Check, Save, Plus, Trash2, 
+  Wallet, Receipt,
+  TrendingUp, Umbrella,
+  Building2, ArrowBigUpDash
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { DebouncedNumberInput, DebouncedTextInput } from './kyc/FormInputs';
@@ -128,7 +128,7 @@ const LevelUp: React.FC = () => {
       return String(rMonth) === lastMonthName && String(rYear) === lastYearStr;
     };
 
-    const mapRecord = (r: any, type: string) => ({
+    const mapRecord = (r: any) => ({
       id: r.id || Math.random().toString(),
       category: r.fields.Category || r.fields.Type || 'Other',
       description: r.fields.Description || r.fields.Type || '',
@@ -138,16 +138,16 @@ const LevelUp: React.FC = () => {
       monthlyInstallment: r.fields["Monthly Installment"] || '0'
     });
 
-    const lastIncomes = (rawHealthData.incomes || []).filter(isLastMonth).map((r: any) => mapRecord(r, 'inflow'));
-    const lastExpenses = (rawHealthData.expenses || []).filter(isLastMonth).map((r: any) => mapRecord(r, 'outflow'));
+    const lastIncomes = (rawHealthData.incomes || []).filter(isLastMonth).map((r: any) => mapRecord(r));
+    const lastExpenses = (rawHealthData.expenses || []).filter(isLastMonth).map((r: any) => mapRecord(r));
     
     // For Assets and Investments, we usually want the most recent MARKET VALUE, not necessarily just "last month" 
     // but the request says "capture last month's data", so we follow that if available, otherwise latest.
     const getItems = (records: any[]) => {
       const match = records.filter(isLastMonth);
-      if (match.length > 0) return match.map(r => mapRecord(r, ''));
+      if (match.length > 0) return match.map(r => mapRecord(r));
       // Fallback to latest available
-      return getLatestRecords(records || []).map(r => mapRecord(r, ''));
+      return getLatestRecords(records || []).map(r => mapRecord(r));
     };
 
     setIncomes(lastIncomes);

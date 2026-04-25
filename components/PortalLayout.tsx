@@ -3,7 +3,7 @@ import Sidebar from './Sidebar';
 import Login from './Login';
 import Register from './Register';
 import { ViewState } from '../types';
-import { getSession } from '../services/apiService';
+import { getSession, clearSession } from '../services/apiService';
 import { Menu, Loader2 } from 'lucide-react';
 
 const Investment = lazy(() => import('./Investment'));

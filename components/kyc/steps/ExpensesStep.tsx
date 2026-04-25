@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KYCData, ExpenseItem, KYCExpensesData } from '../../types';
+import { KYCData, ExpenseItem, KYCExpensesData } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Home, Car, Baby, Trash2, ChevronDown, ChevronUp, PlusCircle, Receipt, Info, User, Package, FolderPlus } from 'lucide-react';
 import { DebouncedTextInput, DebouncedNumberInput } from '../FormInputs';
@@ -10,6 +10,9 @@ interface ExpensesStepProps {
     onNext: () => void;
     onPrev: () => void;
 }
+
+const currentMonth = new Date().getMonth().toString();
+const currentYear = new Date().getFullYear().toString();
 
 const HOUSEHOLD_OPTIONS = [
     { value: 'All - Household', labelEn: 'All - Household', labelZh: '全部 - 家庭' },
@@ -169,7 +172,7 @@ const ExpensesStep: React.FC<ExpensesStepProps> = ({ formData, updateData, onNex
                             <div className="col-span-12 md:col-span-6 text-sm font-semibold text-gray-700">{t('common.amount')}</div>
                         </div>
 
-                        {items.map((item, index) => (
+                        {items.map((item) => (
                             <div key={item.id} className="relative bg-white p-4 rounded-md border border-gray-200 shadow-sm space-y-3">
                                 <div className="flex flex-col md:flex-row md:items-start gap-4">
                                     {/* Type Dropdown */}

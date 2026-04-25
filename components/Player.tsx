@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth, fetchClientProfile, updateClientInfo, updateSession } from '../services/apiService';
 import { getSession } from '../services/apiService';
 import { FinancialHealthData, ClientProfile, UserSession } from '../types';
-import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins, User, Edit2, X, Check, Save, ArrowBigUpDash } from 'lucide-react';
+import { Loader2, AlertCircle, Gamepad2, Shield, Heart, Brain, Sparkles, Sword, Coins, User, Edit2, X, Check, Save, ArrowBigUpDash } from 'lucide-react';
 import LevelUp from './LevelUp';
 
 const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
@@ -112,7 +112,7 @@ const Player: React.FC = () => {
       annualIncome 
     } = raw;
     
-    const emergencyTarget = monthlyExpenses * 3;
+    // const emergencyTarget = monthlyExpenses * 3;
     const debtServiceRatio = monthlyNetIncome > 0 ? totalMonthlyDebtRepayment / monthlyNetIncome : 0;
     const basicLiquidityRatio = monthlyExpenses > 0 ? cashAndFD / monthlyExpenses : 0;
     
