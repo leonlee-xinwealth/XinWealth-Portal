@@ -13,6 +13,12 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  if (!supabaseAdmin) {
+    return res.status(500).json({ 
+      error: 'Server Config Error: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables in Vercel.' 
+    });
+  }
+
   const { email, password } = req.body;
 
   if (!email || !password) {

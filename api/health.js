@@ -15,6 +15,12 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'User name/email is required' });
   }
 
+  if (!supabaseAdmin) {
+    return res.status(500).json({ 
+      error: 'Server Config Error: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables in Vercel.' 
+    });
+  }
+
   try {
     // Get client id
     const { data: clients, error: clientError } = await supabaseAdmin
