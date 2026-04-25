@@ -170,6 +170,23 @@ export default async function handler(req, res) {
     if (!email) return res.status(400).json({ error: 'Email is required' });
     if (!basic.pdpaAccepted) return res.status(400).json({ error: 'PDPA acceptance is required' });
 
+    // Hard-block duplicate onboarding. /kyc is for first-time entry only;
+    // anyone whose email already has a profile must contact their advisor.
+    const { data: existingProfile, error: profileLookupErr } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+    if (profileLookupErr) {
+      throw new Error(`Failed to check existing profile: ${profileLookupErr.message}`);
+    }
+    if (existingProfile) {
+      return res.status(409).json({
+        error: 'This email has already been registered. Please contact your financial advisor to update your information.',
+        code: 'DUPLICATE_EMAIL'
+      });
+    }
+
     const periodMonth = periodMonthFromKyc(basic);
 
     // 1. Find or create auth user
