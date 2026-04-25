@@ -41,15 +41,45 @@ export default async function handler(req, res) {
     const session = authData.session;
 
     // 2. Fetch client record
-    const { data: clientData, error: clientError } = await supabaseAdmin
+    let { data: clientData, error: clientError } = await supabaseAdmin
       .from('clients')
       .select('*')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (clientError || !clientData) {
-      console.error("Client Fetch Error:", clientError);
-      return res.status(404).json({ error: 'Client profile not found' });
+    if (clientError) {
+      console.error("Client Fetch Error (user_id):", clientError);
+      return res.status(500).json({ error: 'Error fetching client profile' });
+    }
+
+    // Fallback: If not found by user_id, try finding by email and auto-link
+    if (!clientData) {
+      console.log(`Client not found for user_id ${user.id}, attempting email fallback for ${email}`);
+      const { data: emailData, error: emailError } = await supabaseAdmin
+        .from('clients')
+        .select('*')
+        .eq('email', email)
+        .maybeSingle();
+
+      if (emailError) {
+        console.error("Client Fetch Error (email):", emailError);
+        return res.status(500).json({ error: 'Error fetching client profile by email' });
+      }
+
+      if (emailData) {
+        console.log(`Found client by email, linking to user_id ${user.id}`);
+        const { error: linkError } = await supabaseAdmin
+          .from('clients')
+          .update({ user_id: user.id })
+          .eq('id', emailData.id);
+
+        if (linkError) {
+          console.error("Auto-link Error:", linkError);
+        }
+        clientData = emailData;
+      } else {
+        return res.status(404).json({ error: 'Client profile not found. Please ensure your email is registered.' });
+      }
     }
 
     // 3. Return session shape (matching frontend expectations)
