@@ -1,7 +1,6 @@
 import React, { useState, Suspense, lazy } from 'react';
 import Sidebar from './Sidebar';
 import Login from './Login';
-import Register from './Register';
 import { ViewState } from '../types';
 import { getSession, clearSession } from '../services/apiService';
 import { Menu, Loader2 } from 'lucide-react';
@@ -18,7 +17,6 @@ const Retirement = lazy(() => import('./Retirement'));
 
 const PortalLayout: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [showRegister, setShowRegister] = useState(false);
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.PLAYER);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
@@ -58,10 +56,7 @@ const PortalLayout: React.FC = () => {
   };
 
   if (!isAuthenticated) {
-    if (showRegister) {
-      return <Register onNavigateToLogin={() => setShowRegister(false)} />;
-    }
-    return <Login onLoginSuccess={handleLoginSuccess} onNavigateToRegister={() => setShowRegister(true)} />;
+    return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
   const session = getSession();

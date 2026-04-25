@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { KYCData } from '../../../types';
 import { useLanguage } from '../../../context/LanguageContext';
 import { DebouncedTextInput } from '../FormInputs';
+import { checkEmailAvailable } from '../../../services/apiService';
 
 interface BasicInfoStepProps {
     formData: KYCData;
@@ -13,6 +14,42 @@ interface BasicInfoStepProps {
 const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onNext, onPrev }) => {
     const { t, language } = useLanguage();
     const isZh = language === 'zh';
+    const [emailError, setEmailError] = useState<string | null>(null);
+    const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+
+    const isValidEmail = (val: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+
+    const handleContinue = async () => {
+        const email = (formData.email || '').trim();
+        setEmailError(null);
+
+        if (!email) {
+            setEmailError(isZh ? '请输入邮箱地址。' : 'Please enter your email address.');
+            return;
+        }
+        if (!isValidEmail(email)) {
+            setEmailError(isZh ? '邮箱格式不正确。' : 'That email format looks incorrect.');
+            return;
+        }
+
+        setIsCheckingEmail(true);
+        try {
+            const result = await checkEmailAvailable(email);
+            if (!result.available) {
+                setEmailError(
+                    isZh
+                        ? '此邮箱已经登记过。如需更新资料，请联系您的理财顾问。'
+                        : 'This email has already been registered. Please contact your financial advisor to update your information.'
+                );
+                return;
+            }
+            onNext();
+        } catch (err: any) {
+            setEmailError(err.message || (isZh ? '邮箱检查失败，请稍后再试。' : 'Email check failed. Please try again.'));
+        } finally {
+            setIsCheckingEmail(false);
+        }
+    };
 
     // Helper to render reusable toggle button groups
     const renderToggleGroup = (
@@ -109,13 +146,19 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
 
                     <div>
                         <label className={labelClasses}>{t('basic.email')} {requiredSpan}</label>
-                        <DebouncedTextInput 
-                            type="email" 
+                        <DebouncedTextInput
+                            type="email"
                             className={inputClasses}
                             value={formData.email}
-                            onChange={(val) => updateData({ email: val })}
+                            onChange={(val) => { updateData({ email: val }); setEmailError(null); }}
                             placeholder="e.g. client@example.com"
                         />
+                        {emailError && (
+                            <p className="mt-2 text-sm text-red-600 font-medium flex items-start gap-1">
+                                <span className="shrink-0">⚠️</span>
+                                <span>{emailError}</span>
+                            </p>
+                        )}
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -232,11 +275,14 @@ const BasicInfoStep: React.FC<BasicInfoStepProps> = ({ formData, updateData, onN
                     >
                         <span>&lt;</span> {t('basic.back')}
                     </button>
-                    <button 
-                        onClick={onNext} 
-                        className="px-8 py-2.5 bg-gradient-to-r from-xin-blue to-xin-blueLight text-white font-medium rounded-md hover:from-xin-dark hover:to-xin-blue flex items-center gap-2 transition-colors shadow-sm"
+                    <button
+                        onClick={handleContinue}
+                        disabled={isCheckingEmail}
+                        className="px-8 py-2.5 bg-gradient-to-r from-xin-blue to-xin-blueLight text-white font-medium rounded-md hover:from-xin-dark hover:to-xin-blue flex items-center gap-2 transition-colors shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
-                        {t('basic.continue')} <span>&gt;</span>
+                        {isCheckingEmail
+                            ? (isZh ? '检查中…' : 'Checking…')
+                            : <>{t('basic.continue')} <span>&gt;</span></>}
                     </button>
                 </div>
             </div>

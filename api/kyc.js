@@ -1,224 +1,436 @@
 import { supabaseAdmin } from './_lib/supabase.js';
 
+// =============================================================
+// Public KYC submission endpoint.
+// No auth required: anyone with the URL can submit.
+// Creates (or reuses) an auth user + profile, writes child rows
+// into incomes / expenses / assets / liabilities / investments,
+// and stores the raw payload in kyc_submissions for audit.
+// Does NOT send a recovery email — onboarding is advisor-driven.
+// =============================================================
+
+const MARITAL_STATUSES   = ['single', 'married', 'divorced', 'widowed'];
+const EMPLOYMENT_STATUSES = ['employed', 'self_employed', 'unemployed', 'retired', 'student'];
+const TAX_STATUSES       = ['resident', 'non_resident'];
+
+const INCOME_TYPE_MAP = {
+  salary:             'salary',
+  bonus:              'bonus',
+  directorFee:        'director_fee',
+  commission:         'commission',
+  dividendCompany:    'dividend_company',
+  dividendInvestment: 'dividend_investment',
+  rentalIncome:       'rental'
+};
+
+const EXPENSE_CATEGORY_MAP = {
+  household:      'household',
+  transportation: 'transportation',
+  dependants:     'dependants',
+  personal:       'personal',
+  miscellaneous:  'miscellaneous',
+  otherExpenses:  'other'
+};
+
+const SIMPLE_ASSET_FIELDS = [
+  ['savingsAccount',   'savings',           'Savings/Current Account'],
+  ['fixedDeposit',     'fixed_deposit',     'Fixed Deposit'],
+  ['moneyMarketFund',  'money_market_fund', 'Money Market Fund'],
+  ['epfPersaraan',     'epf_account_1',     'EPF Account 1 (Akaun Persaraan)'],
+  ['epfSejahtera',     'epf_account_2',     'EPF Account 2 (Akaun Sejahtera)'],
+  ['epfFleksibel',     'epf_account_3',     'EPF Account 3 (Akaun Fleksibel)']
+];
+
+const ASSET_LIST_TYPES = [
+  // [kycKey, asset_kind, derived_loan_kind | null]
+  ['properties',  'property', 'mortgage'],
+  ['vehicles',    'vehicle',  'car_loan'],
+  ['otherAssets', 'other',    null]
+];
+
+const LIABILITY_LIST_TYPES = [
+  ['studyLoans',      'study_loan'],
+  ['personalLoans',   'personal_loan'],
+  ['renovationLoans', 'renovation_loan'],
+  ['otherLoans',      'other']
+];
+
+const INVESTMENT_CLASS_MAP = {
+  etf:              'etf',
+  stocks:           'stock',
+  bonds:            'bond',
+  unitTrusts:       'unit_trust',
+  fixedDeposits:    'fixed_deposit',
+  forex:            'forex',
+  moneyMarket:      'money_market',
+  otherInvestments: 'other'
+};
+
+// ---------- helpers ----------
+
+const parseAmount = (val) => {
+  if (val == null || val === '') return 0;
+  if (typeof val === 'number') return val;
+  const cleaned = String(val).replace(/RM/gi, '').replace(/,/g, '').trim();
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const parseRate = (val) => {
+  if (val == null || val === '') return null;
+  const n = parseFloat(String(val).replace(/%/g, '').trim());
+  return Number.isFinite(n) ? n : null;
+};
+
+const normalizeEnum = (value, allowed) => {
+  if (value == null) return null;
+  const v = String(value).trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z_]/g, '');
+  return v && allowed.includes(v) ? v : null;
+};
+
+const periodMonthFromKyc = (basic) => {
+  const rawMonth = basic.globalMonth != null && basic.globalMonth !== ''
+    ? basic.globalMonth
+    : new Date().getMonth();
+  const rawYear = basic.globalYear != null && basic.globalYear !== ''
+    ? basic.globalYear
+    : new Date().getFullYear();
+  const m = parseInt(rawMonth, 10);
+  const y = parseInt(rawYear, 10);
+  const month = Number.isFinite(m) && m >= 0 && m <= 11 ? m : new Date().getMonth();
+  const year  = Number.isFinite(y) ? y : new Date().getFullYear();
+  return new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+};
+
+const toIsoDate = (val) => {
+  if (!val) return null;
+  const d = new Date(val);
+  return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : null;
+};
+
+// Look up an existing auth user by email; create one if missing.
+// Returns { userId, isNewUser }.
+async function findOrCreateAuthUser(email) {
+  // Prefer the profiles table (cheap, indexed)
+  const { data: existingProfile } = await supabaseAdmin
+    .from('profiles')
+    .select('id')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (existingProfile?.id) {
+    return { userId: existingProfile.id, isNewUser: false };
+  }
+
+  // No profile yet — try to create the auth user.
+  const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    email_confirm: true
+  });
+
+  if (!createErr && created?.user?.id) {
+    return { userId: created.user.id, isNewUser: true };
+  }
+
+  // Auth user may already exist without a profile — find it.
+  const msg = createErr?.message || '';
+  if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')) {
+    const { data: list } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const existing = list?.users?.find(u => (u.email || '').toLowerCase() === email);
+    if (existing?.id) return { userId: existing.id, isNewUser: false };
+  }
+
+  throw new Error(`Failed to create auth user: ${msg || 'unknown error'}`);
+}
+
+// ---------- handler ----------
+
 export default async function handler(req, res) {
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing token' });
+  if (!supabaseAdmin) {
+    return res.status(500).json({
+      error: 'Server Config Error: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.'
+    });
   }
-  const token = authHeader.split(' ')[1];
 
   try {
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-    if (authError || !user) {
-      return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+    const payload = req.body || {};
+    const { income, assets, liabilities, expenses, investments, ...basic } = payload;
+
+    const email = String(basic.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+    if (!basic.pdpaAccepted) return res.status(400).json({ error: 'PDPA acceptance is required' });
+
+    // Hard-block duplicate onboarding. /kyc is for first-time entry only;
+    // anyone whose email already has a profile must contact their advisor.
+    const { data: existingProfile, error: profileLookupErr } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq('email', email)
+      .maybeSingle();
+    if (profileLookupErr) {
+      throw new Error(`Failed to check existing profile: ${profileLookupErr.message}`);
+    }
+    if (existingProfile) {
+      return res.status(409).json({
+        error: 'This email has already been registered. Please contact your financial advisor to update your information.',
+        code: 'DUPLICATE_EMAIL'
+      });
     }
 
-    const { data: client } = await supabaseAdmin
-      .from('clients')
-      .select('id, custom_fields')
-      .eq('user_id', user.id)
-      .single();
+    const periodMonth = periodMonthFromKyc(basic);
 
-    if (!client) {
-      return res.status(404).json({ error: 'Client not found' });
-    }
-    const clientId = client.id;
+    // 1. Find or create auth user
+    const { userId, isNewUser } = await findOrCreateAuthUser(email);
 
-    const { income, assets, liabilities, expenses, investments, ...basic } = req.body;
+    // 2. Upsert profile (one row per auth user)
+    const retirementAgeRaw = parseInt(basic.retirementAge, 10);
+    const retirementAge = Number.isFinite(retirementAgeRaw) && retirementAgeRaw >= 40 && retirementAgeRaw <= 100
+      ? retirementAgeRaw
+      : 55;
 
-    // Update Client Record
-    const KNOWN_CLIENT_FIELDS = [
-      'familyName', 'givenName', 'salutation', 'email', 'dateOfBirth', 'nationality',
-      'residency', 'maritalStatus', 'retirementAge', 'employmentStatus', 'taxStatus',
-      'occupation', 'pdpaAccepted', 'globalMonth', 'globalYear'
-    ];
+    const profileData = {
+      id:                userId,
+      role:              'client',
+      email,
+      family_name:       basic.familyName || null,
+      given_name:        basic.givenName || null,
+      salutation:        basic.salutation || null,
+      date_of_birth:     toIsoDate(basic.dateOfBirth),
+      nationality:       basic.nationality || null,
+      residency:         basic.residency || null,
+      marital_status:    normalizeEnum(basic.maritalStatus, MARITAL_STATUSES),
+      employment_status: normalizeEnum(basic.employmentStatus, EMPLOYMENT_STATUSES),
+      tax_status:        normalizeEnum(basic.taxStatus, TAX_STATUSES),
+      occupation:        basic.occupation || null,
+      retirement_age:    retirementAge,
+      pdpa_accepted_at:  basic.pdpaAccepted ? new Date().toISOString() : null
+    };
 
-    const customFields = { ...client.custom_fields };
-    Object.entries(basic).forEach(([k, v]) => {
-      if (!KNOWN_CLIENT_FIELDS.includes(k)) {
-        customFields[k] = v;
+    const { error: profileErr } = await supabaseAdmin
+      .from('profiles')
+      .upsert(profileData, { onConflict: 'id' });
+    if (profileErr) throw new Error(`Failed to upsert profile: ${profileErr.message}`);
+
+    // 3. Determine version for kyc_submissions
+    const { data: existingSubs } = await supabaseAdmin
+      .from('kyc_submissions')
+      .select('version')
+      .eq('profile_id', userId)
+      .order('version', { ascending: false })
+      .limit(1);
+    const nextVersion = (existingSubs?.[0]?.version || 0) + 1;
+
+    // 4. Insert raw kyc_submissions audit row
+    const { error: kycErr } = await supabaseAdmin
+      .from('kyc_submissions')
+      .insert({
+        profile_id:  userId,
+        version:     nextVersion,
+        status:      'submitted',
+        raw_payload: payload
+      });
+    if (kycErr) throw new Error(`Failed to record kyc submission: ${kycErr.message}`);
+
+    // 5. Build child-table rows
+    // Incomes (single-amount per type; only insert if > 0)
+    const incomeRows = [];
+    for (const [kycKey, enumVal] of Object.entries(INCOME_TYPE_MAP)) {
+      const amt = parseAmount(income?.[kycKey]);
+      if (amt > 0) {
+        incomeRows.push({
+          profile_id:   userId,
+          income_type:  enumVal,
+          amount:       amt,
+          currency:     'MYR',
+          period_month: periodMonth,
+          is_recurring: kycKey !== 'bonus',
+          source_note:  null
+        });
       }
+    }
+
+    // Expenses (arrays of items)
+    const expenseRows = [];
+    for (const [kycKey, catEnum] of Object.entries(EXPENSE_CATEGORY_MAP)) {
+      const items = expenses?.[kycKey] || [];
+      for (const it of items) {
+        const amt = parseAmount(it.amount);
+        if (amt <= 0) continue;
+        expenseRows.push({
+          profile_id:   userId,
+          category:     catEnum,
+          amount:       amt,
+          currency:     'MYR',
+          period_month: periodMonth,
+          is_fixed:     true,
+          description:  it.type || it.description || null
+        });
+      }
+    }
+
+    // Assets — simple fields first
+    const assetRows = [];
+    for (const [key, kind, name] of SIMPLE_ASSET_FIELDS) {
+      const amt = parseAmount(assets?.[key]);
+      if (amt > 0) {
+        assetRows.push({
+          profile_id: userId,
+          kind,
+          name,
+          value:      amt,
+          currency:   'MYR',
+          metadata:   {}
+        });
+      }
+    }
+
+    // Assets — list types (properties / vehicles / other), tracking loan-linked items
+    // so we can later create matching liability rows pointing at the inserted asset id.
+    const linkedLoanMeta = []; // { rowIndex, loanKind, ... }
+    for (const [key, kind, derivedLoanKind] of ASSET_LIST_TYPES) {
+      const items = assets?.[key] || [];
+      for (const it of items) {
+        const amt = parseAmount(it.amount);
+        if (amt <= 0 && !it.description) continue;
+        const row = {
+          profile_id:  userId,
+          kind,
+          name:        it.description || `${kind} item`,
+          value:       amt,
+          currency:    'MYR',
+          acquired_at: null,
+          metadata: {
+            purchasePrice: it.purchasePrice ?? null,
+            tenure:        it.tenure ?? null,
+            interestRate:  it.interestRate ?? null
+          }
+        };
+        const rowIndex = assetRows.length;
+        assetRows.push(row);
+        if (it.isUnderLoan && derivedLoanKind) {
+          linkedLoanMeta.push({
+            rowIndex,
+            loanKind:           derivedLoanKind,
+            outstandingBalance: it.outstandingBalance,
+            originalLoanAmount: it.originalLoanAmount,
+            monthlyInstallment: it.monthlyInstallment,
+            interestRate:       it.interestRate,
+            displayName:        it.description
+          });
+        }
+      }
+    }
+
+    // Insert assets and capture their generated ids in the same order
+    let insertedAssets = [];
+    if (assetRows.length > 0) {
+      const { data, error } = await supabaseAdmin
+        .from('assets')
+        .insert(assetRows)
+        .select('id');
+      if (error) throw new Error(`Failed to insert assets: ${error.message}`);
+      insertedAssets = data || [];
+    }
+
+    // Liabilities — explicit list types (study/personal/renovation/other)
+    const liabilityRows = [];
+    for (const [key, kind] of LIABILITY_LIST_TYPES) {
+      const items = liabilities?.[key] || [];
+      for (const it of items) {
+        const balance   = parseAmount(it.outstandingBalance ?? it.amount);
+        const principal = parseAmount(it.originalLoanAmount);
+        if (balance <= 0 && principal <= 0 && !it.description) continue;
+        liabilityRows.push({
+          profile_id:      userId,
+          kind,
+          name:            it.description || `${kind} item`,
+          principal:       principal > 0 ? principal : null,
+          balance,
+          interest_rate:   parseRate(it.interestRate),
+          monthly_payment: parseAmount(it.monthlyInstallment) || null,
+          start_date:      null,
+          end_date:        null,
+          linked_asset_id: null
+        });
+      }
+    }
+
+    // Liabilities — derived from assets that have loans (mortgage / car_loan)
+    for (const meta of linkedLoanMeta) {
+      const balance   = parseAmount(meta.outstandingBalance);
+      const principal = parseAmount(meta.originalLoanAmount);
+      if (balance <= 0 && principal <= 0) continue;
+      const linkedId = insertedAssets[meta.rowIndex]?.id || null;
+      liabilityRows.push({
+        profile_id:      userId,
+        kind:            meta.loanKind,
+        name:            meta.displayName ? `${meta.displayName} (loan)` : `${meta.loanKind} item`,
+        principal:       principal > 0 ? principal : null,
+        balance,
+        interest_rate:   parseRate(meta.interestRate),
+        monthly_payment: parseAmount(meta.monthlyInstallment) || null,
+        start_date:      null,
+        end_date:        null,
+        linked_asset_id: linkedId
+      });
+    }
+
+    // Investments
+    const investmentRows = [];
+    for (const [key, classEnum] of Object.entries(INVESTMENT_CLASS_MAP)) {
+      const items = investments?.[key] || [];
+      for (const it of items) {
+        const amt = parseAmount(it.amount);
+        if (amt <= 0 && !it.description) continue;
+        investmentRows.push({
+          profile_id:    userId,
+          asset_class:   classEnum,
+          name:          it.description || `${classEnum} holding`,
+          cost_basis:    amt > 0 ? amt : null,
+          current_value: amt > 0 ? amt : null,
+          currency:      'MYR',
+          metadata:      {}
+        });
+      }
+    }
+
+    // 6. Insert child rows (incomes / expenses / liabilities / investments)
+    if (incomeRows.length > 0) {
+      const { error } = await supabaseAdmin.from('incomes').insert(incomeRows);
+      if (error) throw new Error(`Failed to insert incomes: ${error.message}`);
+    }
+    if (expenseRows.length > 0) {
+      const { error } = await supabaseAdmin.from('expenses').insert(expenseRows);
+      if (error) throw new Error(`Failed to insert expenses: ${error.message}`);
+    }
+    if (liabilityRows.length > 0) {
+      const { error } = await supabaseAdmin.from('liabilities').insert(liabilityRows);
+      if (error) throw new Error(`Failed to insert liabilities: ${error.message}`);
+    }
+    if (investmentRows.length > 0) {
+      const { error } = await supabaseAdmin.from('investments').insert(investmentRows);
+      if (error) throw new Error(`Failed to insert investments: ${error.message}`);
+    }
+
+    return res.status(200).json({
+      success:      true,
+      submissionId: userId,
+      version:      nextVersion,
+      isNewUser
     });
 
-    const updateClientData = {
-      family_name: basic.familyName || "",
-      given_name: basic.givenName || "",
-      date_of_birth: basic.dateOfBirth ? new Date(basic.dateOfBirth).toISOString().split('T')[0] : null,
-      nationality: basic.nationality || "",
-      residency: basic.residency || "",
-      marital_status: basic.maritalStatus || "",
-      retirement_age: parseInt(basic.retirementAge) || 55,
-      employment_status: basic.employmentStatus || "",
-      tax_status: basic.taxStatus || "",
-      occupation: basic.occupation || "",
-      pdpa_accepted: !!basic.pdpaAccepted,
-      custom_fields: customFields
-    };
-
-    await supabaseAdmin.from('clients').update(updateClientData).eq('id', clientId);
-
-    const month = parseInt(basic.globalMonth || new Date().getMonth(), 10) + 1; // 1-12
-    const year = parseInt(basic.globalYear || new Date().getFullYear(), 10);
-
-    const mapToTable = (items, knownKeys, mapper) => {
-      if (!items || !items.length) return [];
-      return items.map(item => {
-        const mapped = mapper(item);
-        const custom_fields = {};
-        Object.keys(item).forEach(k => {
-          if (!knownKeys.includes(k)) custom_fields[k] = item[k];
-        });
-        return { ...mapped, custom_fields };
-      });
-    };
-
-    // Incomes
-    const allIncomes = [];
-    const incomeMappings = [
-      { key: 'salary', category: 'Salary', desc: 'Monthly Base Pay' },
-      { key: 'bonus', category: 'Bonus / One-off Incentives', desc: 'Bonus/Incentive' },
-      { key: 'directorFee', category: 'Director / Advisory / Professional Fees', desc: 'Director/Advisory/Professional Fee' },
-      { key: 'commission', category: 'Commission / Referral Fee', desc: 'Commission/Referral Fee' },
-      { key: 'dividendCompany', category: 'Dividend from Own Company', desc: 'Dividend from Own Company' },
-      { key: 'dividendInvestment', category: 'Investment Dividends / Interest', desc: 'Investment Dividends/Interest' },
-      { key: 'rentalIncome', category: 'Rental Income', desc: 'Rental Income' }
-    ];
-    for (const mapping of incomeMappings) {
-      if (income && income[mapping.key]) {
-        allIncomes.push({
-          category: mapping.category,
-          description: mapping.desc,
-          amount: income[mapping.key],
-          month, year
-        });
-      }
-    }
-    const incomeRecords = mapToTable(allIncomes, ['category', 'description', 'amount', 'month', 'year'], item => ({
-      client_id: clientId,
-      category: item.category,
-      description: item.description,
-      amount: parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      month: item.month,
-      year: item.year
-    }));
-
-    // NetWorth items
-    const allNetWorthItems = [
-      ...(assets?.properties || []).map(p => ({ ...p, mainType: "Asset", n_category: "Property" })),
-      ...(assets?.vehicles || []).map(v => ({ ...v, mainType: "Asset", n_category: "Vehicle" })),
-      ...(assets?.otherAssets || []).map(o => ({ ...o, mainType: "Asset", n_category: "Other" })),
-      
-      ...(investments?.etf || []).map(i => ({ ...i, mainType: "Investment", n_category: "ETF" })),
-      ...(investments?.stocks || []).map(i => ({ ...i, mainType: "Investment", n_category: "Stocks" })),
-      ...(investments?.bonds || []).map(i => ({ ...i, mainType: "Investment", n_category: "Bonds" })),
-      ...(investments?.unitTrusts || []).map(i => ({ ...i, mainType: "Investment", n_category: "Unit Trust" })),
-      ...(investments?.fixedDeposits || []).map(i => ({ ...i, mainType: "Investment", n_category: "Investment Properties" })),
-      ...(investments?.forex || []).map(i => ({ ...i, mainType: "Investment", n_category: "Forex" })),
-      ...(investments?.moneyMarket || []).map(i => ({ ...i, mainType: "Investment", n_category: "Money Market" })),
-      ...(investments?.otherInvestments || []).map(i => ({ ...i, mainType: "Investment", n_category: "Other" })),
-      
-      ...(liabilities?.studyLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Study Loan" })),
-      ...(liabilities?.personalLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Personal Loan" })),
-      ...(liabilities?.renovationLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Renovation Loan" })),
-      ...(liabilities?.otherLoans || []).map(l => ({ ...l, mainType: "Liability", n_category: "Other Loan" }))
-    ];
-
-    const pushSimpleAsset = (val, desc, cat) => {
-        if (val) allNetWorthItems.push({ description: desc, amount: val, mainType: "Asset", n_category: cat });
-    };
-    pushSimpleAsset(assets?.savingsAccount, "Savings/Current Account", "Savings");
-    pushSimpleAsset(assets?.fixedDeposit, "Fixed Deposit", "Savings");
-    pushSimpleAsset(assets?.moneyMarketFund, "Money Market Fund For Savings", "Savings");
-    pushSimpleAsset(assets?.epfPersaraan, "EPF Account 1 (Akaun Persaraan)", "EPF");
-    pushSimpleAsset(assets?.epfSejahtera, "EPF Account 2 (Akaun Sejahtera)", "EPF");
-    pushSimpleAsset(assets?.epfFleksibel, "EPF Account 3 (Akaun Fleksibel)", "EPF");
-
-    const allLiabilityDupes = [
-      ...(assets?.properties || []).filter(p => p.isUnderLoan).map(p => ({ ...p, isDuplicateLiability: true, amount: p.outstandingBalance, mainType: "Liability", n_category: "Mortgage" })),
-      ...(assets?.vehicles || []).filter(v => v.isUnderLoan).map(v => ({ ...v, isDuplicateLiability: true, amount: v.outstandingBalance, mainType: "Liability", n_category: "Car Loan" })),
-      ...(investments?.fixedDeposits || []).filter(i => i.isUnderLoan).map(i => ({ ...i, isDuplicateLiability: true, amount: i.outstandingBalance, mainType: "Liability", n_category: "Mortgage" }))
-    ];
-
-    const combinedNetWorthItems = [...allNetWorthItems, ...allLiabilityDupes];
-
-    const knownNwKeys = ['mainType', 'n_category', 'description', 'amount', 'purchasePrice', 'originalLoanAmount', 'month', 'year', 'isUnderLoan', 'outstandingBalance', 'monthlyIncome', 'monthlyExpenses', 'monthlyInstallment', 'isDuplicateLiability'];
-
-    const nwRecords = mapToTable(combinedNetWorthItems, knownNwKeys, item => ({
-      client_id: clientId,
-      type: item.mainType,
-      category: item.n_category,
-      description: item.description || "",
-      value: parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      original_purchase_price: item.purchasePrice ? parseFloat(String(item.purchasePrice).replace(/,/g, '')) : null,
-      original_loan_amount: item.originalLoanAmount ? parseFloat(String(item.originalLoanAmount).replace(/,/g, '')) : null,
-      month: item.month || month,
-      year: item.year || year
-    }));
-
-    // Standard Expenses
-    const allExpenses = [
-      ...(expenses?.household || []).map(e => ({ ...e, category: "Household" })),
-      ...(expenses?.transportation || []).map(e => ({ ...e, category: "Transportation" })),
-      ...(expenses?.dependants || []).map(e => ({ ...e, category: "Dependants" })),
-      ...(expenses?.personal || []).map(e => ({ ...e, category: "Personal" })),
-      ...(expenses?.miscellaneous || []).map(e => ({ ...e, category: "Miscellaneous" })),
-      ...(expenses?.otherExpenses || []).map(e => ({ ...e, category: "Other" }))
-    ];
-
-    const expRecords = mapToTable(allExpenses, ['category', 'type', 'amount', 'month', 'year'], item => ({
-      client_id: clientId,
-      category: item.category,
-      type: item.type || "",
-      amount: parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      month: item.month || month,
-      year: item.year || year
-    }));
-
-    // Perform inserts
-    if (incomeRecords.length > 0) await supabaseAdmin.from('incomes').insert(incomeRecords);
-    if (expRecords.length > 0) await supabaseAdmin.from('expenses').insert(expRecords);
-    
-    if (nwRecords.length > 0) {
-      const { data: insertedNw, error: nwError } = await supabaseAdmin.from('networth').insert(nwRecords).select();
-      if (nwError) throw nwError;
-
-      // Snapshots
-      const snapshotsToCreate = [];
-      combinedNetWorthItems.forEach((item, index) => {
-          if (!item.isDuplicateLiability && insertedNw[index]) {
-              const outBal = parseFloat(String(item.outstandingBalance || '0').replace(/,/g, ''));
-              const mInc = parseFloat(String(item.monthlyIncome || '0').replace(/,/g, ''));
-              const mExp = parseFloat(String(item.monthlyExpenses || '0').replace(/,/g, ''));
-              const mRepay = parseFloat(String(item.monthlyInstallment || '0').replace(/,/g, ''));
-              
-              if (outBal > 0 || mInc > 0 || mExp > 0 || mRepay > 0) {
-                  const snapDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-                  snapshotsToCreate.push({
-                      client_id: clientId,
-                      networth_id: insertedNw[index].id,
-                      snapshot_date: snapDate,
-                      current_value: outBal,
-                      monthly_income: mInc,
-                      monthly_expenses: mExp,
-                      monthly_repayment: mRepay
-                  });
-              }
-          }
-      });
-
-      if (snapshotsToCreate.length > 0) {
-        await supabaseAdmin.from('monthly_snapshots').insert(snapshotsToCreate);
-      }
-    }
-
-    return res.status(200).json({ success: true, submissionId: clientId });
-
   } catch (error) {
-    console.error("KYC Submission Error:", error);
-    return res.status(500).json({ error: error.message });
+    console.error('KYC Submission Error:', error);
+    return res.status(500).json({ error: error.message || 'Internal server error' });
   }
 }

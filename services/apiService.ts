@@ -288,19 +288,26 @@ export const fetchTransactions = async (): Promise<Transaction[]> => {
   return [];
 };
 
+export const checkEmailAvailable = async (
+  email: string
+): Promise<{ available: boolean; reason?: string }> => {
+  const trimmed = (email || '').trim().toLowerCase();
+  if (!trimmed) return { available: false, reason: 'INVALID_EMAIL' };
+
+  const response = await fetch(`/api/check-email?email=${encodeURIComponent(trimmed)}`);
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to check email');
+  }
+  return data;
+};
+
 export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; submissionId: string }> => {
   try {
-    const session = getSession();
-    if (!session || !session.token) {
-      throw new Error("Authentication error. Please login again.");
-    }
-
+    // Public endpoint — no auth header. Anyone with the /kyc URL can submit.
     const response = await fetch('/api/kyc', {
       method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.token}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(formData)
     });
 
