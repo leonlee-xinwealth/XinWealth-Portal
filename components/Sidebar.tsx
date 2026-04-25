@@ -1,6 +1,6 @@
 import React from 'react';
 import { ViewState } from '../types';
-import { getSession } from '../services/larkService';
+import { getSession } from '../services/apiService';
 import { 
   PieChart, 
   ShieldCheck, 

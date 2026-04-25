@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchRawHealthData, calculateAnalytics } from '../services/larkService';
+import { fetchRawHealthData, calculateAnalytics } from '../services/apiService';
 import { FinancialAnalytics } from '../types';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';

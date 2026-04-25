@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchFinancialHealth, fetchRawHealthData } from '../services/larkService';
+import { fetchFinancialHealth, fetchRawHealthData } from '../services/apiService';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { 
   ComposedChart, 

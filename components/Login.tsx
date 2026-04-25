@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { authenticateUser } from '../services/larkService';
+import { authenticateUser } from '../services/apiService';
 import { ArrowRight, Lock, Mail, Loader2 } from 'lucide-react';
 
 interface LoginProps {

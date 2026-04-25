@@ -1,8 +1,6 @@
 import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics, AnalyticsItem } from '../types';
 
-/**
- * Connects to Vercel Serverless Functions in the /api folder.
- */
+import { supabase } from '../lib/supabase';
 
 const setSession = (data: any) => localStorage.setItem('xinwealth_user', JSON.stringify(data));
 export const updateSession = (partialData: Partial<UserSession>) => {
@@ -66,6 +64,15 @@ export const authenticateUser = async (email: string, pass: string): Promise<boo
       if (!response.ok) {
         throw new Error(data.error || 'Authentication failed (Server Error)');
       }
+      
+      // Persist Supabase session
+      if (data.token && data.refresh_token) {
+        await supabase.auth.setSession({
+          access_token: data.token,
+          refresh_token: data.refresh_token
+        });
+      }
+      
       setSession(data);
       return true;
     } else {
@@ -283,9 +290,17 @@ export const fetchTransactions = async (): Promise<Transaction[]> => {
 
 export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; submissionId: string }> => {
   try {
+    const session = getSession();
+    if (!session || !session.token) {
+      throw new Error("Authentication error. Please login again.");
+    }
+
     const response = await fetch('/api/kyc', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.token}`
+      },
       body: JSON.stringify(formData)
     });
 
@@ -297,6 +312,34 @@ export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; 
     return data;
   } catch (error) {
     console.error("KYC Submission Error:", error);
+    throw error;
+  }
+};
+
+export const submitLevelUp = async (formData: any): Promise<{ success: boolean }> => {
+  try {
+    const session = getSession();
+    if (!session || !session.token) {
+      throw new Error("Authentication error. Please login again.");
+    }
+
+    const response = await fetch('/api/levelUp', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.token}`
+      },
+      body: JSON.stringify(formData)
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Level Up Submission failed');
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Level Up Submission Error:", error);
     throw error;
   }
 };

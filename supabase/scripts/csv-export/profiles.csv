@@ -1,0 +1,49 @@
+client_code,email,family_name,given_name,salutation,nric,date_of_birth,gender,marital_status,nationality,residency,employment_status,tax_status,occupation,retirement_age,epf_account_number,ppa_account_number,correspondence_address,correspondence_postal_code,correspondence_city,correspondence_state,mobile_number
+XW-000001,leonzw5631@gmail.com,Lim,Chong Boon,,950424-10-5631,1995-04-24,male,,,,employed,,Sales Executives,,,,"NO 58, LORONG SELAT SELATAN 10",42000,Klang,Selangor,601137687351
+XW-000002,aliceusj9@gmail.com,Chng,Kae Wee,,901217-01-5528,1990-12-17,female,,,,self_employed,,MANAGING DIRECTOR / CEO,,,,"47-2, Jalan USJ 9/5S",47620,Subang Jaya,Selangor,601131433931
+XW-000003,mrbee77soo@gmail.com,Soo,Tao Jian,,960707-01-5539,1996-07-07,male,,,,self_employed,,Business Owner,,,,3 Jalan Maju 9,,,,60133194913
+XW-000004,koonsihui@gmail.com,Koon,Si Hui,,990317-14-6343,1999-03-17,male,,,,employed,,ENGINEER,,,,"B-1-3, Menara Komanwel B, Vista Komanwel B",57700,Sri Petaling,W.P.K.L,60173173293
+XW-000005,tangwq0518@gmail.com,Tang,Wan Qing,,980518-10-5672,1998-05-18,female,,,,employed,,Tutor,,,,"6, Jalan SS9/15 Sungai Way",47300,Petaling Jaya,Selangor,60146690518
+XW-000006,limxiaozhang98@gmail.com,Lim,Xiao Zhang,,980218-08-5913,1998-02-18,male,,,,self_employed,,Business Owner,,,,"20, Laluan Tasek Timur 16B Taman Gerbang Bercham Selamat",31400,Ipoh,Perak,60165243136
+XW-000007,edwardpangjiawei2003@gmail.com,Pang,Jia Wei,,030107-10-1045,2003-01-07,male,,,,,,,,,,"38A, JALAN USJ 18/2B",47630,Subang Jaya,Selangor,60162249295
+XW-000008,jbeyy113@gmail.com,Lim,Jia Bey,,820113-07-5230,1982-01-13,female,,,,employed,,,,15876197,,"A1-23A-02 Platinum 3, Cangkat Bukit Belah 2, eluk Kumbar Heights",11920,Bayan Lepas,Pulau Pinang,60174189322
+XW-000009,francestan6191999@gmail.com,Frances Tan,Yan Ling,,990619-14-5816,1999-06-19,female,,,,employed,,"
+Project Manager",,,,"
+C-3-6 CONNAUGHT AVENUE NO 38 JALAN 9 TAMAN BUKIT CHERAS",56000,Cheras,W.P.K.L,60104656998
+XW-000010,chincyq717@gmail.com,Chin,Yun Qing,,060717-14-0890,2006-07-17,female,,,,,,Student,,,,NO 27 JALAN BS6 TAMAN BUKIT SEGAR ,56100,Cheras,W.P.K.L,601111287613
+XW-000011,sammecylok@gmail.com,Yuen,Hou Lok,,990530-08-8667,1999-05-30,male,,,,self_employed,,Business Owner,,,,"
+PVD3-124, PERDANA VILLA DELUXE 3 
+JLN PERDANA 2/1, PANDAN PERDANA",55300,Cheras,W.P.K.L,60183505966
+XW-000012,haojiun7967@gmail.com,Wong,Hao Jiun,,990305-08-7967,1999-03-05,male,,,,self_employed,,Business Owner,,,,NO 33 JALAN PENGKALAN UTAMA 13 TAMAN PENGKALAN UTAMA,31650,Ipoh,Perak,60174668567
+XW-000013,alan.tang1903@gmail.com,Alan Tan,Gui Lian,,970724-13-6331,1997-07-24,male,,,,employed,,"
+IT EXECUTIVE",,,,"
+Lot 2027, Pujut 6 Jerami 3",98000,Miri,Sarawak,60189864124
+XW-000014,ngjiayin2001@gmail.com,Ng ,Jia Yin,,010803-10-0718,2001-08-03,female,,,,employed,,Tutor,,,,"
+310 Block D1, Lily Apartment Jalan SS26/10",47301,Petaling Jaya,Selangor,60183242596
+XW-000015,ngjiaxuan2003@gmail.com,Ng,Jia Xuan,,030723-10-0900,2003-07-23,female,,,,employed,,Tutor,,,,"
+310 Block D1, Lily Apartment Jalan SS26/10",47301,Petaling Jaya,Selangor,60182327803
+XW-000016,siew81tan@gmail.com,Tan,Siew Choo,,810929-07-5728,1981-09-29,female,,,,employed,,Customer Service Executive,,,,"
+422-6-25, Taman Bukit Bendera, Jalan Hill Railway",11500,Ayer Itam,Pulau Pinang,60125830388
+XW-000017,coolyaya960502@gmail.com,Kun,Yoke Yee,,960502-14-5110,1996-05-02,female,,,,employed,,Nutritionist,,20721923,,"C3-3, Jalan BS 5/27A, Taman Bukit Serdang, Sek 5",43300,Seri Kembangan,Selangor,60163663488
+XW-000018,lau_waikit@yahoo.com,Lau,Wai Kit,,870609-06-5453,1987-06-09,male,,,,employed,,"
+Asst Sales Manager",,19634794,,"ZB-19-12, Zest Service Apartment, Jalan Kinrara 6B, Bandar Kinrara,",47180,Puchong,Selangor,601126134951
+XW-000019,meteor_sin11@hotmail.com,Cheong,Yin Sin,,911111-14-5008,1991-11-11,female,,,,self_employed,,Director,,19497712,,"43, Jalan Setia Utama U13/38E Seksyen U13 Setia Alam",40170,Setia Alam,Selangor,601135792799
+XW-000020,christy_limys@yahoo.com,Lim,Yn Sze,,750719-08-5678,1975-07-19,female,,,,employed,,Regional Sales Mgr,,14115124,,8 Jalan Margosa SD 10/5C Bandar Sri Damansara,52200,Petaling Jaya,Selangor,60122330788
+XW-000021,ellywkmoy@gmail.com,Moy,Wan Kheng,,840323-07-5018,1984-03-23,female,,,,employed,,Buyer,,,,"12 LRG RESIDENSI HARMONI 3, TMN RESIDENSI HARMONI. ",14000,Bukit Mertajam,Pulau Pinang,60125698945
+XW-000022,kengdar@gmail.com,Ang,Keng Dar,,810602-07-5099,1981-06-02,male,,,,employed,,ENGINEER ,,,,"12 LRG RESIDENSI HARMONI 3, TMN RESIDENSI HARMONI",14000,Bukit Mertajam,Pulau Pinang,60125595129
+XW-000023,ednayuensl@yahoo.com,Edna Yuen,Suet Ling,,841011-08-6724,1984-10-11,female,,,,employed,,Nurse,,,,"L13-1, Cyber City Phase 2, Jalan Lintas, Kepayan",88200,Kota Kinabalu,Sabah,60168282512
+XW-000024,chinhow81@gmail.com,Kung,Chin How,,810804-07-5695,1981-08-04,male,,,,employed,,Engineer ,,,,"B5-12-6 Putra Place, 118 Persiaran Bayan Indah",11900,Bayan Lepas,Pulau Pinang,60124615721
+XW-000025,amypyleong@gmail.com,Leong ,Puay Yan,,811216-07-5116,1981-12-16,female,,,,employed,,Business Analyst,,,,"B5-12-6 Putra Place, 118 Persiaran Bayan Indah",11900,Bayan Lepas,Pulau Pinang,60164598905
+XW-000026,junhao940126@gmail.com,Lim,Jun Hao,,980416-10-6949,1998-04-16,male,,,,employed,,,,,,"No.10, Jalan Desa Mewah 7D, Taman Desa Mewah ",43500,Semenyih,Selangor,60142341588
+XW-000027,teejuen@yahoo.com,Tee ,Ju En,,980902-10-5386,1998-09-02,female,,,,employed,,,,,,"No.31, Jalan Sungai Puloh 7, Taman Klang Utama",41200,Klang,Selangor,60125509028
+XW-000028,elynn.0204@gmail.com,Sia,Yee Lin,,920204-01-6066,1992-02-04,female,,,,self_employed,,Business Owner,,,,,,,,60167702040
+XW-000029,lzchong226@gmail.com,Chong,Ling Zhi,,890226-01-6492,1989-02-26,female,,,,self_employed,,Business Owner,,,,,,,,
+XW-000031,nonamez_21@hotmail.com,Chaw,Chia Ling,,961121-01-6272,1996-11-21,female,single,,,self_employed,,,,,,"No.9, Jalan Siew Teng Yhoi, Taman Lian Seng, 86000 Kluang, Johor.",86000,Kluang,Johor,60182848838
+XW-000032,kvt9393@gmail.com,Kelvin Tan,Chee Meng,,931023-04-5187,1993-10-23,male,married,,,self_employed,,Director,,,,No 66 lot 69 Taman Perkota Jalan Batu Ampar,75350,,Melaka,60166202062
+XW-000033,onekit95@gmail.com,Hong,Chun Kit,,950609-01-6723,1995-06-09,male,single,,,self_employed,,Business Owner,,,,114 jalan indah 22/5 taman bukit indah,81200 ,Bukit Indah,Johor,60189846550
+XW-000034,kent.nanyang@gmail.com,Tan ,Kian Hin,,841012-10-5915,1984-10-12,male,married,,,self_employed,,,,,,No 1A Jalan Jambu Mawar 3 Tmn Seri Jarom ,42600,Jenjarom,Selangor,60123720515
+XW-000035,joannechew67@gmail.com,Chew,Chai Yann,,671011-10-5148,1967-10-11,female,married,,,self_employed,,INSURANCE AGENT,,,,"No 9 Jalan Kangar 92, Jalan Kapar",41400,Klang,Selangor,60162295749
+XW-000036,louisckcbillionaire@gmail.com,Chua,Khai Chun,,901213-08-6425,1990-12-13,male,single,,,self_employed,,Insurance Agent,,,,"No 6, Lorong Batu Nilam 20C Bandar Bukit Tinggi 2",41200,Klang,Selangor,60146448024
+XW-000040,limweijian@gmail.com,Lim,Wei Jian,Mr,,1985-04-15,,married,Malaysian,Malaysia Citizen,employed,resident,Business Development Manager,60,,,,,,,
+XW-000042,tzewee86@gmail.com,NG,Jimmy,Mr,,2002-01-03,,single,Malaysian,Malaysia Citizen,self_employed,resident,online marketing,45,,,,,,,
+XW-000043,mansarn1998@gmail.com,Wai,Man Sarn,Mr,,1998-10-11,,single,Malaysian,Malaysia Citizen,employed,resident,Finance Executive ,60,,,,,,,

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchFinancialHealth } from '../services/larkService';
+import { fetchFinancialHealth } from '../services/apiService';
 import { Loader2, Shield, AlertTriangle, CheckCircle2, AlertCircle, FileText, ExternalLink } from 'lucide-react';
 import { FinancialHealthData } from '../types';
 
@@ -109,22 +109,8 @@ const Insurance: React.FC = () => {
 
   // Extract policy URL
   const getPolicyUrl = (item: any): string | null => {
-    if (!item || !item.fields) return null;
-    const policyField = item.fields["E-policy"] || item.fields["e-policy"];
-    if (Array.isArray(policyField) && policyField.length > 0) {
-      // Lark attachment field format
-      if (policyField[0].url) {
-        // Bitable attachments require special URLs with `extra` auth parameters.
-        // We pass the pre-constructed `url` from Lark to our proxy to inject the tenant token.
-        return `/api/download?url=${encodeURIComponent(policyField[0].url)}&file_token=${policyField[0].file_token || ''}`; 
-      } else if (policyField[0].file_token) {
-        return `/api/download?file_token=${policyField[0].file_token}`; 
-      }
-      // Link field format
-      if (policyField[0].link) return policyField[0].link;
-      if (policyField[0].text && policyField[0].text.startsWith('http')) return policyField[0].text;
-    }
-    if (typeof policyField === 'string' && policyField.startsWith('http')) return policyField;
+    // PDF download is disabled for this milestone.
+    // It will be re-enabled in the advisor portal phase with Supabase Storage.
     return null;
   };
 

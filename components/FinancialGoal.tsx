@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { fetchFinancialHealth } from '../services/larkService';
+import { fetchFinancialHealth } from '../services/apiService';
 import { FinancialHealthData } from '../types';
 import { Car, Home, Loader2, AlertCircle, TrendingUp, Info } from 'lucide-react';
 

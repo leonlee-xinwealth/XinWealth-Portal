@@ -10,7 +10,7 @@ import ExpensesStep from './steps/ExpensesStep';
 import InvestmentsStep from './steps/InvestmentsStep';
 import ReviewSummaryStep from './steps/ReviewSummaryStep';
 import { useLanguage } from '../../context/LanguageContext';
-import { submitKYC } from '../../services/larkService';
+import { submitKYC } from '../../services/apiService';
 import { CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 // Placeholder steps

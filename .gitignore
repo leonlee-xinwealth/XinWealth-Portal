@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Supabase
+supabase/scripts/.env.migration
+supabase/.temp/
+.env
+.env.local
+.env.migration
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchRawHealthData, getLatestRecords, getSession } from '../services/larkService';
+import { fetchRawHealthData, getLatestRecords, getSession, submitLevelUp } from '../services/apiService';
 import { 
   Loader2, AlertCircle, Edit2, Check, ArrowRight, Save, Plus, Trash2, 
   HelpCircle, Wallet, Receipt, Home, Car, Baby, Package, FolderPlus, 

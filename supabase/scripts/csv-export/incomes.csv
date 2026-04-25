@@ -1,0 +1,19 @@
+client_email,income_type,amount,currency,year,month,source_note
+limweijian@gmail.com,salary,9200.0,MYR,2026,3,Monthly Salary
+limweijian@gmail.com,bonus,18400.0,MYR,2026,12,Annual Bonus
+limweijian@gmail.com,rental,2800.0,MYR,2026,3,Mont Kiara Condo Rental
+limweijian@gmail.com,dividend_investment,4500.0,MYR,2026,3,Bursa & US Stock Dividends
+limweijian@gmail.com,other,1500.0,MYR,2026,3,Commission & Side Consulting
+tzewee86@gmail.com,salary,7500.0,MYR,2026,3,Monthly Salary
+tzewee86@gmail.com,bonus,10000.0,MYR,2026,2,Annual Bonus
+tzewee86@gmail.com,dividend_investment,14400.0,MYR,2026,3,红利
+tzewee86@gmail.com,dividend_investment,5834.0,MYR,2026,3,老虎股息
+tzewee86@gmail.com,other,0.0,MYR,2026,3,
+mansarn1998@gmail.com,salary,4000.0,MYR,2026,3,Monthly Salary
+mansarn1998@gmail.com,bonus,4000.0,MYR,2026,2,Annual Bonus
+limweijian@gmail.com,salary,8000.0,MYR,2026,4,Monthly Base Pay
+limweijian@gmail.com,director_fee,3000.0,MYR,2026,4,Board Advisory Fee
+limweijian@gmail.com,commission,5000.0,MYR,2026,4,Unit Trust Commission
+limweijian@gmail.com,dividend_company,2000.0,MYR,2026,4,Annual Dividend Q1
+limweijian@gmail.com,rental,1800.0,MYR,2026,4,Subang Jaya Condo
+limweijian@gmail.com,dividend_investment,500.0,MYR,2026,4,Fixed Deposit & Bonds

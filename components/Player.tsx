@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { fetchFinancialHealth, fetchClientProfile, updateClientInfo, updateSession } from '../services/larkService';
-import { getSession } from '../services/larkService';
+import { fetchFinancialHealth, fetchClientProfile, updateClientInfo, updateSession } from '../services/apiService';
+import { getSession } from '../services/apiService';
 import { FinancialHealthData, ClientProfile, UserSession } from '../types';
 import { Loader2, AlertCircle, Gamepad2, Shield, Zap, Heart, Star, Brain, TrendingUp, Sparkles, Sword, Coins, User, Edit2, X, Check, Save, ArrowBigUpDash } from 'lucide-react';
 import LevelUp from './LevelUp';

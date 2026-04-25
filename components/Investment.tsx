@@ -3,7 +3,7 @@ import {
   Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart
 } from 'recharts';
 import { DollarSign, Percent, BarChart3 } from 'lucide-react';
-import { fetchPortfolioHistory, fetchClientProfile } from '../services/larkService';
+import { fetchPortfolioHistory, fetchClientProfile } from '../services/apiService';
 import { PortfolioDataPoint, ClientProfile } from '../types';
 
 const Investment: React.FC = () => {

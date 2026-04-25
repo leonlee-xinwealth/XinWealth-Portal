@@ -1,0 +1,215 @@
+{
+  "_comment": "告诉脚本：Lark 的字段名 → Supabase 的列名。先跑 inspect 命令查出你 Lark 实际字段名，再填这里。",
+  "_example": "如果 Lark 里字段叫 '姓名'，Supabase 叫 family_name，就写 \"family_name\": \"姓名\"",
+
+  "lark_region": "larksuite",
+  "_lark_region_note": "larksuite = 海外版（.larksuite.com），feishu = 国内版（.feishu.cn）",
+
+  "tables": {
+    "clients": {
+      "lark_table_id": "tblxxxxxxxxxxxx",
+      "_note": "对应 Supabase profiles + auth.users",
+      "default_password": "ChangeMe123!",
+      "_default_password_note": "所有迁移过来的用户临时密码，让用户之后走'忘记密码'重设",
+
+      "fields": {
+        "email":                      "Email",
+        "family_name":                "Family Name",
+        "given_name":                 "Given Name",
+        "salutation":                 "Salutation",
+        "nric":                       "NRIC",
+        "date_of_birth":              "Date of Birth",
+        "gender":                     "Gender",
+        "marital_status":             "Marital Status",
+        "nationality":                "Nationality",
+        "residency":                  "Residency",
+        "employment_status":          "Employment Status",
+        "tax_status":                 "Tax Status",
+        "occupation":                 "Occupation",
+        "retirement_age":             "Retirement Age",
+        "epf_account_number":         "EPF Account Number",
+        "ppa_account_number":         "PPA Account Number",
+        "correspondence_address":     "Correspondence Address",
+        "correspondence_postal_code": "Correspondence Postal Code",
+        "correspondence_city":        "Correspondence City",
+        "correspondence_state":       "Correspondence State"
+      },
+
+      "enum_mapping": {
+        "gender": {
+          "Male": "male", "Female": "female", "Other": "other",
+          "男": "male", "女": "female"
+        },
+        "marital_status": {
+          "Single": "single", "Married": "married",
+          "Divorced": "divorced", "Widowed": "widowed",
+          "单身": "single", "已婚": "married", "离婚": "divorced", "丧偶": "widowed"
+        },
+        "employment_status": {
+          "Employed": "employed", "Self-Employed": "self_employed",
+          "Self Employed": "self_employed", "Unemployed": "unemployed",
+          "Retired": "retired", "Student": "student"
+        },
+        "tax_status": {
+          "Resident": "resident", "Non-Resident": "non_resident",
+          "Non Resident": "non_resident"
+        }
+      }
+    },
+
+    "incomes": {
+      "lark_table_id": "tblxxxxxxxxxxxx",
+      "_note": "每行一条收入记录",
+
+      "client_link_field": "Email",
+      "_client_link_field_note": "Lark 里标识'属于哪个客户'的字段，通常是 Email 或 Client Name",
+
+      "fields": {
+        "income_type":  "Type",
+        "amount":       "Amount",
+        "currency":     "Currency",
+        "year":         "Year",
+        "month":        "Month",
+        "source_note":  "Note"
+      },
+
+      "enum_mapping": {
+        "income_type": {
+          "Salary": "salary",
+          "Bonus": "bonus",
+          "Director Fee": "director_fee",
+          "Commission": "commission",
+          "Dividend (Company)": "dividend_company",
+          "Dividend (Investment)": "dividend_investment",
+          "Rental": "rental",
+          "Other": "other"
+        }
+      }
+    },
+
+    "expenses": {
+      "lark_table_id": "tblxxxxxxxxxxxx",
+      "client_link_field": "Email",
+
+      "fields": {
+        "category":    "Category",
+        "amount":      "Amount",
+        "currency":    "Currency",
+        "year":        "Year",
+        "month":       "Month",
+        "description": "Description"
+      },
+
+      "enum_mapping": {
+        "category": {
+          "Household": "household",
+          "Transportation": "transportation",
+          "Dependants": "dependants",
+          "Personal": "personal",
+          "Miscellaneous": "miscellaneous",
+          "Other": "other"
+        }
+      }
+    },
+
+    "assets": {
+      "lark_table_id": "tblxxxxxxxxxxxx",
+      "client_link_field": "Email",
+
+      "fields": {
+        "kind":        "Type",
+        "name":        "Name",
+        "value":       "Value",
+        "currency":    "Currency",
+        "acquired_at": "Acquired Date"
+      },
+
+      "enum_mapping": {
+        "kind": {
+          "Savings": "savings", "Savings Account": "savings",
+          "Fixed Deposit": "fixed_deposit", "FD": "fixed_deposit",
+          "Money Market Fund": "money_market_fund", "MMF": "money_market_fund",
+          "EPF Account 1": "epf_account_1",
+          "EPF Account 2": "epf_account_2",
+          "EPF Account 3": "epf_account_3",
+          "Property": "property",
+          "Vehicle": "vehicle",
+          "Other": "other"
+        }
+      }
+    },
+
+    "liabilities": {
+      "lark_table_id": "tblxxxxxxxxxxxx",
+      "client_link_field": "Email",
+
+      "fields": {
+        "kind":            "Type",
+        "name":            "Name",
+        "principal":       "Principal",
+        "balance":         "Balance",
+        "interest_rate":   "Interest Rate",
+        "monthly_payment": "Monthly Payment",
+        "start_date":      "Start Date",
+        "end_date":        "End Date"
+      },
+
+      "enum_mapping": {
+        "kind": {
+          "Study Loan": "study_loan", "Personal Loan": "personal_loan",
+          "Renovation Loan": "renovation_loan", "Mortgage": "mortgage",
+          "Car Loan": "car_loan", "Credit Card": "credit_card",
+          "Other": "other"
+        }
+      }
+    },
+
+    "investments": {
+      "lark_table_id": "tblxxxxxxxxxxxx",
+      "client_link_field": "Email",
+
+      "fields": {
+        "asset_class":   "Asset Class",
+        "ticker":        "Ticker",
+        "name":          "Name",
+        "units":         "Units",
+        "cost_basis":    "Cost Basis",
+        "current_value": "Current Value",
+        "currency":      "Currency",
+        "purchased_at":  "Purchase Date"
+      },
+
+      "enum_mapping": {
+        "asset_class": {
+          "ETF": "etf", "Bond": "bond", "Stock": "stock",
+          "Unit Trust": "unit_trust", "Fixed Deposit": "fixed_deposit",
+          "Forex": "forex", "Money Market": "money_market", "Other": "other"
+        }
+      }
+    },
+
+    "insurance_policies": {
+      "lark_table_id": "tblxxxxxxxxxxxx",
+      "client_link_field": "Email",
+
+      "fields": {
+        "policy_type":        "Type",
+        "provider":           "Provider",
+        "policy_number":      "Policy Number",
+        "sum_assured":        "Sum Assured",
+        "premium":            "Premium",
+        "premium_frequency":  "Premium Frequency",
+        "start_date":         "Start Date",
+        "end_date":           "End Date"
+      },
+
+      "enum_mapping": {
+        "premium_frequency": {
+          "Monthly": "monthly", "Quarterly": "quarterly",
+          "Semi-Annual": "semi_annual", "Semi Annual": "semi_annual",
+          "Annual": "annual", "Yearly": "annual"
+        }
+      }
+    }
+  }
+}
