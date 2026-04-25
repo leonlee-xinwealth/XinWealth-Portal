@@ -1,140 +1,113 @@
 import jwt from 'jsonwebtoken';
+import { supabase } from './_supabase.js';
 
-const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const parseAmount = (val) => parseFloat(String(val || 0).replace(/,/g, '')) || 0;
+
+// Convert targetMonth (0-11 index or month name) + targetYear → "YYYY-MM-01" date string
+const MONTH_NAMES = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
+const toPeriodMonth = (month, year) => {
+  if (!year) return null;
+  let m = parseInt(month);
+  if (isNaN(m)) {
+    m = MONTH_NAMES.findIndex(n => n.toLowerCase() === String(month).toLowerCase());
+  }
+  if (m < 0 || m > 11) m = 0;
+  return `${year}-${String(m + 1).padStart(2, '0')}-01`;
+};
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const appId = (process.env.LARK_APP_ID || "").trim();
-  const appSecret = (process.env.LARK_APP_SECRET || "").trim();
-  const baseToken = (process.env.LARK_BASE_TOKEN || "").trim();
-  const tableIncomes = (process.env.LARK_TABLE_INCOMES || "").trim();
-  const tableAssets = (process.env.LARK_TABLE_ASSETS || "").trim();
-  const tableLiabilities = (process.env.LARK_TABLE_LIABILITIES || "").trim();
-  const tableExpenses = (process.env.LARK_TABLE_EXPENSES || "").trim();
-  const tableInvestments = (process.env.LARK_TABLE_INVESTMENT || "").trim();
-
-  // 1. Authentication
+  // JWT auth
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
-  }
-  
-  const token = authHeader.split(' ')[1];
+  if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+
   let jwtPayload;
   try {
-    const jwtSecret = process.env.JWT_SECRET || appSecret || 'fallback_secret_xinwealth';
-    jwtPayload = jwt.verify(token, jwtSecret);
-  } catch (err) {
+    jwtPayload = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET || 'fallback_secret_xinwealth');
+  } catch {
     return res.status(401).json({ error: 'Unauthorized: Token expired or invalid' });
   }
 
-  const clientId = jwtPayload.recordId;
+  const profileId = jwtPayload.recordId;
   const { targetMonth, targetYear, incomes, expenses, assets, liabilities } = req.body;
 
-  if (!clientId || !targetMonth || !targetYear) {
-    return res.status(400).json({ error: 'Missing required parameters' });
-  }
+  if (!profileId || !targetMonth || !targetYear) return res.status(400).json({ error: 'Missing required parameters' });
 
-  const getMonthName = (index) => {
-    const idx = parseInt(index);
-    return isNaN(idx) ? index : MONTH_NAMES[idx] || index;
-  };
+  const periodMonth = toPeriodMonth(targetMonth, targetYear);
 
   try {
-    // 2. Get Access Token
-    const tokenRes = await fetch("https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ app_id: appId, app_secret: appSecret })
-    });
-    const tokenData = await tokenRes.json();
-    if (tokenData.code !== 0) throw new Error(`Lark Auth Failed: ${tokenData.msg}`);
-    const accessToken = tokenData.tenant_access_token;
-    const authHeaderObj = { 
-      "Authorization": `Bearer ${accessToken}`,
-      "Content-Type": "application/json"
+    const run = async (table, rows) => {
+      if (!rows?.length) return;
+      const { error } = await supabase.from(table).insert(rows);
+      if (error) throw new Error(`Insert to ${table} failed: ${error.message}`);
     };
 
-    // Helper for batch creation
-    const createSubRecords = async (tableName, items) => {
-      if (!tableName || !items || items.length === 0) return;
-      const records = items.map(item => ({
-        fields: {
-          ...item,
-          "Client": [clientId]
-        }
-      }));
-
-      const res = await fetch(`https://open.larksuite.com/open-apis/bitable/v1/apps/${baseToken}/tables/${tableName}/records/batch_create`, {
-        method: "POST",
-        headers: authHeaderObj,
-        body: JSON.stringify({ records })
-      });
-      const result = await res.json();
-      if (result.code !== 0) throw new Error(`Batch create failed for ${tableName}: ${result.msg}`);
+    // Map income category → income_type enum
+    const INCOME_TYPE = {
+      'Salary': 'salary', 'Annual Bonus': 'bonus', 'Bonus / One-off Incentives': 'bonus',
+      'Director / Advisory / Professional Fees': 'director_fee',
+      'Commission / Referral Fee': 'commission',
+      'Dividend from Own Company': 'dividend_company',
+      'Investment Dividends / Interest': 'dividend_investment',
+      'Rental Income': 'rental'
     };
 
-    // Prepare Incomes
-    const incomeRecords = (incomes || []).map(item => ({
-      "Category": item.category,
-      "Description": item.description || "",
-      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      "Month": getMonthName(item.month || targetMonth),
-      "Year": String(item.year || targetYear)
+    const incomeRows = (incomes || []).map(item => ({
+      profile_id:   profileId,
+      income_type:  INCOME_TYPE[item.category] || 'other',
+      amount:       parseAmount(item.amount),
+      period_month: periodMonth,
+      source_note:  item.description || null
     }));
 
-    // Prepare Expenses
-    const expenseRecords = (expenses || []).map(item => ({
-      "Category": item.type, 
-      "Type": item.description || "", 
-      "Amount": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      "Month": getMonthName(item.month || targetMonth),
-      "Year": String(item.year || targetYear)
+    // Expenses — map category to enum, store description in description column
+    const EXP_CAT = {
+      'Household':'household', 'Transportation':'transportation', 'Dependants':'dependants',
+      'Personal':'personal', 'Miscellaneous':'miscellaneous', 'Other':'other'
+    };
+    const expenseRows = (expenses || []).map(item => ({
+      profile_id:   profileId,
+      category:     EXP_CAT[item.type] || EXP_CAT[item.category] || 'other',
+      amount:       parseAmount(item.amount),
+      period_month: periodMonth,
+      description:  item.description || null
     }));
 
-    // Prepare Assets
-    const assetRecords = (assets || []).map(item => ({
-      "Category": item.category,
-      "Description": item.description || "",
-      "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      "Month": getMonthName(item.month || targetMonth),
-      "Year": String(item.year || targetYear)
+    // Assets → assets table
+    const assetRows = (assets || []).map(item => ({
+      profile_id:  profileId,
+      kind:        'other',             // category not reliably mapped from levelUp payload
+      name:        item.description || item.category || 'Asset',
+      value:       parseAmount(item.amount),
+      acquired_at: periodMonth
     }));
 
-    // Prepare Liabilities
-    const liabilityRecords = (liabilities || []).map(item => ({
-      "Category": item.category,
-      "Description": item.description || "",
-      "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      "Month": getMonthName(item.month || targetMonth),
-      "Year": String(item.year || targetYear)
+    // Liabilities → liabilities table
+    const LIABILITY_KIND = {
+      'Study Loan':'study_loan', 'Personal Loan':'personal_loan',
+      'Renovation Loan':'renovation_loan', 'Mortgage':'mortgage',
+      'Car Loan':'car_loan', 'Credit Card':'credit_card', 'Other':'other'
+    };
+    const liabilityRows = (liabilities || []).map(item => ({
+      profile_id: profileId,
+      kind:       LIABILITY_KIND[item.category] || 'other',
+      name:       item.description || item.category || 'Liability',
+      balance:    parseAmount(item.amount)
     }));
 
-    // Prepare Investments
-    const investmentRecords = (investments || []).map(item => ({
-      "Category": item.category,
-      "Description": item.description || "",
-      "Value": parseFloat(String(item.amount).replace(/,/g, '')) || 0,
-      "Month": getMonthName(item.month || targetMonth),
-      "Year": String(item.year || targetYear)
-    }));
-
-    // Execute in parallel
     await Promise.all([
-      createSubRecords(tableIncomes, incomeRecords),
-      createSubRecords(tableExpenses, expenseRecords),
-      createSubRecords(tableAssets, assetRecords),
-      createSubRecords(tableLiabilities, liabilityRecords),
-      createSubRecords(tableInvestments, investmentRecords)
+      run('incomes',     incomeRows),
+      run('expenses',    expenseRows),
+      run('assets',      assetRows),
+      run('liabilities', liabilityRows)
     ]);
 
     return res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error("Level Up Submission Error:", error);
+    console.error('Level Up Submission Error:', error);
     return res.status(500).json({ error: error.message });
   }
 }

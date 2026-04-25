@@ -1,109 +1,184 @@
-// Health Data API Endpoint
-const extractLarkValue = (field) => {
-    if (!field) return "";
-    if (typeof field === 'string' || typeof field === 'number') return String(field);
-    if (Array.isArray(field)) {
-        if (field.length === 0) return "";
-        const first = field[0];
-        if (typeof first === 'object' && first !== null && first.text) return first.text;
-        return String(first);
-    }
-    if (typeof field === 'object' && field.text) return field.text;
-    return String(field);
+import { supabase, findProfileByName, parsePeriod } from './_supabase.js';
+
+// ─── Enum → readable string mappings ──────────────────────────────────────────
+
+const ASSET_KIND = {
+  savings:          'Savings',
+  fixed_deposit:    'Fixed Deposit',
+  money_market_fund:'Money Market Fund For Savings',
+  epf_account_1:    'EPF',
+  epf_account_2:    'EPF',
+  epf_account_3:    'EPF',
+  property:         'Property',
+  vehicle:          'Vehicle',
+  other:            'Other'
 };
+
+const LIABILITY_KIND = {
+  study_loan:       'Study Loan',
+  personal_loan:    'Personal Loan',
+  renovation_loan:  'Renovation Loan',
+  mortgage:         'Mortgage',
+  car_loan:         'Car Loan',
+  credit_card:      'Credit Card',
+  other:            'Other'
+};
+
+// Map income_type enum → category string that larkService.ts calculation logic expects
+const INCOME_TYPE = {
+  salary:               'Salary',
+  bonus:                'Annual Bonus',          // service divides by 12 for this category
+  director_fee:         'Director / Advisory / Professional Fees',
+  commission:           'Commission / Referral Fee',
+  dividend_company:     'Dividend from Own Company',
+  dividend_investment:  'Dividend Income',        // service counts as passive income
+  rental:               'Rental Income',          // service counts as passive income
+  other:                'Other'
+};
+
+const INVESTMENT_CLASS = {
+  etf:          'ETF',
+  bond:         'Bonds',
+  stock:        'Stocks',
+  unit_trust:   'Unit Trust',
+  fixed_deposit:'Fixed Deposit',
+  forex:        'Forex',
+  money_market: 'Money Market',
+  other:        'Other'
+};
+
+// ─── Row transformers ──────────────────────────────────────────────────────────
+
+const transformAsset = (row) => {
+  const { monthName, year } = parsePeriod(row.acquired_at || row.created_at);
+  return {
+    id:          row.id,
+    create_time: new Date(row.created_at || Date.now()).getTime(),
+    fields: {
+      "Type":        'Asset',
+      "Category":    ASSET_KIND[row.kind] || row.kind,
+      "Description": row.name,
+      "Value":       parseFloat(row.value) || 0,
+      "Month":       monthName,
+      "Year":        year
+    }
+  };
+};
+
+const transformLiability = (row) => {
+  const { monthName, year } = parsePeriod(row.created_at);
+  return {
+    id:          row.id,
+    create_time: new Date(row.created_at || Date.now()).getTime(),
+    fields: {
+      "Type":                   'Liability',
+      "Category":               LIABILITY_KIND[row.kind] || row.kind,
+      "Description":            row.name,
+      "Value":                  parseFloat(row.balance)    || 0,
+      "Original Loan Amount":   parseFloat(row.principal)  || 0,
+      // Linked asset for equity calculation (kept as array for larkService compat)
+      "Linked Asset":           row.linked_asset_id ? [row.linked_asset_id] : [],
+      "Month":                  monthName,
+      "Year":                   year
+    }
+  };
+};
+
+const transformIncome = (row) => {
+  const { monthName, year } = parsePeriod(row.period_month);
+  return {
+    id:          row.id,
+    create_time: new Date(row.created_at || Date.now()).getTime(),
+    fields: {
+      "Category":    INCOME_TYPE[row.income_type] || row.income_type,
+      "Description": row.source_note || '',
+      "Amount":      parseFloat(row.amount) || 0,
+      "Month":       monthName,
+      "Year":        year
+    }
+  };
+};
+
+const transformExpense = (row) => {
+  const { monthName, year } = parsePeriod(row.period_month);
+  return {
+    id:          row.id,
+    create_time: new Date(row.created_at || Date.now()).getTime(),
+    fields: {
+      "Category": row.category.charAt(0).toUpperCase() + row.category.slice(1),
+      "Type":     row.description || '',   // service checks "Type" for loan repayment etc.
+      "Amount":   parseFloat(row.amount) || 0,
+      "Month":    monthName,
+      "Year":     year
+    }
+  };
+};
+
+// Investment holdings (asset_class) used for investmentAssets calc in financial health
+const transformInvestment = (row) => {
+  const { monthName, year } = parsePeriod(row.created_at);
+  return {
+    id:          row.id,
+    create_time: new Date(row.created_at || Date.now()).getTime(),
+    fields: {
+      "Category":    INVESTMENT_CLASS[row.asset_class] || row.asset_class,
+      "Description": row.name,
+      "Value":       parseFloat(row.current_value) || 0,
+      "Amount":      parseFloat(row.current_value) || 0,
+      "End Value":   parseFloat(row.current_value) || 0,
+      "Month":       monthName,
+      "Year":        year
+    }
+  };
+};
+
+const transformInsurance = (row) => ({
+  id:          row.id,
+  create_time: new Date(row.created_at || Date.now()).getTime(),
+  fields: {
+    "Type":        row.policy_type,
+    "Provider":    row.provider || '',
+    "Sum Assured": parseFloat(row.sum_assured) || 0,
+    "Premium":     parseFloat(row.premium)     || 0
+  }
+});
+
+// ─── Handler ───────────────────────────────────────────────────────────────────
 
 export default async function handler(req, res) {
   const { name } = req.query;
+  if (!name) return res.status(400).json({ error: 'User name is required' });
 
-  if (!name) {
-    return res.status(400).json({ error: 'User name is required' });
-  }
-
-  const appId = (process.env.LARK_APP_ID || "").trim();
-  const appSecret = (process.env.LARK_APP_SECRET || "").trim();
-  const baseToken = (process.env.LARK_BASE_TOKEN || "").trim();
-
-  // Tables — updated to match new Vercel env var names
-  // Net Worth table contains BOTH assets and liabilities (distinguished by "Type" column)
-  // Monthly Snapshot is the new standalone liabilities/installment tracking table
-  const tables = {
-      networth: (process.env.LARK_TABLE_NETWORTH || "").trim(),
-      monthlySnapshot: (process.env.LARK_TABLE_MONTHLYSNAPSHOT || "").trim(),
-      incomes: (process.env.LARK_TABLE_INCOMES || "").trim(),
-      expenses: (process.env.LARK_TABLE_EXPENSES || "").trim(),
-      investments: (process.env.LARK_TABLE_INVESTMENT || "").trim(),
-      insurance: (process.env.LARK_TABLE_INSURANCE || "").trim()
-  };
-
-  if (!appId || !appSecret || !baseToken) {
-     return res.status(500).json({ error: 'Server Config Error: Missing Lark Credentials.' });
-  }
+  const empty = { assets: [], liabilities: [], incomes: [], expenses: [], investments: [], insurance: [], monthlySnapshot: [] };
 
   try {
-    // 1. Get Token
-    const tokenRes = await fetch("https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ app_id: appId, app_secret: appSecret })
-    });
-    const tokenData = await tokenRes.json();
-    if (tokenData.code !== 0) {
-        return res.status(500).json({ error: `Lark Auth Failed: ${tokenData.msg}` });
-    }
-    const accessToken = tokenData.tenant_access_token;
+    const profile = await findProfileByName(name);
+    if (!profile) return res.status(200).json(empty);
 
-    // 2. Fetch Records from all tables concurrently
-    const fetchTable = async (tableName) => {
-        if (!tableName) return [];
-        const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${baseToken}/tables/${tableName}/records?page_size=500`;
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-        const data = await res.json();
-        if (!data.data || !data.data.items) return [];
-        
-        // Filter by Client name or email
-        return data.data.items.filter(item => {
-            const rawName = item.fields["Client"] || item.fields["Full Name"] || item.fields["Name"] || item.fields["Client Name"];
-            const rawEmail = item.fields["Email Address"] || item.fields["Email"] || item.fields["email"];
-            const rowName = extractLarkValue(rawName);
-            const rowEmail = extractLarkValue(rawEmail);
-            
-            return rowName.trim() === String(name).trim() || 
-                   (rowEmail && rowEmail.trim().toLowerCase() === String(name).trim().toLowerCase());
-        });
-    };
+    const pid = profile.id;
 
-    const [networthRecords, monthlySnapshot, incomes, expenses, investments, insurance] = await Promise.all([
-        fetchTable(tables.networth),
-        fetchTable(tables.monthlySnapshot),
-        fetchTable(tables.incomes),
-        fetchTable(tables.expenses),
-        fetchTable(tables.investments),
-        fetchTable(tables.insurance)
+    // Fetch all tables concurrently
+    const [aRes, lRes, incRes, expRes, invRes, insRes] = await Promise.all([
+      supabase.from('assets').select('*').eq('profile_id', pid),
+      supabase.from('liabilities').select('*').eq('profile_id', pid),
+      supabase.from('incomes').select('*').eq('profile_id', pid),
+      supabase.from('expenses').select('*').eq('profile_id', pid),
+      supabase.from('investments').select('*').eq('profile_id', pid),
+      supabase.from('insurance_policies').select('*').eq('profile_id', pid)
     ]);
 
-    // 3. Split the unified Net Worth table into assets vs liabilities by "Type" field
-    const assets = networthRecords.filter(item => {
-        const type = extractLarkValue(item.fields["Type"] || "");
-        return type === "Asset";
-    });
-
-    const liabilities = networthRecords.filter(item => {
-        const type = extractLarkValue(item.fields["Type"] || "");
-        return type === "Liability";
-    });
-
     return res.status(200).json({
-        assets,
-        liabilities,
-        incomes,
-        expenses,
-        investments,
-        insurance,
-        monthlySnapshot
+      assets:          (aRes.data   || []).map(transformAsset),
+      liabilities:     (lRes.data   || []).map(transformLiability),
+      incomes:         (incRes.data || []).map(transformIncome),
+      expenses:        (expRes.data || []).map(transformExpense),
+      investments:     (invRes.data || []).map(transformInvestment),
+      insurance:       (insRes.data || []).map(transformInsurance),
+      monthlySnapshot: []   // no monthly_snapshots table in this schema
     });
 
   } catch (error) {
-    console.error("Health Data API Error:", error);
+    console.error('Health Data API Error:', error);
     return res.status(500).json({ error: error.message });
   }
 }

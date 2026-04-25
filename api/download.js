@@ -1,73 +1,49 @@
+import { supabase } from './_supabase.js';
+
+// Serves files from Supabase Storage.
+// Query params:
+//   file_path  — path within the storage bucket (e.g. "policies/abc123.pdf")
+//   url        — a direct public/signed URL to proxy (fallback)
+//
+// Set the SUPABASE_STORAGE_BUCKET env var to the bucket that holds policy documents.
+// Default bucket name: "documents"
+
 export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { file_token, url } = req.query;
+  const { file_path, url } = req.query;
 
-  if (!file_token && !url) {
-    return res.status(400).json({ error: 'File token or url is required' });
-  }
-
-  const appId = (process.env.LARK_APP_ID || "").trim();
-  const appSecret = (process.env.LARK_APP_SECRET || "").trim();
-
-  if (!appId || !appSecret) {
-    return res.status(500).json({ error: 'Server Config Error: Missing Lark Credentials.' });
-  }
+  if (!file_path && !url) return res.status(400).json({ error: 'file_path or url is required' });
 
   try {
-    // 1. Get Tenant Access Token
-    const tokenRes = await fetch("https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        app_id: appId,
-        app_secret: appSecret
-      })
-    });
-    
-    const tokenData = await tokenRes.json();
-    if (tokenData.code !== 0) {
-      return res.status(500).json({ error: `Lark Auth Failed: ${tokenData.msg}` });
-    }
-    const accessToken = tokenData.tenant_access_token;
-
-    // 2. Download File from Lark Drive API
-    let downloadUrl = url || `https://open.larksuite.com/open-apis/drive/v1/medias/download?file_token=${encodeURIComponent(file_token)}`;
-    
-    const fileRes = await fetch(downloadUrl, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
+    // If a direct URL is provided, proxy it
+    if (url) {
+      const fileRes = await fetch(url);
+      if (!fileRes.ok) {
+        return res.status(fileRes.status).json({ error: 'Failed to download file from URL' });
       }
-    });
-
-    if (!fileRes.ok) {
-      const errorText = await fileRes.text();
-      console.error("Lark Download Error:", errorText);
-      return res.status(fileRes.status).json({ 
-        error: 'Failed to download file from Lark',
-        details: errorText,
-        url: downloadUrl
-      });
+      const contentType = fileRes.headers.get('content-type') || 'application/pdf';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', `inline; filename="document.pdf"`);
+      return res.send(Buffer.from(await fileRes.arrayBuffer()));
     }
 
-    // 3. Proxy the file back to the client
-    const contentType = fileRes.headers.get('content-type') || 'application/pdf';
-    
-    // We intentionally override content-disposition to be "inline" instead of "attachment"
-    // This allows the browser to render the PDF instead of forcing a download.
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Content-Disposition', `inline; filename="e-policy-${file_token || 'view'}.pdf"`);
+    // Download from Supabase Storage
+    const bucket = process.env.SUPABASE_STORAGE_BUCKET || 'documents';
+    const { data, error } = await supabase.storage.from(bucket).download(file_path);
 
-    // Send the buffer
-    const arrayBuffer = await fileRes.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    return res.send(buffer);
+    if (error) {
+      console.error('Supabase Storage download error:', error);
+      return res.status(404).json({ error: `File not found: ${error.message}` });
+    }
+
+    const filename = file_path.split('/').pop() || 'document.pdf';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    return res.send(Buffer.from(await data.arrayBuffer()));
 
   } catch (error) {
-    console.error("Download API Error:", error);
+    console.error('Download API Error:', error);
     return res.status(500).json({ error: error.message });
   }
 }

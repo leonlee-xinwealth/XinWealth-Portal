@@ -1,146 +1,88 @@
 import jwt from 'jsonwebtoken';
+import { supabase } from './_supabase.js';
 
-// Update Client API Endpoint
+// Maps the Lark field names (sent from Player.tsx) → profiles column names + validation rules
+const FIELD_MAP = {
+  'Family Name':                { col: 'family_name',               type: 'string'       },
+  'Given Name':                 { col: 'given_name',                type: 'string'       },
+  'NRIC':                       { col: 'nric',                      type: 'string'       },
+  'Date of Birth':              { col: 'date_of_birth',             type: 'date'         },
+  'Gender':                     { col: 'gender',                    type: 'gender_enum'  },
+  'Marital Status':             { col: 'marital_status',            type: 'marital_enum' },
+  'Nationality':                { col: 'nationality',               type: 'string'       },
+  'Residency':                  { col: 'residency',                 type: 'string'       },
+  'EPF Account Number':         { col: 'epf_account_number',        type: 'string'       },
+  'PPA Account Number':         { col: 'ppa_account_number',        type: 'string'       },
+  'Correspondence Address':     { col: 'correspondence_address',    type: 'string'       },
+  'Correspondence Postal Code': { col: 'correspondence_postal_code',type: 'digits_only'  },
+  'Correspondence City':        { col: 'correspondence_city',       type: 'string'       },
+  'Correspondence State':       { col: 'correspondence_state',      type: 'string'       }
+};
+
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const appId = (process.env.LARK_APP_ID || "").trim();
-  const appSecret = (process.env.LARK_APP_SECRET || "").trim();
-  const baseToken = (process.env.LARK_BASE_TOKEN || "").trim();
-  const tableClient = (process.env.LARK_TABLE_CLIENT || "").trim();
-
-  // 1. Authentication & Authorization (Verify JWT)
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Unauthorized: Missing or invalid token' });
-  }
-  
-  const token = authHeader.split(' ')[1];
+  if (!authHeader?.startsWith('Bearer ')) return res.status(401).json({ error: 'Unauthorized' });
+
   let jwtPayload;
   try {
-    const jwtSecret = process.env.JWT_SECRET || appSecret || 'fallback_secret_xinwealth';
-    jwtPayload = jwt.verify(token, jwtSecret);
-  } catch (err) {
+    jwtPayload = jwt.verify(authHeader.split(' ')[1], process.env.JWT_SECRET || 'fallback_secret_xinwealth');
+  } catch {
     return res.status(401).json({ error: 'Unauthorized: Token expired or invalid' });
   }
 
-  // Use the recordId from the verified token, NEVER trust the frontend's recordId
-  const targetRecordId = jwtPayload.recordId;
+  const profileId = jwtPayload.recordId; // always from verified token — never trust frontend
   const { fields } = req.body;
 
-  if (!targetRecordId || !fields) {
-    return res.status(400).json({ error: 'Missing target record or fields' });
-  }
+  if (!profileId || !fields) return res.status(400).json({ error: 'Missing target record or fields' });
 
-  // 2. Backend Validation (Sanitize and validate inputs)
-  const sanitizedFields = {};
-  
-  // Define allowed fields and validation rules
-  const allowedFields = {
-    'Family Name': 'string',
-    'Given Name': 'string',
-    'NRIC': 'string',
-    'Date of Birth': 'date', // We'll validate date format
-    'Age': 'numberString',
-    'Gender': 'string',
-    'Marital Status': 'string',
-    'Nationality': 'string',
-    'Residency': 'string',
-    'EPF Account Number': 'string',
-    'PPA Account Number': 'string',
-    'Correspondence Address': 'string',
-    'Correspondence Postal Code': 'numberString', // Should be numeric
-    'Correspondence City': 'string',
-    'Correspondence State': 'string'
-  };
+  const update = {};
 
-  for (const [key, val] of Object.entries(fields)) {
-    if (!allowedFields[key]) continue; // Ignore unauthorized fields to enforce minimum privilege
+  for (const [larkField, val] of Object.entries(fields)) {
+    const def = FIELD_MAP[larkField];
+    if (!def) continue; // silently ignore unknown / unauthorised fields
 
-    let cleanVal = String(val).trim();
-    if (cleanVal === '') {
-      sanitizedFields[key] = null; // Clear field in Lark if empty
-      continue;
-    }
+    let clean = String(val).trim();
+    if (clean === '') { update[def.col] = null; continue; }
+    if (clean.length > 500) return res.status(400).json({ error: `${larkField} exceeds maximum length.` });
 
-    if (allowedFields[key] === 'numberString') {
-      if (!/^\d+$/.test(cleanVal)) {
-        return res.status(400).json({ error: `Validation Error: ${key} must contain only numbers.` });
+    switch (def.type) {
+      case 'digits_only':
+        if (!/^\d+$/.test(clean)) return res.status(400).json({ error: `${larkField} must contain only numbers.` });
+        break;
+      case 'date': {
+        const d = new Date(clean);
+        if (isNaN(d.getTime())) return res.status(400).json({ error: `Invalid date format for ${larkField}.` });
+        if (d > new Date())     return res.status(400).json({ error: `${larkField} cannot be in the future.`  });
+        clean = d.toISOString().split('T')[0]; // store as YYYY-MM-DD
+        break;
       }
-    } else if (allowedFields[key] === 'date') {
-      const dateObj = new Date(cleanVal);
-      if (isNaN(dateObj.getTime())) {
-        return res.status(400).json({ error: `Validation Error: Invalid date format for ${key}.` });
-      }
-      if (dateObj > new Date()) {
-        return res.status(400).json({ error: `Validation Error: ${key} cannot be in the future.` });
-      }
-      // Note: We'll send the string to Lark or let Lark parse it. 
-      // Depending on Lark's configuration, it might require milliseconds timestamp.
-      // Usually, YYYY/MM/DD works well. We will pass cleanVal directly.
-    }
-    
-    // Add length constraint to prevent abuse
-    if (cleanVal.length > 500) {
-      return res.status(400).json({ error: `Validation Error: ${key} exceeds maximum length.` });
+      case 'gender_enum':
+        clean = clean.toLowerCase();
+        if (!['male','female','other'].includes(clean)) return res.status(400).json({ error: `Invalid value for ${larkField}.` });
+        break;
+      case 'marital_enum':
+        clean = clean.toLowerCase();
+        if (!['single','married','divorced','widowed'].includes(clean)) return res.status(400).json({ error: `Invalid value for ${larkField}.` });
+        break;
     }
 
-    sanitizedFields[key] = cleanVal;
+    update[def.col] = clean;
   }
 
-  // Auto-calculate Age in backend to enforce consistency
-  if (sanitizedFields['Date of Birth']) {
-    const dob = new Date(sanitizedFields['Date of Birth']);
-    if (!isNaN(dob.getTime())) {
-      const ageDiffMs = Date.now() - dob.getTime();
-      const ageDate = new Date(ageDiffMs);
-      const calculatedAge = Math.abs(ageDate.getUTCFullYear() - 1970);
-      sanitizedFields['Age'] = String(calculatedAge);
-    }
-  }
+  if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No valid fields provided for update.' });
 
-  if (Object.keys(sanitizedFields).length === 0) {
-    return res.status(400).json({ error: 'No valid fields provided for update.' });
-  }
-
-  if (!appId || !appSecret || !baseToken || !tableClient) {
-    return res.status(500).json({ error: 'Server Config Error: Missing Lark Credentials.' });
-  }
+  // Always refresh updated_at
+  update.updated_at = new Date().toISOString();
 
   try {
-    // 3. Get Token
-    const tokenRes = await fetch("https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ app_id: appId, app_secret: appSecret })
-    });
-    const tokenData = await tokenRes.json();
-    if (tokenData.code !== 0) {
-        return res.status(500).json({ error: `Lark Auth Failed: ${tokenData.msg}` });
-    }
-    const accessToken = tokenData.tenant_access_token;
-
-    // 4. Update Record
-    const updateRes = await fetch(`https://open.larksuite.com/open-apis/bitable/v1/apps/${baseToken}/tables/${tableClient}/records/${targetRecordId}`, {
-      method: "PUT",
-      headers: { 
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${accessToken}`
-      },
-      body: JSON.stringify({ fields: sanitizedFields })
-    });
-    
-    const updateData = await updateRes.json();
-    if (updateData.code !== 0) {
-      return res.status(500).json({ error: `Lark Update Failed: ${updateData.msg}` });
-    }
-
+    const { error } = await supabase.from('profiles').update(update).eq('id', profileId);
+    if (error) return res.status(500).json({ error: `Update failed: ${error.message}` });
     return res.status(200).json({ success: true });
 
   } catch (error) {
-    console.error("Update Client API Error:", error);
+    console.error('Update Client API Error:', error);
     return res.status(500).json({ error: error.message });
   }
 }
