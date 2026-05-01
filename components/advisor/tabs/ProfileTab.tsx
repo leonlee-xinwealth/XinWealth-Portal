@@ -25,6 +25,10 @@ export default function ProfileTab({ client, onSave }: { client: any; onSave: ()
       employment_status: form.employment_status || null, occupation: form.occupation, employer_name: form.employer_name,
       risk_profile: form.risk_profile || null, retirement_age: form.retirement_age,
       epf_account_number: form.epf_account_number, status: form.status,
+      race: form.race || null, tin_number: form.tin_number || null,
+      bank_name: form.bank_name || null, bank_account_number: form.bank_account_number || null,
+      ppa_account_number: form.ppa_account_number || null,
+      source_of_funds: form.source_of_funds || null, pep_status: form.pep_status || false,
     }).eq('id', client.id);
     setSaving(false); setEditing(false); setOk(true); onSave();
     setTimeout(() => setOk(false), 3000);
@@ -111,3 +115,4 @@ const Sel = ({ value, onChange, opts }: any) => (
     {opts.map(([v, l]: any) => <option key={v} value={v}>{l}</option>)}
   </select>
 );
+
