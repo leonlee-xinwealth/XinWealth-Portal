@@ -12,6 +12,7 @@ export default function Dashboard() {
   const [clients, setClients] = useState<any[]>([]);
   const [pendingFollowUps, setPendingFollowUps] = useState<any[]>([]);
   const [expiringPolicies, setExpiringPolicies] = useState<any[]>([]);
+  const [incompleteClients, setIncompleteClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,10 +27,43 @@ export default function Dashboard() {
       // Load all clients
       const { data: cls } = await supabase
         .from('clients')
-        .select('id, full_name, email, phone, status, date_of_birth')
+        .select('id, full_name, email, phone, status, date_of_birth, nric, risk_profile')
         .eq('advisor_id', adv.id)
         .order('full_name');
       setClients(cls || []);
+
+      const clientIds = (cls || []).map((c: any) => c.id);
+      if (clientIds.length > 0) {
+        const [{ data: cf }, { data: a }, { data: ip }] = await Promise.all([
+          supabase.from('cashflow_entries').select('client_id').in('client_id', clientIds),
+          supabase.from('assets').select('client_id').in('client_id', clientIds),
+          supabase.from('insurance_policies').select('client_id').in('client_id', clientIds),
+        ]);
+
+        const hasCashflow = new Set((cf || []).map((r: any) => r.client_id));
+        const hasAssets = new Set((a || []).map((r: any) => r.client_id));
+        const hasInsurance = new Set((ip || []).map((r: any) => r.client_id));
+
+        const miss = (en: string, zh: string) => language === 'zh' ? zh : en;
+        const calcMissing = (c: any) => {
+          const reasons: string[] = [];
+          if (!c.date_of_birth) reasons.push(miss('DOB', '生日'));
+          if (!c.phone) reasons.push(miss('Phone', '电话'));
+          if (!c.nric) reasons.push(miss('NRIC', '身份证'));
+          if (!c.risk_profile) reasons.push(miss('Risk', '风险评级'));
+          if (!hasCashflow.has(c.id)) reasons.push(miss('No cashflow', '缺少收支'));
+          if (!hasAssets.has(c.id)) reasons.push(miss('No assets', '缺少资产'));
+          if (!hasInsurance.has(c.id)) reasons.push(miss('No insurance', '缺少保单'));
+          return reasons;
+        };
+
+        const incompletes = (cls || [])
+          .map((c: any) => ({ ...c, missing: calcMissing(c) }))
+          .filter((c: any) => c.missing.length > 0);
+        setIncompleteClients(incompletes);
+      } else {
+        setIncompleteClients([]);
+      }
 
       // Load pending follow-ups (due today or overdue)
       const today = new Date().toISOString().split('T')[0];
@@ -46,7 +80,6 @@ export default function Dashboard() {
 
       // Load expiring insurance policies (within 90 days)
       const in90days = new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0];
-      const clientIds = (cls || []).map((c: any) => c.id);
       if (clientIds.length > 0) {
         const { data: policies } = await supabase
           .from('insurance_policies')
@@ -140,7 +173,7 @@ export default function Dashboard() {
       </div>
 
       {/* Action panels - 3 column grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
 
         {/* Follow-ups */}
         <ActionCard
@@ -229,6 +262,37 @@ export default function Dashboard() {
               </Link>
             );
           })}
+        </ActionCard>
+
+        <ActionCard
+          title={t('Incomplete Profiles', '资料不完整')}
+          icon="🧾"
+          count={incompleteClients.length}
+          urgent={incompleteClients.length > 0}
+          empty={incompleteClients.length === 0}
+          emptyText={t('All profiles look complete 🎉', '所有客户资料看起来都完整 🎉')}
+        >
+          {incompleteClients.slice(0, 4).map(c => (
+            <Link key={c.id} to={`/advisor/clients/${c.id}`}
+              className="flex items-start gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors"
+            >
+              <Avatar name={c.full_name || '?'} />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-xin-blue truncate">{c.full_name}</div>
+                <div className="text-[11px] text-slate-500 truncate">
+                  {t('Missing:', '缺少：')} {Array.isArray(c.missing) ? c.missing.join(', ') : ''}
+                </div>
+              </div>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 bg-red-100 text-red-600">
+                {t('Fix', '补全')}
+              </span>
+            </Link>
+          ))}
+          {incompleteClients.length > 4 ? (
+            <div className="py-2.5 text-center text-xs text-slate-400">
+              + {incompleteClients.length - 4} {t('more', '更多')}
+            </div>
+          ) : null}
         </ActionCard>
       </div>
 

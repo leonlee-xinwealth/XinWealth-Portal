@@ -9,8 +9,10 @@ import NetworthTab from '../tabs/NetworthTab';
 import InsuranceTab from '../tabs/InsuranceTab';
 import ActivityTab from '../tabs/ActivityTab';
 import FormKitTab from '../tabs/FormKitTab';
+import PortfolioTab from '../tabs/PortfolioTab';
+import HealthScoreCard from '../components/HealthScoreCard';
 
-type Tab = 'activity' | 'profile' | 'cashflow' | 'networth' | 'insurance' | 'formkit';
+type Tab = 'activity' | 'profile' | 'cashflow' | 'networth' | 'insurance' | 'portfolio' | 'formkit';
 
 export default function ClientDetail() {
   const { id } = useParams();
@@ -50,6 +52,7 @@ export default function ClientDetail() {
     { key: 'cashflow', en: 'Cash Flow', zh: '收支', icon: '💰' },
     { key: 'networth', en: 'Net Worth', zh: '净资产', icon: '📈' },
     { key: 'insurance', en: 'Insurance', zh: '保险', icon: '🛡️' },
+    { key: 'portfolio', en: 'Portfolio', zh: '投资组合', icon: '📊' },
     { key: 'formkit', en: 'Form Kit', zh: '表格资料', icon: '📋' },
   ];
 
@@ -96,6 +99,8 @@ export default function ClientDetail() {
         </div>
       </div>
 
+      <HealthScoreCard clientId={client.id} />
+
       {/* Tabs */}
       <div className="flex gap-1 bg-slate-100 p-1 rounded-xl w-fit mb-6 flex-wrap">
         {tabs.map(tabItem => (
@@ -123,6 +128,7 @@ export default function ClientDetail() {
       {tab === 'cashflow' && <CashflowTab clientId={client.id} />}
       {tab === 'networth' && <NetworthTab clientId={client.id} />}
       {tab === 'insurance' && <InsuranceTab clientId={client.id} />}
+      {tab === 'portfolio' && <PortfolioTab clientId={client.id} />}
       {tab === 'formkit' && <FormKitTab client={client} />}
     </div>
   );

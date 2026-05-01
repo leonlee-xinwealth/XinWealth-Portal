@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Plus, X } from 'lucide-react';
+import InsuranceGapPanel from '../components/InsuranceGapPanel';
 
 const TYPES: [string,string][] = [['life','Life / 人寿'],['medical','Medical / 医疗'],['critical_illness','Critical Illness / 重疾'],['disability','Disability / 残障'],['investment_linked','Investment-Linked / 投资联结'],['accident','Accident / 意外'],['property','Property / 财产'],['other','Other / 其他']];
 const FREQ: [string,string][] = [['monthly','Monthly'],['quarterly','Quarterly'],['semi_annual','Semi-annual'],['annual','Annual'],['single_premium','Single Premium']];
@@ -50,6 +51,8 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
         <SumCard label={t('Total Sum Assured','总保额')} value={`RM ${fmt(totalSA)}`} color="text-xin-blue" bg="bg-blue-50" />
         <SumCard label={t('Annual Premium','年保费')} value={`RM ${fmt(totalAP)}`} color="text-amber-600" bg="bg-amber-50" />
       </div>
+
+      <InsuranceGapPanel clientId={clientId} />
 
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-xin-blue">{t('Insurance Policies','保险保单')}</h3>
