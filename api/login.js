@@ -40,48 +40,155 @@ export default async function handler(req, res) {
     const user = authData.user;
     const session = authData.session;
 
-    // 2. Fetch profile record from 'profiles' table
-    let { data: profileData, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
+    const normalizedEmail = String(email || user.email || '').trim().toLowerCase();
 
-    if (profileError) {
-      console.error("Profile Fetch Error (id):", profileError);
-      return res.status(500).json({ error: 'Error fetching profile from database', details: profileError.message });
-    }
-
-    // Fallback: If not found by id, try finding by email (in case auth user was created separately)
-    if (!profileData) {
-      console.log(`Profile not found for id ${user.id}, attempting email fallback for ${email}`);
-      const { data: emailData, error: emailError } = await supabaseAdmin
+    const fetchProfileById = async () => {
+      const { data, error } = await supabaseAdmin
         .from('profiles')
         .select('*')
-        .eq('email', email)
+        .eq('id', user.id)
         .maybeSingle();
+      return { data, error };
+    };
 
-      if (emailError) {
-        console.error("Profile Fetch Error (email):", emailError);
+    const fetchProfileByEmail = async () => {
+      if (!normalizedEmail) return { data: null, error: null };
+      const { data, error } = await supabaseAdmin
+        .from('profiles')
+        .select('*')
+        .ilike('email', normalizedEmail)
+        .maybeSingle();
+      return { data, error };
+    };
+
+    const fetchClientForUser = async () => {
+      const { data, error } = await supabaseAdmin
+        .from('clients')
+        .select('*')
+        .eq('user_id', user.id)
+        .maybeSingle();
+      return { data, error };
+    };
+
+    const fetchClientByEmail = async () => {
+      if (!normalizedEmail) return { data: null, error: null };
+      const { data, error } = await supabaseAdmin
+        .from('clients')
+        .select('*')
+        .ilike('email', normalizedEmail)
+        .maybeSingle();
+      return { data, error };
+    };
+
+    const upsertProfileFromClient = async (clientRow) => {
+      const advisorId = clientRow?.advisor_id || clientRow?.advisor || null;
+      const dateOfBirth = clientRow?.date_of_birth ? new Date(clientRow.date_of_birth) : null;
+      const isoDob = dateOfBirth && !isNaN(dateOfBirth.getTime())
+        ? dateOfBirth.toISOString().slice(0, 10)
+        : null;
+
+      const profileUpsert = {
+        id: user.id,
+        role: 'client',
+        email: (clientRow?.email || normalizedEmail || user.email || '').trim().toLowerCase() || null,
+        family_name: clientRow?.family_name || null,
+        given_name: clientRow?.given_name || null,
+        salutation: clientRow?.salutation || null,
+        nric: clientRow?.nric || null,
+        date_of_birth: isoDob,
+        gender: clientRow?.gender || null,
+        marital_status: clientRow?.marital_status || null,
+        nationality: clientRow?.nationality || null,
+        residency: clientRow?.residency || null,
+        employment_status: clientRow?.employment_status || null,
+        tax_status: clientRow?.tax_status || null,
+        occupation: clientRow?.occupation || null,
+        retirement_age: clientRow?.retirement_age ?? null,
+        epf_account_number: clientRow?.epf_account_number || null,
+        ppa_account_number: clientRow?.ppa_account_number || null,
+        correspondence_address: clientRow?.correspondence_address || null,
+        correspondence_postal_code: clientRow?.correspondence_postal_code || null,
+        correspondence_city: clientRow?.correspondence_city || null,
+        correspondence_state: clientRow?.correspondence_state || null,
+        advisor_id: advisorId
+      };
+
+      const { error } = await supabaseAdmin
+        .from('profiles')
+        .upsert(profileUpsert, { onConflict: 'id' });
+
+      return { error };
+    };
+
+    const linkClientToAuthUser = async (clientRow) => {
+      if (!clientRow?.id) return { error: null };
+      const current = clientRow.user_id || null;
+      if (current === user.id) return { error: null };
+      const { error } = await supabaseAdmin
+        .from('clients')
+        .update({ user_id: user.id })
+        .eq('id', clientRow.id);
+      return { error };
+    };
+
+    let profileData = null;
+
+    const { data: byId, error: byIdErr } = await fetchProfileById();
+    if (byIdErr) {
+      console.error('Profile Fetch Error (id):', byIdErr);
+    } else {
+      profileData = byId;
+    }
+
+    if (!profileData) {
+      const { data: clientByUser, error: clientByUserErr } = await fetchClientForUser();
+      if (clientByUserErr) console.error('Client Fetch Error (user_id):', clientByUserErr);
+
+      const clientRow = clientByUser || (await fetchClientByEmail()).data;
+      if (clientRow) {
+        const { error: linkErr } = await linkClientToAuthUser(clientRow);
+        if (linkErr) console.error('Client Link Error (user_id):', linkErr);
+
+        const { error: upsertErr } = await upsertProfileFromClient(clientRow);
+        if (upsertErr) {
+          console.error('Profile Upsert Error (from client):', upsertErr);
+          return res.status(500).json({ error: 'Error syncing profile from client record', details: upsertErr.message });
+        }
+
+        const { data: syncedProfile, error: syncedErr } = await fetchProfileById();
+        if (syncedErr) {
+          console.error('Profile Fetch Error (after sync):', syncedErr);
+          return res.status(500).json({ error: 'Error fetching profile from database', details: syncedErr.message });
+        }
+        profileData = syncedProfile;
+      }
+    }
+
+    if (!profileData) {
+      const { data: emailProfile, error: emailErr } = await fetchProfileByEmail();
+      if (emailErr) {
+        console.error('Profile Fetch Error (email):', emailErr);
       }
 
-      if (emailData) {
-        profileData = emailData;
+      if (emailProfile) {
+        profileData = emailProfile;
       } else {
-        // Create a minimal profile if one doesn't exist yet (Auto-onboarding)
+        const seedEmail = normalizedEmail || user.email;
+        const seedGiven = seedEmail ? String(seedEmail).split('@')[0] : 'client';
+
         const { data: newProfile, error: createError } = await supabaseAdmin
           .from('profiles')
           .insert({
             id: user.id,
-            email: user.email,
-            given_name: user.email.split('@')[0],
+            email: seedEmail,
+            given_name: seedGiven,
             role: 'client'
           })
           .select()
           .single();
-        
+
         if (createError) {
-          console.error("Auto-create Profile Error:", createError);
+          console.error('Auto-create Profile Error:', createError);
           return res.status(404).json({ error: 'Profile not found and could not be auto-created.' });
         }
         profileData = newProfile;
