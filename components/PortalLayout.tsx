@@ -1,9 +1,10 @@
-import React, { useState, Suspense, lazy } from 'react';
+import React, { useEffect, useState, Suspense, lazy } from 'react';
 import Sidebar from './Sidebar';
 import Login from './Login';
 import { ViewState } from '../types';
 import { getSession, clearSession } from '../services/apiService';
 import { Menu, Loader2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 const Investment = lazy(() => import('./Investment'));
 const Player = lazy(() => import('./Player'));
@@ -20,12 +21,32 @@ const PortalLayout: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewState>(ViewState.PLAYER);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      setIsAuthenticated(Boolean(data.session));
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setIsAuthenticated(Boolean(session));
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const handleLoginSuccess = () => {
     setIsAuthenticated(true);
   };
 
   const handleLogout = () => {
     clearSession();
+    supabase.auth.signOut();
     setIsAuthenticated(false);
     setCurrentView(ViewState.PLAYER);
   };

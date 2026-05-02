@@ -1,44 +1,81 @@
-import { supabaseAdmin } from './_lib/supabase.js';
-import { investmentRowToFrontend } from './_lib/shape.js';
+import { applyCors, configError, getAuthUser, supabaseAdmin } from './_lib/supabase.js';
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const monthName = (dateStr) => {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  return MONTH_NAMES[d.getMonth()] || '';
+};
+
+const yearString = (dateStr) => {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  return String(d.getFullYear());
+};
+
+const toMs = (dateStr) => {
+  const d = new Date(dateStr);
+  const t = d.getTime();
+  return Number.isFinite(t) ? t : null;
+};
+
+const record = (id, fields) => ({ id, record_id: id, fields });
 
 export default async function handler(req, res) {
-  const { name } = req.query;
+  applyCors(res);
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
+  if (!supabaseAdmin) return configError(res);
 
-  if (!name) {
-    return res.status(400).json({ error: 'User email is required' });
+  const { user, error } = await getAuthUser(req);
+  if (error || !user) {
+    return res.status(401).json({ error: `Unauthorized: ${error || 'Invalid token'}` });
   }
 
-  if (!supabaseAdmin) {
-    return res.status(500).json({ error: 'Server not configured' });
+  const email = (user.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Missing email on auth user' });
+
+  const { data: clientRow, error: clientErr } = await supabaseAdmin
+    .from('clients')
+    .select('id')
+    .ilike('email', email)
+    .maybeSingle();
+
+  if (clientErr) return res.status(500).json({ error: 'Error fetching client', details: clientErr.message });
+  if (!clientRow?.id) return res.status(200).json({ records: [] });
+
+  const { data: holdings, error: holdingsErr } = await supabaseAdmin
+    .from('portfolio_holdings')
+    .select('*')
+    .eq('client_id', clientRow.id);
+
+  if (holdingsErr) return res.status(500).json({ error: 'Failed to fetch holdings', details: holdingsErr.message });
+
+  const byMonth = new Map();
+  for (const h of holdings || []) {
+    const date = h.snapshot_month || h.created_at;
+    const key = String(date || '');
+    const current = byMonth.get(key) || { id: key, date, marketValue: 0 };
+    current.marketValue += Number(h.market_value || 0);
+    byMonth.set(key, current);
   }
 
-  try {
-    // Search for profile
-    const { data: profiles, error: profileError } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('email', name)
-      .maybeSingle();
+  const records = Array.from(byMonth.values()).map((row) => {
+    const date = row.date;
+    return record(row.id, {
+      'Date': toMs(date),
+      'End Value': Number(row.marketValue || 0),
+      'Cashflow': 0,
+      'FD': 0,
+      'Month': monthName(date) || '',
+      'Year': yearString(date) || ''
+    });
+  });
 
-    if (profileError || !profiles) {
-      return res.status(200).json([]);
-    }
-
-    const profileId = profiles.id;
-
-    // Fetch investments
-    const { data: investments, error: invError } = await supabaseAdmin
-      .from('investments')
-      .select('*')
-      .eq('profile_id', profileId)
-      .order('year', { ascending: false })
-      .order('month', { ascending: false });
-
-    if (invError) throw invError;
-
-    return res.status(200).json((investments || []).map(investmentRowToFrontend));
-  } catch (error) {
-    console.error('Data API Error:', error);
-    return res.status(500).json({ error: error.message });
-  }
+  return res.status(200).json({ records });
 }
+

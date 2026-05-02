@@ -115,7 +115,15 @@ export default async function handler(req, res) {
     const { error: upsertUserProfileErr } = await upsertUserProfile(clientRow);
     if (upsertUserProfileErr) {
       console.error('User Profile Upsert Error:', upsertUserProfileErr);
-      return res.status(500).json({ error: 'Error linking auth user to client record', details: upsertUserProfileErr.message });
+      return res.status(500).json({
+        error: 'Error linking auth user to client record',
+        details: {
+          message: upsertUserProfileErr.message,
+          code: upsertUserProfileErr.code,
+          hint: upsertUserProfileErr.hint,
+          details: upsertUserProfileErr.details
+        }
+      });
     }
 
     const fullName = clientRow.full_name || clientRow.email || normalizedEmail || user.email;

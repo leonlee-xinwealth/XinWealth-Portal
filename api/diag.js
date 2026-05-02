@@ -1,4 +1,4 @@
-import { supabaseAdmin } from './_lib/supabase.js';
+import { supabaseAdmin, supabaseServiceKeyRole } from './_lib/supabase.js';
 
 export default async function handler(req, res) {
   if (!supabaseAdmin) {
@@ -41,6 +41,7 @@ export default async function handler(req, res) {
     env_check: {
       has_url: !!process.env.SUPABASE_URL,
       has_service_key: !!process.env.SUPABASE_SERVICE_ROLE_KEY
-    }
+    },
+    key_role: supabaseServiceKeyRole
   });
 }

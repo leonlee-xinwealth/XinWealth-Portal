@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchRawHealthData, getLatestRecords, getSession } from '../services/apiService';
+import { fetchRawHealthData, getLatestRecords } from '../services/apiService';
+import { getAccessToken } from '../lib/supabase';
 import { 
   Loader2, AlertCircle, Check, Save, Plus, Trash2, 
   Wallet, Receipt,
@@ -177,9 +178,9 @@ const LevelUp: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    const session = getSession();
-    if (!session?.token) {
-      setError("Session expired. Please log in again.");
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+      setError('Session expired. Please log in again.');
       return;
     }
 
@@ -190,7 +191,7 @@ const LevelUp: React.FC = () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.token}`
+          'Authorization': `Bearer ${accessToken}`
         },
         body: JSON.stringify({
           targetMonth,

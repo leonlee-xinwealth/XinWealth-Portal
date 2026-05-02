@@ -1,6 +1,6 @@
 import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics, AnalyticsItem } from '../types';
 
-import { supabase } from '../lib/supabase';
+import { getAccessToken, supabase } from '../lib/supabase';
 
 const setSession = (data: any) => localStorage.setItem('xinwealth_user', JSON.stringify(data));
 export const updateSession = (partialData: Partial<UserSession>) => {
@@ -52,34 +52,38 @@ const deduplicateByMonth = (records: any[]) => {
 
 export const authenticateUser = async (email: string, pass: string): Promise<boolean> => {
   try {
-    const response = await fetch('/api/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password: pass })
+    const trimmedEmail = (email || '').trim().toLowerCase();
+    const trimmedPass = pass || '';
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
+      password: trimmedPass
     });
 
-    const contentType = response.headers.get("content-type");
-    if (contentType && contentType.indexOf("application/json") !== -1) {
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error || 'Authentication failed (Server Error)');
-      }
-      
-      // Persist Supabase session
-      if (data.token && data.refresh_token) {
-        await supabase.auth.setSession({
-          access_token: data.token,
-          refresh_token: data.refresh_token
-        });
-      }
-      
-      setSession(data);
-      return true;
-    } else {
-      const text = await response.text();
-      console.error("Non-JSON response from server:", text);
-      throw new Error(`Server connection failed. Status: ${response.status}. Please ensure API is running.`);
+    if (error) {
+      throw new Error(error.message || 'Invalid email or password');
     }
+
+    const accessToken = data.session?.access_token || (await getAccessToken());
+    if (!accessToken) {
+      throw new Error('Authentication succeeded but no access token was returned');
+    }
+
+    const meRes = await fetch('/api/me', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    });
+    const me = await meRes.json();
+    if (!meRes.ok) {
+      throw new Error(me.error || 'Failed to load user profile');
+    }
+
+    setSession({
+      ...me,
+      token: accessToken
+    });
+    return true;
 
   } catch (error) {
     console.error("Auth Error:", error);
@@ -88,13 +92,15 @@ export const authenticateUser = async (email: string, pass: string): Promise<boo
 };
 
 const fetchData = async () => {
-  const user = getSession();
-  if (!user || (!user.name && !user.email)) throw new Error("No user session found. Please sign out and sign in again.");
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new Error('Authentication error. Please login again.');
 
-  // ADDED TIMESTAMP TO PREVENT CACHING
-  const queryName = user.name || user.email;
   const timestamp = new Date().getTime();
-  const response = await fetch(`/api/data?name=${encodeURIComponent(queryName)}&_t=${timestamp}`);
+  const response = await fetch(`/api/data?_t=${timestamp}`, {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  });
 
   const contentType = response.headers.get("content-type");
   if (contentType && contentType.indexOf("application/json") !== -1) {
@@ -325,16 +331,14 @@ export const submitKYC = async (formData: KYCData): Promise<{ success: boolean; 
 
 export const submitLevelUp = async (formData: any): Promise<{ success: boolean }> => {
   try {
-    const session = getSession();
-    if (!session || !session.token) {
-      throw new Error("Authentication error. Please login again.");
-    }
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('Authentication error. Please login again.');
 
     const response = await fetch('/api/levelUp', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.token}`
+        'Authorization': `Bearer ${accessToken}`
       },
       body: JSON.stringify(formData)
     });
@@ -490,12 +494,15 @@ export const calculateAnalytics = (data: any): FinancialAnalytics => {
 };
 
 export const fetchRawHealthData = async (): Promise<any> => {
-  const user = getSession();
-  if (!user || (!user.name && !user.email)) throw new Error("No user session found. Please sign out and sign in again.");
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new Error('Authentication error. Please login again.');
 
-  const queryName = user.name || user.email;
   const timestamp = new Date().getTime();
-  const response = await fetch(`/api/health?name=${encodeURIComponent(queryName)}&_t=${timestamp}`);
+  const response = await fetch(`/api/health?_t=${timestamp}`, {
+    headers: {
+      'Authorization': `Bearer ${accessToken}`
+    }
+  });
   
   if (!response.ok) {
      throw new Error("Failed to fetch health data");
@@ -506,16 +513,14 @@ export const fetchRawHealthData = async (): Promise<any> => {
 
 export const updateClientInfo = async (recordId: string, fields: any): Promise<{ success: boolean }> => {
   try {
-    const session = getSession();
-    if (!session || !session.token) {
-      throw new Error("Authentication error. Please login again.");
-    }
+    const accessToken = await getAccessToken();
+    if (!accessToken) throw new Error('Authentication error. Please login again.');
 
     const response = await fetch('/api/updateClient', {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.token}`
+        'Authorization': `Bearer ${accessToken}`
       },
       body: JSON.stringify({ recordId, fields }) // We still send recordId for fallback or validation, though backend will trust token
     });

@@ -11,6 +11,22 @@ export const supabaseAdmin = hasSupabaseEnv
     })
   : null;
 
+export const supabaseServiceKeyRole = (() => {
+  if (!serviceKey) return null;
+  const parts = serviceKey.split('.');
+  if (parts.length < 2) return null;
+  try {
+    const payloadBase64Url = parts[1];
+    const base64 = payloadBase64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    const json = Buffer.from(padded, 'base64').toString('utf8');
+    const payload = JSON.parse(json);
+    return payload?.role || null;
+  } catch {
+    return null;
+  }
+})();
+
 export function getBearerToken(req) {
   const header = req.headers?.authorization || req.headers?.Authorization || '';
   if (!header.startsWith('Bearer ')) return null;

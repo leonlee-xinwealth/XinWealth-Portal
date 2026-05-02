@@ -21,19 +21,24 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: `Unauthorized: ${authErr || 'Invalid token'}` });
     }
 
-    const { data: userProfile, error: userProfileErr } = await supabaseAdmin
-      .from('user_profiles')
-      .select('client_id')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (userProfileErr) {
-      return res.status(500).json({ error: 'Failed to resolve client id', details: userProfileErr.message });
+    const email = (user.email || '').trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({ error: 'Missing email on auth user' });
     }
 
-    const clientId = userProfile?.client_id;
+    const { data: clientRow, error: clientErr } = await supabaseAdmin
+      .from('clients')
+      .select('id')
+      .ilike('email', email)
+      .maybeSingle();
+
+    if (clientErr) {
+      return res.status(500).json({ error: 'Failed to resolve client id', details: clientErr.message });
+    }
+
+    const clientId = clientRow?.id;
     if (!clientId) {
-      return res.status(404).json({ error: 'Client link not found for this user' });
+      return res.status(404).json({ error: 'Client profile not found' });
     }
 
     const clean = {};
