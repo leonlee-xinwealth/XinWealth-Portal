@@ -8,6 +8,7 @@ import ClientList from './pages/ClientList';
 import NewClient from './pages/NewClient';
 import ClientDetail from './pages/ClientDetail';
 import Settings from './pages/Settings';
+import InsuranceComparison from './pages/InsuranceComparison';
 
 const AdvisorApp: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -48,6 +49,7 @@ const AdvisorApp: React.FC = () => {
         <Route path="clients" element={<ClientList />} />
         <Route path="clients/new" element={<NewClient />} />
         <Route path="clients/:id" element={<ClientDetail />} />
+        <Route path="insurance-comparison" element={<InsuranceComparison />} />
         <Route path="settings" element={<Settings />} />
       </Route>
     </Routes>

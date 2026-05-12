@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import { LayoutDashboard, Users, Settings, LogOut, Menu, X } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 
 const AdvisorLayout: React.FC = () => {
@@ -17,6 +17,7 @@ const AdvisorLayout: React.FC = () => {
   const navItems = [
     { to: '/advisor/dashboard', icon: <LayoutDashboard size={18} />, label: language === 'zh' ? '主页' : 'Dashboard' },
     { to: '/advisor/clients', icon: <Users size={18} />, label: language === 'zh' ? '客户' : 'Clients' },
+    { to: '/advisor/insurance-comparison', icon: <ShieldCheck size={18} />, label: language === 'zh' ? '保单对比' : 'Insurance Comparison' },
     { to: '/advisor/settings', icon: <Settings size={18} />, label: language === 'zh' ? '设置' : 'Settings' },
   ];
 
