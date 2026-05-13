@@ -6,7 +6,7 @@ import {
   Building2,
   HeartPulse,
   Wallet,
-  Ribbon,
+  Target,
   Leaf,
   ChevronDown,
   ChevronUp
@@ -680,7 +680,7 @@ const InsuranceComparison: React.FC = () => {
                     },
                     {
                       id: 'cancer',
-                      icon: Ribbon,
+                      icon: Target,
                       label: t('Cancer coverage', '癌症保障'),
                       sub: t('Alt treatment, outpatient', '替代治疗/门诊')
                     },
