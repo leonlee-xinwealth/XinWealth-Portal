@@ -39,6 +39,12 @@ type TierCoverage = {
   icuMaxDays: number | null;
   icuLimit: string | null;
   roomBoardMaxDays: number | null;
+  outpatientDetails: string | null;
+  emergencyDetails: string | null;
+  panelHospitalNotes: string | null;
+  overseasCoverageDetails: string | null;
+  noClaimBenefit: string | null;
+  pricingDetails: string | null;
 };
 
 type Tier = {
@@ -96,11 +102,31 @@ type SelectedComparison = {
   riders: Rider[];
 };
 
+type ReviewCol = {
+  insurerId: string;
+  shortName: string;
+  planName: string;
+  tier: Tier | null;
+  deductible: Deductible;
+  plan: Plan;
+};
+
 const MIN_INSURERS = 3;
 
 const InsuranceComparison: React.FC = () => {
   const { language } = useLanguage();
   const t = (en: string, zh: string) => (language === 'zh' ? zh : en);
+
+  const insurerLabel = (insurer: Insurer) => insurer.shortName || insurer.name;
+
+  const displayPlanName = (planName: string, insurer: Insurer) => {
+    const sn = (insurer.shortName || '').toLowerCase();
+    const shouldTrimPlus = sn === 'hla' || sn === 'prudential' || sn === 'pru';
+    if (!shouldTrimPlus) return planName;
+    const idx = planName.indexOf('+');
+    if (idx === -1) return planName;
+    return planName.slice(0, idx).trim();
+  };
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
@@ -255,7 +281,7 @@ const InsuranceComparison: React.FC = () => {
 
   const [hasCompanyCover, setHasCompanyCover] = useState(false);
   const [scenario, setScenario] = useState<'comfort' | 'recovery' | 'selfpay' | 'cancer' | 'wellness' | null>(null);
-  const [showBonus, setShowBonus] = useState(false);
+  const [openBenefits, setOpenBenefits] = useState<{ outpatient: boolean; other: boolean }>({ outpatient: false, other: false });
 
   const formatMoney = (n: number | null) => {
     if (n === null || n === undefined) return '—';
@@ -289,6 +315,68 @@ const InsuranceComparison: React.FC = () => {
     return match?.description || '—';
   };
 
+  const splitTextPieces = (text: string) =>
+    text
+      .split(/；|;|\n|\r|\u2022|\u00b7/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  const extractPiece = (texts: Array<string | null | undefined>, keywords: string[]) => {
+    const ks = keywords.map((k) => k.toLowerCase());
+    const merged = texts.filter(Boolean).join('；');
+    const pieces = splitTextPieces(merged);
+    const hit = pieces.find((p) => {
+      const v = p.toLowerCase();
+      return ks.some((k) => v.includes(k));
+    });
+    return hit || '';
+  };
+
+  const getBenefitValue = (col: ReviewCol, benefitKey: string) => {
+    const cov = col.tier?.coverage;
+    const infoTexts = [
+      cov?.outpatientDetails,
+      cov?.emergencyDetails,
+      cov?.panelHospitalNotes,
+      cov?.overseasCoverageDetails,
+      cov?.noClaimBenefit,
+      cov?.pricingDetails
+    ];
+
+    const featureTexts = col.plan.features.flatMap((f) => [f.name, f.description].filter(Boolean)) as string[];
+
+    const map: Record<string, string[][]> = {
+      cancer_tx: [['癌症', 'cancer', 'chemo']],
+      kidney_dialysis: [['肾', 'dialysis', 'kidney']],
+      emergency_accidental: [['意外', 'accident', 'emergency', '牙科', 'dental']],
+      dengue: [['骨痛热症', '登革', 'dengue', '寨卡', 'zika']],
+      physiotherapy: [['物理', 'physio', 'rehab', '复健']],
+      imaging: [['mri', 'pet', 'imaging', '影像']],
+      home_nursing: [['home nursing', '居家', '护理']],
+      lodger: [['lodger', '陪护', '住宿']],
+      iol: [['iol', 'intraocular', '晶体']],
+      tcm: [['tcm', 'traditional chinese', '中医', '脊骨', 'chiro']],
+      organ_transplant: [['organ transplant', '器官移植', '移植']],
+      overseas: [['overseas', '境外', '海外', '新加坡', 'singapore', '香港', 'hong kong', 'china', '中国', 'brunei', '汶莱']],
+      alt_cancer: [['alternative cancer', 'alt', '替代', '癌症']],
+      second_opinion: [['2nd opinion', 'second opinion', '第二意见']],
+      ambulance: [['ambulance', '救护车', '撤离', 'evac']],
+      maternity: [['maternity', '妊娠', '孕', '产后']],
+      medical_appliances: [['medical appliances', '器材', 'appliances']],
+      health_wallet: [['health wallet', '钱包', '无理赔', 'no-claim']],
+      wellness: [['wellness', 'screening', '体检', '健检', '疫苗']],
+      mental_health: [['mental', '精神', '心理', 'depression', 'ocd']],
+      recovery_care: [['recovery', '复元', '护理金', 'rehab']]
+    };
+
+    const groups = map[benefitKey] || [];
+    for (const keys of groups) {
+      const piece = extractPiece(infoTexts, keys) || extractPiece(featureTexts, keys);
+      if (piece) return piece;
+    }
+    return '—';
+  };
+
   const getSelectedTier = (s: SelectedComparison) => s.tier || s.plan.defaultTier;
 
   const getBestMask = (values: Array<number | null>, hi: boolean) => {
@@ -313,22 +401,11 @@ const InsuranceComparison: React.FC = () => {
   const aia = findByShortName('aia');
   const pru = findByShortName('pru');
 
-  const getHighestRoomTierFor = (s: SelectedComparison | null) => {
-    if (!s) return null;
-    const tiers = s.plan.tiers || [];
-    if (tiers.length === 0) return null;
-    return tiers.reduce((best, cur) => {
-      const bestRb = best.roomBoardDailyLimit ?? -Infinity;
-      const curRb = cur.roomBoardDailyLimit ?? -Infinity;
-      return curRb > bestRb ? cur : best;
-    }, tiers[0]);
-  };
-
   const recommended = useMemo(() => {
     if (!scenario) return null;
     if (scenario === 'comfort') {
       if (!hla) return null;
-      return { ...hla, tier: getHighestRoomTierFor(hla) };
+      return { ...hla, tier: getSelectedTier(hla) };
     }
     if (scenario === 'recovery') return aia ? { ...aia, tier: getSelectedTier(aia) } : null;
     if (scenario === 'selfpay') return pru ? { ...pru, tier: getSelectedTier(pru) } : null;
@@ -337,68 +414,345 @@ const InsuranceComparison: React.FC = () => {
     return null;
   }, [aia, hla, pru, scenario]);
 
-  const whyText = useMemo(() => {
-    if (!scenario || !recommended) return '';
+  const scenarioOutput = useMemo(() => {
+    if (!scenario || !recommended) {
+      return { why: '', highlightIds: [] as string[], warnInsurerId: '', warnMessage: '' };
+    }
+
     const tier = recommended.tier || recommended.plan.defaultTier;
     if (scenario === 'comfort') {
       const rb = tier?.roomBoardDailyLimit ? `RM ${tier.roomBoardDailyLimit.toLocaleString()}/day` : '—';
-      return t(
-        `Highest room & board (${rb}) — best for clients who prioritize private ward comfort.`,
-        `病房津贴最高（${rb}）— 适合重视私立病房舒适度的客户。`
-      );
+      return {
+        why: t(
+          `HLA ${tier?.tierName || ''} has the highest R&B (${rb}). Best for clients who want private ward comfort without compromise.`,
+          `HLA ${tier?.tierName || ''} 病房津贴最高（${rb}），适合重视私立病房舒适度的客户。`
+        ),
+        highlightIds: ['rb', 'annual'],
+        warnInsurerId: '',
+        warnMessage: ''
+      };
     }
+
     if (scenario === 'recovery') {
-      const post = tier?.coverage?.postHospitalizationDays ?? null;
-      return t(
-        `Most comprehensive recovery support. Post-hospitalisation up to ${post ? `${post}d` : '—'}.`,
-        `康复支持更全面。出院后保障最长 ${post ? `${post} 天` : '—'}。`
-      );
+      return {
+        why: t(
+          'AIA covers longer post-hosp for serious conditions + recovery care + Health Wallet. Strongest post-discharge support among the options.',
+          'AIA 针对重疾的出院后保障更长，并带有复元护理 + Health Wallet，出院后支持更强。'
+        ),
+        highlightIds: ['post', 'icu'],
+        warnInsurerId: '',
+        warnMessage: ''
+      };
     }
+
     if (scenario === 'selfpay') {
-      const d = recommended.plan.deductible.amount ? `RM ${recommended.plan.deductible.amount.toLocaleString()}` : '—';
-      return t(
-        `Lowest fixed self-pay (deductible ${d}). Suitable when client has no company cover.`,
-        `固定自付最低（免赔额 ${d}）。适合没有公司医疗保障的客户。`
-      );
+      const pruDed = recommended.plan.deductible.amount ? `RM ${recommended.plan.deductible.amount.toLocaleString()}` : '—';
+      const hlaDed = hla?.plan.deductible.amount ? `RM ${hla.plan.deductible.amount.toLocaleString()}` : '—';
+      return {
+        why: hasCompanyCover
+          ? t(
+              `PRU deductible ${pruDed} — lowest fixed self-pay. Company insurance can absorb the deductible if needed.`,
+              `PRU 免赔额 ${pruDed} — 固定自付最低；有公司医疗保障时更适合承接免赔额。`
+            )
+          : t(
+              `PRU deductible ${pruDed} — lowest and most predictable self-pay. HLA deductible ${hlaDed} is much higher without company insurance to cushion it.`,
+              `PRU 免赔额 ${pruDed} — 自付最低且更可预测；没有公司医疗保障时，HLA ${hlaDed} 自付会更高。`
+            ),
+        highlightIds: ['ded', 'maxSelfPay'],
+        warnInsurerId: !hasCompanyCover && hla ? hla.insurer.id : '',
+        warnMessage: t('RM 2,500 deductible — only suitable if client has company medical cover', 'RM 2,500 免赔额 — 仅适合客户有公司医疗保障时')
+      };
     }
+
     if (scenario === 'cancer') {
-      const alt = getFeatureValue(recommended.plan, ['alternative cancer treatment', 'alt', '癌']);
-      return t(
-        `Alternative cancer-related benefit: ${alt}`,
-        `替代癌症相关权益：${alt}`
+      const alt = getBenefitValue(
+        {
+          insurerId: recommended.insurer.id,
+          shortName: recommended.insurer.shortName || recommended.insurer.name,
+          planName: recommended.plan.name,
+          tier: tier || null,
+          deductible: recommended.plan.deductible,
+          plan: recommended.plan
+        },
+        'alt_cancer'
       );
+      return {
+        why: t(
+          `HLA ${tier?.tierName || ''} includes alternative cancer-related benefit (${alt || '—'}) and strong outpatient cancer support.`,
+          `HLA ${tier?.tierName || ''} 包含替代癌症相关权益（${alt || '—'}），并提供更强的癌症门诊支持。`
+        ),
+        highlightIds: ['annual'],
+        warnInsurerId: '',
+        warnMessage: ''
+      };
     }
+
     if (scenario === 'wellness') {
       const wallet = getFeatureValue(recommended.plan, ['health wallet', 'no-claim', '钱包', '无理赔']);
-      return t(
-        `Wellness & prevention benefit: ${wallet}`,
-        `健康管理/预防权益：${wallet}`
-      );
+      return {
+        why: t(
+          `AIA Health Wallet: ${wallet}. Unique in this comparison for wellness & prevention.`,
+          `AIA Health Wallet：${wallet}。在本对比中属于更偏向健康管理/预防的方案。`
+        ),
+        highlightIds: [],
+        warnInsurerId: '',
+        warnMessage: ''
+      };
     }
-    return '';
-  }, [getFeatureValue, recommended, scenario, t]);
 
-  const showDeductibleWarning = useMemo(() => {
-    if (scenario !== 'selfpay') return false;
-    if (hasCompanyCover) return false;
-    if (!hla) return false;
-    const amount = hla.plan.deductible.amount || 0;
-    return amount >= 1000;
-  }, [hasCompanyCover, hla, scenario]);
+    return { why: '', highlightIds: [] as string[], warnInsurerId: '', warnMessage: '' };
+  }, [getBenefitValue, getFeatureValue, hasCompanyCover, hla, recommended, scenario, t]);
 
-  const reviewCols = useMemo(() => {
+  const reviewCols: ReviewCol[] = useMemo(() => {
     return selection.map((s) => {
       const tier = getSelectedTier(s);
       return {
         insurerId: s.insurer.id,
-        shortName: s.insurer.shortName || s.insurer.name,
-        planName: s.plan.name,
+        shortName: insurerLabel(s.insurer),
+        planName: displayPlanName(s.plan.name, s.insurer),
         tier,
         deductible: s.plan.deductible,
         plan: s.plan
       };
     });
   }, [getSelectedTier, selection]);
+
+  const renderMvpCompareTable = (cols: ReviewCol[], recInsurerId: string, highlightIds: string[], warnInsurerId: string) => {
+    const annualVals = cols.map((c) => c.tier?.annualLimit ?? null);
+    const rbVals = cols.map((c) => c.tier?.roomBoardDailyLimit ?? null);
+    const preVals = cols.map((c) => c.tier?.coverage?.preHospitalizationDays ?? null);
+    const postVals = cols.map((c) => c.tier?.coverage?.postHospitalizationDays ?? null);
+    const icuVals = cols.map((c) => c.tier?.coverage?.icuMaxDays ?? null);
+    const dedVals = cols.map((c) => c.deductible.amount ?? null);
+
+    const annualBest = getBestMask(annualVals, true);
+    const rbBest = getBestMask(rbVals, true);
+    const preBest = getBestMask(preVals, true);
+    const postBest = getBestMask(postVals, true);
+    const icuBest = getBestMask(icuVals, true);
+    const dedBest = getBestMask(dedVals, false);
+
+    const thOpacity = (id: string) => (recInsurerId && id !== recInsurerId ? 'opacity-30' : 'opacity-100');
+    const tdOpacity = (id: string) => (recInsurerId && id !== recInsurerId ? 'opacity-30' : 'opacity-100');
+
+    const isHl = (id: string) => highlightIds.includes(id);
+
+    const outpatientRows = [
+      { id: 'cancer_tx', label: t('Cancer tx', '癌症治疗') },
+      { id: 'kidney_dialysis', label: t('Kidney dialysis', '肾透析') },
+      { id: 'emergency_accidental', label: t('Emergency accidental', '意外门诊') },
+      { id: 'dengue', label: t('Dengue', '骨痛热症/登革热') },
+      { id: 'physiotherapy', label: t('Physiotherapy', '物理治疗') },
+      { id: 'imaging', label: t('Imaging (MRI/PET)', '影像检查（MRI/PET）') }
+    ];
+
+    const otherRows = [
+      { id: 'home_nursing', label: t('Home nursing', '居家护理') },
+      { id: 'lodger', label: t('Lodger', '陪护住宿') },
+      { id: 'iol', label: t('IOL', '人工晶体') },
+      { id: 'tcm', label: t('TCM', '中医/脊骨') },
+      { id: 'organ_transplant', label: t('Organ transplant', '器官移植') },
+      { id: 'overseas', label: t('Overseas', '海外保障') },
+      { id: 'alt_cancer', label: t('Alt. cancer tx', '替代癌症治疗') },
+      { id: 'second_opinion', label: t('2nd opinion', '第二意见') },
+      { id: 'ambulance', label: t('Ambulance', '救护车/撤离') },
+      { id: 'maternity', label: t('Maternity comp.', '妊娠并发症') },
+      { id: 'medical_appliances', label: t('Medical appliances', '医疗器材') },
+      { id: 'health_wallet', label: t('Health Wallet', '健康钱包') },
+      { id: 'wellness', label: t('Wellness', '健康管理') },
+      { id: 'mental_health', label: t('Mental health', '心理健康') },
+      { id: 'recovery_care', label: t('Recovery care', '复元护理') }
+    ];
+
+    const rows = [
+      {
+        id: 'annual',
+        label: t('Annual limit', '年度限额'),
+        best: annualBest,
+        accent: 'info' as const,
+        value: (c: ReviewCol) => formatMoney(c.tier?.annualLimit ?? null)
+      },
+      {
+        id: 'lifetime',
+        label: t('Lifetime limit', '终身限额'),
+        best: cols.map(() => false),
+        accent: undefined,
+        value: (c: ReviewCol) => (c.tier?.lifetimeLimit === null ? t('Unlimited', '无限额') : formatMoney(c.tier?.lifetimeLimit ?? null))
+      },
+      {
+        id: 'rb',
+        label: t('R&B / day', '病房津贴/天'),
+        best: rbBest,
+        accent: 'info' as const,
+        value: (c: ReviewCol) => (c.tier?.roomBoardDailyLimit ? `RM ${c.tier.roomBoardDailyLimit.toLocaleString()}` : '—')
+      },
+      {
+        id: 'pre',
+        label: t('Pre-hosp', '住院前'),
+        best: preBest,
+        accent: 'info' as const,
+        value: (c: ReviewCol) => formatDays(c.tier?.coverage?.preHospitalizationDays ?? null)
+      },
+      {
+        id: 'post',
+        label: t('Post-hosp', '出院后'),
+        best: postBest,
+        accent: 'info' as const,
+        value: (c: ReviewCol) => {
+          const d = c.tier?.coverage?.postHospitalizationDays ?? null;
+          const note = extractPiece([c.tier?.coverage?.outpatientDetails, c.tier?.coverage?.panelHospitalNotes], ['post-hosp', 'post hosp', '出院后']);
+          if (note) return note;
+          return formatDays(d);
+        }
+      },
+      {
+        id: 'icu',
+        label: t('ICU max', 'ICU 最多'),
+        best: icuBest,
+        accent: 'info' as const,
+        value: (c: ReviewCol) => formatDays(c.tier?.coverage?.icuMaxDays ?? null)
+      },
+      {
+        id: 'ded',
+        label: t('Deductible', '免赔额'),
+        best: dedBest,
+        accent: undefined,
+        value: (c: ReviewCol) => getDeductibleDisplay(c.deductible)
+      },
+      {
+        id: 'coins',
+        label: t('Co-insurance', '共同保险'),
+        best: cols.map(() => false),
+        accent: undefined,
+        value: () => t('None', '无')
+      },
+      {
+        id: 'maxSelfPay',
+        label: t('Max self-pay', '最高自付'),
+        best: dedBest,
+        accent: 'warning' as const,
+        value: (c: ReviewCol) => (c.deductible.amount ? `RM ${c.deductible.amount.toLocaleString()}` : '—')
+      }
+    ];
+
+    return (
+      <div className="overflow-x-auto border border-slate-100 rounded-2xl">
+        <table className="w-full min-w-[720px] border-collapse">
+          <colgroup>
+            <col className="w-[32%]" />
+            {cols.map((c) => (
+              <col key={c.insurerId} className="w-[23%]" />
+            ))}
+          </colgroup>
+          <thead>
+            <tr className="border-b border-slate-200 bg-white">
+              <th className="p-3 text-left text-xs font-semibold text-slate-500"></th>
+              {cols.map((c) => (
+                <th key={c.insurerId} className={`p-3 text-center ${thOpacity(c.insurerId)}`}>
+                  {recInsurerId === c.insurerId && (
+                    <div className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 mb-1">
+                      {t('✓ Recommended', '✓ 推荐')}
+                    </div>
+                  )}
+                  {warnInsurerId === c.insurerId && (
+                    <div className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 mb-1">
+                      {t('⚠ High deductible', '⚠ 高免赔')}
+                    </div>
+                  )}
+                  <div className="text-sm font-semibold text-slate-900">{c.shortName}</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">{c.tier?.tierName || c.planName}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            <tr className="bg-slate-50">
+              <td colSpan={cols.length + 1} className="p-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                {t('Core benefits', '核心保障')}
+              </td>
+            </tr>
+
+            {rows.map((row) => {
+              const hl = isHl(row.id);
+              const rowBg = !hl && row.accent === 'warning' ? 'bg-amber-50/40' : '';
+              return (
+                <tr key={row.id} className={rowBg}>
+                  <td className={`p-3 border-b border-slate-100 text-xs ${hl ? 'bg-xin-blue/5 text-slate-900 font-semibold' : 'text-slate-600'}`}>
+                    {row.label}
+                  </td>
+                  {cols.map((c, i) => {
+                    const best = (row.best || [])[i];
+                    const cellBg = hl || best ? 'bg-xin-blue/5' : '';
+                    const accent =
+                      row.accent === 'info' ? 'text-xin-blue' : row.accent === 'warning' ? 'text-amber-800' : 'text-slate-800';
+                    const weight = recInsurerId === c.insurerId && hl ? 'font-bold' : best && !hl ? 'font-medium' : 'font-normal';
+                    return (
+                      <td key={c.insurerId} className={`p-3 border-b border-slate-100 text-center text-xs ${tdOpacity(c.insurerId)} ${cellBg} ${accent} ${weight}`}>
+                        <span className="inline-flex items-center justify-center gap-1">
+                          <span>{row.value(c)}</span>
+                          {best && !hl && <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-600" />}
+                        </span>
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+
+            <tr className="bg-slate-50">
+              <td colSpan={cols.length + 1} className="p-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                <button
+                  type="button"
+                  onClick={() => setOpenBenefits((s) => ({ ...s, outpatient: !s.outpatient }))}
+                  className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900"
+                >
+                  {openBenefits.outpatient ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  {t('Outpatient benefits', '门诊保障')}
+                </button>
+              </td>
+            </tr>
+
+            {openBenefits.outpatient &&
+              outpatientRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="p-3 border-b border-slate-100 text-xs text-slate-600">{r.label}</td>
+                  {cols.map((c) => (
+                    <td key={c.insurerId} className={`p-3 border-b border-slate-100 text-center text-xs text-slate-800 ${tdOpacity(c.insurerId)}`}>
+                      {getBenefitValue(c, r.id)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+
+            <tr className="bg-slate-50">
+              <td colSpan={cols.length + 1} className="p-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                <button
+                  type="button"
+                  onClick={() => setOpenBenefits((s) => ({ ...s, other: !s.other }))}
+                  className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900"
+                >
+                  {openBenefits.other ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  {t('Other benefits', '其他福利')}
+                </button>
+              </td>
+            </tr>
+
+            {openBenefits.other &&
+              otherRows.map((r) => (
+                <tr key={r.id}>
+                  <td className="p-3 border-b border-slate-100 text-xs text-slate-600">{r.label}</td>
+                  {cols.map((c) => (
+                    <td key={c.insurerId} className={`p-3 border-b border-slate-100 text-center text-xs text-slate-800 ${tdOpacity(c.insurerId)}`}>
+                      {getBenefitValue(c, r.id)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -468,8 +822,7 @@ const InsuranceComparison: React.FC = () => {
                             className="h-4 w-4"
                           />
                           <div className="min-w-0">
-                            <div className="text-sm font-semibold text-slate-900 truncate">{i.shortName || i.name}</div>
-                            <div className="text-xs text-slate-500 truncate">{i.name}</div>
+                            <div className="text-sm font-semibold text-slate-900 truncate">{insurerLabel(i)}</div>
                           </div>
                         </div>
                       </label>
@@ -494,7 +847,7 @@ const InsuranceComparison: React.FC = () => {
                         return (
                           <div key={insurer.id} className="border border-slate-100 rounded-2xl overflow-hidden">
                             <div className="p-4 bg-slate-50 border-b border-slate-100">
-                              <div className="font-semibold text-slate-900">{insurer.name}</div>
+                              <div className="font-semibold text-slate-900">{insurerLabel(insurer)}</div>
                               <div className="text-xs text-slate-500">{t('Pick a plan and optional riders', '选择方案与可选 Riders')}</div>
                             </div>
 
@@ -509,7 +862,9 @@ const InsuranceComparison: React.FC = () => {
                                   <option value="">{t('-- Select a plan --', '-- 选择方案 --')}</option>
                                   {plans.map((p) => (
                                     <option key={p.id} value={p.id}>
-                                      {p.defaultTier?.tierName ? `${p.name} (${p.defaultTier.tierName})` : p.name}
+                                      {p.defaultTier?.tierName
+                                        ? `${displayPlanName(p.name, insurer)} (${p.defaultTier.tierName})`
+                                        : displayPlanName(p.name, insurer)}
                                     </option>
                                   ))}
                                 </select>
@@ -719,210 +1074,16 @@ const InsuranceComparison: React.FC = () => {
                     {t('Recommended', '推荐')}:{' '}
                     {(recommended.insurer.shortName || recommended.insurer.name) + ' ' + (recommended.tier?.tierName || recommended.plan.defaultTier?.tierName || '')}
                   </div>
-                  <div className="text-sm text-slate-700 leading-relaxed">{whyText}</div>
+                  <div className="text-sm text-slate-700 leading-relaxed">{scenarioOutput.why}</div>
+                  {scenarioOutput.warnMessage && (
+                    <div className="text-xs text-amber-800 font-semibold mt-2">{`⚠ ${scenarioOutput.warnMessage}`}</div>
+                  )}
                 </div>
               )}
 
-              {showDeductibleWarning && (
-                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                  <div className="text-sm font-semibold text-amber-800">
-                    {t(
-                      `High deductible may not be suitable without company cover.`,
-                      '没有公司医疗保障时，高免赔额方案一般不建议。'
-                    )}
-                  </div>
-                </div>
-              )}
+              {renderMvpCompareTable(reviewCols, recommended?.insurer.id || '', scenarioOutput.highlightIds, scenarioOutput.warnInsurerId)}
 
-              {(() => {
-                const annualVals = reviewCols.map((c) => c.tier?.annualLimit ?? null);
-                const rbVals = reviewCols.map((c) => c.tier?.roomBoardDailyLimit ?? null);
-                const preVals = reviewCols.map((c) => c.tier?.coverage?.preHospitalizationDays ?? null);
-                const postVals = reviewCols.map((c) => c.tier?.coverage?.postHospitalizationDays ?? null);
-                const icuVals = reviewCols.map((c) => c.tier?.coverage?.icuMaxDays ?? null);
-                const dedVals = reviewCols.map((c) => c.deductible.amount ?? null);
-
-                const annualBest = getBestMask(annualVals, true);
-                const rbBest = getBestMask(rbVals, true);
-                const preBest = getBestMask(preVals, true);
-                const postBest = getBestMask(postVals, true);
-                const icuBest = getBestMask(icuVals, true);
-                const dedBest = getBestMask(dedVals, false);
-
-                const recInsurerId = recommended?.insurer.id || '';
-
-                const thOpacity = (id: string) => (recInsurerId && id !== recInsurerId ? 'opacity-30' : 'opacity-100');
-                const tdOpacity = (id: string) => (recInsurerId && id !== recInsurerId ? 'opacity-25' : 'opacity-100');
-
-                const LabelCell: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-                  <td className="p-3 border-b border-slate-100 text-xs text-slate-600">{children}</td>
-                );
-
-                const ValueCell: React.FC<{ id: string; best: boolean; children: React.ReactNode }> = ({ id, best, children }) => (
-                  <td className={`p-3 border-b border-slate-100 text-center text-xs text-slate-800 ${tdOpacity(id)} ${best ? 'bg-xin-blue/5' : ''}`}>
-                    <span className="inline-flex items-center justify-center gap-1">
-                      <span>{children}</span>
-                      {best && <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-600" />}
-                    </span>
-                  </td>
-                );
-
-                return (
-                  <div className="overflow-x-auto border border-slate-100 rounded-2xl">
-                    <table className="w-full min-w-[680px] border-collapse">
-                      <colgroup>
-                        <col className="w-[34%]" />
-                        {reviewCols.map((c) => (
-                          <col key={c.insurerId} className="w-[22%]" />
-                        ))}
-                      </colgroup>
-                      <thead>
-                        <tr className="border-b border-slate-200 bg-white">
-                          <th className="p-3 text-left text-xs font-semibold text-slate-500"></th>
-                          {reviewCols.map((c) => (
-                            <th key={c.insurerId} className={`p-3 text-center ${thOpacity(c.insurerId)}`}>
-                              {recInsurerId === c.insurerId && (
-                                <div className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 mb-1">
-                                  {t('Recommended', '推荐')}
-                                </div>
-                              )}
-                              <div className="text-sm font-semibold text-slate-900">{c.shortName}</div>
-                              <div className="text-[11px] text-slate-500 mt-0.5">{c.tier?.tierName || c.planName}</div>
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr className="bg-slate-50">
-                          <td colSpan={reviewCols.length + 1} className="p-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                            {t('Core benefits', '核心保障')}
-                          </td>
-                        </tr>
-
-                        <tr>
-                          <LabelCell>{t('Annual limit', '年度限额')}</LabelCell>
-                          {reviewCols.map((c, i) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={annualBest[i]}>
-                              {formatMoney(c.tier?.annualLimit ?? null)}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr>
-                          <LabelCell>{t('Lifetime limit', '终身限额')}</LabelCell>
-                          {reviewCols.map((c) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={false}>
-                              {c.tier?.lifetimeLimit === null ? t('Unlimited', '无限额') : formatMoney(c.tier?.lifetimeLimit ?? null)}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr>
-                          <LabelCell>{t('R&B / day', '病房津贴/天')}</LabelCell>
-                          {reviewCols.map((c, i) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={rbBest[i]}>
-                              {c.tier?.roomBoardDailyLimit ? `RM ${c.tier.roomBoardDailyLimit.toLocaleString()}` : '—'}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr>
-                          <LabelCell>{t('Pre-hosp', '住院前')}</LabelCell>
-                          {reviewCols.map((c, i) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={preBest[i]}>
-                              {formatDays(c.tier?.coverage?.preHospitalizationDays ?? null)}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr>
-                          <LabelCell>{t('Post-hosp', '出院后')}</LabelCell>
-                          {reviewCols.map((c, i) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={postBest[i]}>
-                              {formatDays(c.tier?.coverage?.postHospitalizationDays ?? null)}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr>
-                          <LabelCell>{t('ICU max', 'ICU 最多')}</LabelCell>
-                          {reviewCols.map((c, i) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={icuBest[i]}>
-                              {formatDays(c.tier?.coverage?.icuMaxDays ?? null)}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr>
-                          <LabelCell>{t('Deductible', '免赔额')}</LabelCell>
-                          {reviewCols.map((c, i) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={dedBest[i]}>
-                              {getDeductibleDisplay(c.deductible)}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr>
-                          <LabelCell>{t('Co-insurance', '共同保险')}</LabelCell>
-                          {reviewCols.map((c) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={false}>
-                              {t('—', '—')}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr className="bg-amber-50/40">
-                          <LabelCell>{t('Max self-pay', '最高自付')}</LabelCell>
-                          {reviewCols.map((c, i) => (
-                            <ValueCell key={c.insurerId} id={c.insurerId} best={dedBest[i]}>
-                              {c.deductible.amount ? `RM ${c.deductible.amount.toLocaleString()}` : '—'}
-                            </ValueCell>
-                          ))}
-                        </tr>
-
-                        <tr className="bg-slate-50">
-                          <td colSpan={reviewCols.length + 1} className="p-2 text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
-                            <button
-                              type="button"
-                              onClick={() => setShowBonus((v) => !v)}
-                              className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900"
-                            >
-                              {showBonus ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                              {t('Bonus benefits', '额外福利')}
-                            </button>
-                          </td>
-                        </tr>
-
-                        {showBonus &&
-                          [
-                            { label: t('Alt. cancer tx', '替代癌症治疗'), keys: ['alternative cancer treatment', 'alt', '癌'] },
-                            { label: t('TCM', '中医/脊椎'), keys: ['traditional chinese medicine', 'tcm', '中医', '脊椎'] },
-                            { label: t('Home nursing', '居家护理'), keys: ['home nursing', '护理'] },
-                            { label: t('Lodger', '陪护住宿'), keys: ['lodger', '陪护'] },
-                            { label: t('IOL', '人工晶体'), keys: ['intraocular lens', 'iol', '晶体'] },
-                            { label: t('Imaging', '影像检查'), keys: ['imaging', 'mri', 'pet', '影像'] },
-                            { label: t('Health Wallet', '健康钱包'), keys: ['health wallet', 'no-claim', '钱包', '无理赔'] },
-                            { label: t('Mental health', '心理健康'), keys: ['mental health', '心理'] },
-                            { label: t('Maternity comp.', '妊娠并发症'), keys: ['maternity', '孕', '妊娠'] }
-                          ].map((r) => (
-                            <tr key={r.label}>
-                              <LabelCell>{r.label}</LabelCell>
-                              {reviewCols.map((c) => (
-                                <ValueCell key={c.insurerId} id={c.insurerId} best={false}>
-                                  {getFeatureValue(c.plan, r.keys)}
-                                </ValueCell>
-                              ))}
-                            </tr>
-                          ))}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              })()}
-
-              <div className="text-[10px] text-slate-500">
-                {t('● = best in row', '● = 行内最佳')}
-              </div>
+              <div className="text-[10px] text-slate-500">{t('● = best in row', '● = 行内最佳')}</div>
             </div>
           )}
 
@@ -938,153 +1099,210 @@ const InsuranceComparison: React.FC = () => {
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr>
-                      <th className="p-4 border-b border-r border-slate-100 bg-white w-1/4">
-                        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('Features', '项目')}</span>
-                      </th>
-                      {selection.map((s) => (
-                        <th key={s.insurer.id} className="p-4 border-b border-slate-100 bg-white w-1/4">
-                          <div className="font-semibold text-slate-900">{s.insurer.shortName || s.insurer.name}</div>
-                          <div className="text-xs text-slate-500 mt-1">{s.plan.name}</div>
+              <div className="p-6 space-y-6">
+                {hla && (hla.plan.tiers || []).length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-500">{t('HLA tier:', 'HLA Tier：')}</span>
+                    {['200', '300', '500']
+                      .map((code) => {
+                        const tier = (hla.plan.tiers || []).find((x) => (x.tierName || '').includes(code));
+                        return tier ? { code, tier } : null;
+                      })
+                      .filter(Boolean)
+                      .map((x) => {
+                        const v = x as { code: string; tier: Tier };
+                        const active = (selectedTierIdsByInsurer[hla.insurer.id] || '') === v.tier.id;
+                        return (
+                          <button
+                            key={v.tier.id}
+                            type="button"
+                            onClick={() => setSelectedTierIdsByInsurer((prev) => ({ ...prev, [hla.insurer.id]: v.tier.id }))}
+                            className={`px-3 py-1 rounded-full text-xs border transition ${
+                              active ? 'bg-xin-blue/5 border-xin-blue/40 text-xin-blue' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            {v.tier.tierName}
+                          </button>
+                        );
+                      })}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setHasCompanyCover((v) => !v)}
+                  className="w-full flex items-center gap-3 p-3 rounded-2xl border border-slate-100 bg-slate-50 hover:bg-slate-100 transition"
+                >
+                  <div className={`w-9 h-5 rounded-full relative transition ${hasCompanyCover ? 'bg-xin-blue' : 'bg-slate-300'}`}>
+                    <div className={`w-4 h-4 rounded-full bg-white absolute top-0.5 transition ${hasCompanyCover ? 'left-4' : 'left-0.5'}`} />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm font-semibold text-slate-900">{t('Client has company medical insurance', '客户有公司医疗保障')}</div>
+                    <div className="text-xs text-slate-500">
+                      {hasCompanyCover
+                        ? t('Higher deductible options are viable', '高免赔额方案可行')
+                        : t('High deductible not recommended — client bears full excess', '高免赔额不建议 — 客户需自行承担免赔额')}
+                    </div>
+                  </div>
+                </button>
+
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">{t("Client's priority", '客户优先项')}</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {[
+                      { id: 'comfort', icon: Building2, label: t('Hospital comfort', '病房舒适'), sub: t('Private ward, good R&B', '私立病房，重视 R&B') },
+                      { id: 'recovery', icon: HeartPulse, label: t('Serious illness recovery', '重疾/康复'), sub: t('Cancer, stroke, long rehab', '癌症/中风/长期复健') },
+                      { id: 'selfpay', icon: Wallet, label: t('Minimise self-pay', '降低自付'), sub: t('Client has no company insurance', '没有公司医疗保障') },
+                      { id: 'cancer', icon: Target, label: t('Cancer-focused', '癌症优先'), sub: t('Outpatient chemo + alt treatment', '门诊化疗 + 替代治疗') },
+                      { id: 'wellness', icon: Leaf, label: t('Wellness & prevention', '健康管理'), sub: t('Screening, mental health', '体检/心理健康') }
+                    ].map((s) => {
+                      const on = scenario === (s.id as any);
+                      const Icon = s.icon;
+                      return (
+                        <button
+                          key={s.id}
+                          type="button"
+                          onClick={() => setScenario((prev) => (prev === (s.id as any) ? null : (s.id as any)))}
+                          className={`text-left p-4 rounded-2xl border transition ${
+                            on ? 'border-xin-blue/40 bg-xin-blue/5' : 'border-slate-100 bg-white hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Icon className={`${on ? 'text-xin-blue' : 'text-slate-500'}`} size={18} />
+                            <div className={`text-sm font-semibold ${on ? 'text-xin-blue' : 'text-slate-900'}`}>{s.label}</div>
+                          </div>
+                          <div className="text-xs text-slate-500 mt-1">{s.sub}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {recommended && (
+                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                    <div className="text-xs font-semibold text-emerald-800 mb-1">{t('Recommended →', '推荐 →')} {insurerLabel(recommended.insurer)} {recommended.tier?.tierName || recommended.plan.defaultTier?.tierName || ''}</div>
+                    <div className="text-sm text-slate-700 leading-relaxed">{scenarioOutput.why}</div>
+                    {scenarioOutput.warnMessage && (
+                      <div className="text-xs text-amber-800 font-semibold mt-2">{`⚠ ${scenarioOutput.warnMessage}`}</div>
+                    )}
+                  </div>
+                )}
+
+                {renderMvpCompareTable(reviewCols, recommended?.insurer.id || '', scenarioOutput.highlightIds, scenarioOutput.warnInsurerId)}
+                <div className="text-[10px] text-slate-500">{t('● = best in row', '● = 行内最佳')}</div>
+
+                <div className="overflow-x-auto border border-slate-100 rounded-2xl">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr>
+                        <th className="p-4 border-b border-r border-slate-100 bg-white w-1/4">
+                          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{t('Features', '项目')}</span>
                         </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="text-sm divide-y divide-slate-100">
-                    <tr className="bg-slate-50/60">
-                      <td colSpan={selection.length + 1} className="p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100">
-                        {t('Medical Coverage', '医疗保障')}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Annual Limit', '年限额')}</td>
-                      {selection.map((s) => (
-                        <td key={s.insurer.id} className="p-4 text-slate-700">
-                          {getSelectedTier(s)?.annualLimit ? `RM ${getSelectedTier(s)!.annualLimit!.toLocaleString()}` : '-'}
+                        {selection.map((s) => (
+                          <th key={s.insurer.id} className="p-4 border-b border-slate-100 bg-white w-1/4">
+                          <div className="font-semibold text-slate-900">{insurerLabel(s.insurer)}</div>
+                          <div className="text-xs text-slate-500 mt-1">{displayPlanName(s.plan.name, s.insurer)}</div>
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm divide-y divide-slate-100">
+                      <tr className="bg-slate-50/60">
+                        <td colSpan={selection.length + 1} className="p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100">
+                          {t('Selling Points', '卖点')}
                         </td>
-                      ))}
-                    </tr>
-                    <tr>
-                      <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Lifetime Limit', '终身限额')}</td>
-                      {selection.map((s) => (
-                        <td key={s.insurer.id} className="p-4 text-slate-700">
-                          {getSelectedTier(s)?.lifetimeLimit === null ? (
-                            <span className="text-emerald-700 font-medium">{t('No Limit', '无限额')}</span>
-                          ) : getSelectedTier(s)?.lifetimeLimit ? (
-                            `RM ${getSelectedTier(s)!.lifetimeLimit!.toLocaleString()}`
-                          ) : '-'}
-                        </td>
-                      ))}
-                    </tr>
-                    <tr>
-                      <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Room & Board', '房间与膳食')}</td>
-                      {selection.map((s) => (
-                        <td key={s.insurer.id} className="p-4 text-slate-700">
-                          {getSelectedTier(s)?.roomBoardDailyLimit ? `RM ${getSelectedTier(s)!.roomBoardDailyLimit!.toLocaleString()} /day` : '-'}
-                        </td>
-                      ))}
-                    </tr>
-                    <tr>
-                      <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Deductible (min)', '免赔额（最低）')}</td>
-                      {selection.map((s) => (
-                        <td key={s.insurer.id} className="p-4 text-slate-700">
-                          {getDeductibleDisplay(s.plan.deductible)}
-                        </td>
-                      ))}
-                    </tr>
-                    <tr>
-                      <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Selling Points', '卖点')}</td>
-                      {selection.map((s) => (
-                        <td key={s.insurer.id} className="p-4 text-slate-700 align-top">
-                          {s.plan.features.filter((f) => f.isSellingPoint).length === 0 ? (
-                            <span className="text-slate-400 text-xs italic">-</span>
-                          ) : (
-                            <ul className="space-y-2">
-                              {s.plan.features
-                                .filter((f) => f.isSellingPoint)
-                                .map((f, i) => (
-                                <li key={i} className="text-xs border border-slate-100 rounded-xl p-2 bg-white">
-                                  <div className="font-semibold text-slate-900">{f.name}</div>
-                                  {f.description && <div className="text-slate-600 mt-0.5">{f.description}</div>}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </td>
-                      ))}
-                    </tr>
+                      </tr>
+                      <tr>
+                        <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Selling Points', '卖点')}</td>
+                        {selection.map((s) => (
+                          <td key={s.insurer.id} className="p-4 text-slate-700 align-top">
+                            {s.plan.features.filter((f) => f.isSellingPoint).length === 0 ? (
+                              <span className="text-slate-400 text-xs italic">-</span>
+                            ) : (
+                              <ul className="space-y-2">
+                                {s.plan.features
+                                  .filter((f) => f.isSellingPoint)
+                                  .map((f, i) => (
+                                    <li key={i} className="text-xs border border-slate-100 rounded-xl p-2 bg-white">
+                                      <div className="font-semibold text-slate-900">{f.name}</div>
+                                      {f.description && <div className="text-slate-600 mt-0.5">{f.description}</div>}
+                                    </li>
+                                  ))}
+                              </ul>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
 
-                    <tr className="bg-slate-50/60">
-                      <td colSpan={selection.length + 1} className="p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100">
-                        {t('Riders & Clauses', 'Riders 与条款')}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Selected Riders', '已选 Riders')}</td>
-                      {selection.map((s) => (
-                        <td key={s.insurer.id} className="p-4 text-slate-700 align-top">
-                          {s.riders.length === 0 ? (
-                            <span className="text-slate-400 text-xs italic">-</span>
-                          ) : (
-                            <ul className="space-y-2">
-                              {s.riders.map((r) => (
-                                <li key={r.id} className="text-xs border border-slate-100 rounded-xl p-2 bg-white">
-                                  <div className="font-semibold text-slate-900">
-                                    {r.name}
-                                    {r.isRequired && (
-                                      <span className="ml-2 text-[10px] bg-xin-gold/20 text-xin-blue px-1.5 py-0.5 rounded">
-                                        {t('Required', '必选')}
-                                      </span>
-                                    )}
-                                  </div>
-                                  {r.clauses.length > 0 && (
-                                    <div className="mt-2 space-y-1">
-                                      {r.clauses.map((c, idx) => (
-                                        <div key={idx} className="text-[11px] text-slate-700 bg-slate-50 border border-slate-100 rounded-xl p-2">
-                                          <div className="font-semibold">{c.advisorAlert}</div>
-                                          <div className="text-slate-500">
-                                            {c.clauseType}
-                                            {c.headlineValue ? ` · ${c.headlineValue}` : ''}
-                                            {c.effectiveLimit ? ` · ${c.effectiveLimit}` : ''}
-                                          </div>
-                                        </div>
-                                      ))}
+                      <tr className="bg-slate-50/60">
+                        <td colSpan={selection.length + 1} className="p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100">
+                          {t('Riders & Clauses', 'Riders 与条款')}
+                        </td>
+                      </tr>
+                      <tr>
+                        <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Selected Riders', '已选 Riders')}</td>
+                        {selection.map((s) => (
+                          <td key={s.insurer.id} className="p-4 text-slate-700 align-top">
+                            {s.riders.length === 0 ? (
+                              <span className="text-slate-400 text-xs italic">-</span>
+                            ) : (
+                              <ul className="space-y-2">
+                                {s.riders.map((r) => (
+                                  <li key={r.id} className="text-xs border border-slate-100 rounded-xl p-2 bg-white">
+                                    <div className="font-semibold text-slate-900">
+                                      {r.name}
+                                      {r.isRequired && (
+                                        <span className="ml-2 text-[10px] bg-xin-gold/20 text-xin-blue px-1.5 py-0.5 rounded">
+                                          {t('Required', '必选')}
+                                        </span>
+                                      )}
                                     </div>
-                                  )}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
-                        </td>
-                      ))}
-                    </tr>
+                                    {r.clauses.length > 0 && (
+                                      <div className="mt-2 space-y-1">
+                                        {r.clauses.map((c, idx) => (
+                                          <div key={idx} className="text-[11px] text-slate-700 bg-slate-50 border border-slate-100 rounded-xl p-2">
+                                            <div className="font-semibold">{c.advisorAlert}</div>
+                                            <div className="text-slate-500">
+                                              {c.clauseType}
+                                              {c.headlineValue ? ` · ${c.headlineValue}` : ''}
+                                              {c.effectiveLimit ? ` · ${c.effectiveLimit}` : ''}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
 
-                    <tr className="bg-slate-50/60">
-                      <td colSpan={selection.length + 1} className="p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100">
-                        {t('Exclusions', '除外条款')}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Key Exclusions', '关键除外')}</td>
-                      {selection.map((s) => (
-                        <td key={s.insurer.id} className="p-4 text-slate-700 align-top">
-                          {s.plan.exclusions.length === 0 ? (
-                            <span className="text-slate-400 text-xs italic">-</span>
-                          ) : (
-                            <ul className="list-disc pl-4 space-y-1 text-xs">
-                              {s.plan.exclusions.map((ex, i) => (
-                                <li key={i}>{ex}</li>
-                              ))}
-                            </ul>
-                          )}
+                      <tr className="bg-slate-50/60">
+                        <td colSpan={selection.length + 1} className="p-3 text-xs font-semibold text-slate-500 uppercase tracking-wider border-r border-slate-100">
+                          {t('Exclusions', '除外条款')}
                         </td>
-                      ))}
-                    </tr>
-                  </tbody>
-                </table>
+                      </tr>
+                      <tr>
+                        <td className="p-4 border-r border-slate-100 font-medium text-slate-700">{t('Key Exclusions', '关键除外')}</td>
+                        {selection.map((s) => (
+                          <td key={s.insurer.id} className="p-4 text-slate-700 align-top">
+                            {s.plan.exclusions.length === 0 ? (
+                              <span className="text-slate-400 text-xs italic">-</span>
+                            ) : (
+                              <ul className="list-disc pl-4 space-y-1 text-xs">
+                                {s.plan.exclusions.map((ex, i) => (
+                                  <li key={i}>{ex}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

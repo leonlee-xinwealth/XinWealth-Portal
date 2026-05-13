@@ -84,7 +84,21 @@ export default async function handler(req, res) {
   const { data: coverage, error: coverageError } = await supabaseAdmin
     .from('plan_coverage')
     .select(
-      'plan_id,plan_tier_id,icu_limit,icu_max_days,room_board_max_days,pre_hospitalization_days,post_hospitalization_days'
+      [
+        'plan_id',
+        'plan_tier_id',
+        'icu_limit',
+        'icu_max_days',
+        'room_board_max_days',
+        'pre_hospitalization_days',
+        'post_hospitalization_days',
+        'outpatient_details',
+        'emergency_details',
+        'panel_hospital_notes',
+        'overseas_coverage_details',
+        'no_claim_benefit',
+        'pricing_details'
+      ].join(',')
     )
     .in('plan_id', planIds);
 
@@ -191,9 +205,10 @@ export default async function handler(req, res) {
     const allTiers = tiersByPlan.get(p.id) || [];
     const byTierCoverage = coverageByPlan.get(p.id) || new Map();
     const planLevelCoverage = byTierCoverage.get('__plan__') || null;
-    const tiersModel = allTiers.map((tier) => {
+    const anyCoverage = planLevelCoverage || (byTierCoverage.size > 0 ? Array.from(byTierCoverage.values())[0] : null);
+    let tiersModel = allTiers.map((tier) => {
       const tierCov = byTierCoverage.get(tier.id) || null;
-      const c = tierCov || planLevelCoverage;
+      const c = tierCov || anyCoverage;
       return {
         id: tier.id,
         tierName: tier.tier_name,
@@ -207,11 +222,42 @@ export default async function handler(req, res) {
               postHospitalizationDays: c.post_hospitalization_days ?? null,
               icuMaxDays: c.icu_max_days ?? null,
               icuLimit: c.icu_limit ?? null,
-              roomBoardMaxDays: c.room_board_max_days ?? null
+              roomBoardMaxDays: c.room_board_max_days ?? null,
+              outpatientDetails: c.outpatient_details ?? null,
+              emergencyDetails: c.emergency_details ?? null,
+              panelHospitalNotes: c.panel_hospital_notes ?? null,
+              overseasCoverageDetails: c.overseas_coverage_details ?? null,
+              noClaimBenefit: c.no_claim_benefit ?? null,
+              pricingDetails: c.pricing_details ?? null
             }
           : null
       };
     });
+    if (tiersModel.length === 0 && planLevelCoverage) {
+      tiersModel = [
+        {
+          id: `${p.id}__base`,
+          tierName: 'Standard',
+          annualLimit: undefined,
+          lifetimeLimit: undefined,
+          roomBoardDailyLimit: undefined,
+          sortOrder: null,
+          coverage: {
+            preHospitalizationDays: planLevelCoverage.pre_hospitalization_days ?? null,
+            postHospitalizationDays: planLevelCoverage.post_hospitalization_days ?? null,
+            icuMaxDays: planLevelCoverage.icu_max_days ?? null,
+            icuLimit: planLevelCoverage.icu_limit ?? null,
+            roomBoardMaxDays: planLevelCoverage.room_board_max_days ?? null,
+            outpatientDetails: planLevelCoverage.outpatient_details ?? null,
+            emergencyDetails: planLevelCoverage.emergency_details ?? null,
+            panelHospitalNotes: planLevelCoverage.panel_hospital_notes ?? null,
+            overseasCoverageDetails: planLevelCoverage.overseas_coverage_details ?? null,
+            noClaimBenefit: planLevelCoverage.no_claim_benefit ?? null,
+            pricingDetails: planLevelCoverage.pricing_details ?? null
+          }
+        }
+      ];
+    }
     const defaultTier = tiersModel.length > 0 ? tiersModel[0] : null;
 
     const linkedRiders = planRidersByPlan.get(p.id) || [];
