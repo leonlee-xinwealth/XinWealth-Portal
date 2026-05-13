@@ -16,6 +16,14 @@ const minNumber = (values) => {
   return Math.min(...nums);
 };
 
+const parseDeductibleUnit = (notes) => {
+  const s = String(notes || '').toLowerCase();
+  if (!s) return null;
+  if (s.includes('case') || s.includes('per case') || s.includes('每次')) return 'case';
+  if (s.includes('year') || s.includes('yr') || s.includes('per year') || s.includes('每年')) return 'yr';
+  return null;
+};
+
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -60,7 +68,7 @@ export default async function handler(req, res) {
 
   const { data: deductibles, error: deductiblesError } = await supabaseAdmin
     .from('plan_deductibles')
-    .select('plan_id,pre_retirement_amount')
+    .select('plan_id,pre_retirement_amount,notes,sort_order')
     .in('plan_id', planIds);
 
   if (deductiblesError) return res.status(500).json({ error: deductiblesError.message });
@@ -69,10 +77,18 @@ export default async function handler(req, res) {
     .from('plan_features')
     .select('plan_id,feature_name,feature_description,is_selling_point,sort_order')
     .in('plan_id', planIds)
-    .eq('is_selling_point', true)
     .order('sort_order', { ascending: true, nullsFirst: false });
 
   if (featuresError) return res.status(500).json({ error: featuresError.message });
+
+  const { data: coverage, error: coverageError } = await supabaseAdmin
+    .from('plan_coverage')
+    .select(
+      'plan_id,plan_tier_id,icu_limit,icu_max_days,room_board_max_days,pre_hospitalization_days,post_hospitalization_days'
+    )
+    .in('plan_id', planIds);
+
+  if (coverageError) return res.status(500).json({ error: coverageError.message });
 
   const { data: exclusions, error: exclusionsError } = await supabaseAdmin
     .from('plan_exclusions')
@@ -120,7 +136,10 @@ export default async function handler(req, res) {
     const planId = d.plan_id;
     const prev = deductibleByPlan.get(planId);
     const val = toNumberOrNull(d.pre_retirement_amount);
-    deductibleByPlan.set(planId, minNumber([prev ?? null, val]));
+    const nextAmount = minNumber([prev?.amount ?? null, val]);
+    const unit = parseDeductibleUnit(d.notes);
+    const notes = d.notes || null;
+    deductibleByPlan.set(planId, { amount: nextAmount, unit, notes });
   }
 
   const featuresByPlan = new Map();
@@ -128,6 +147,14 @@ export default async function handler(req, res) {
     const arr = featuresByPlan.get(f.plan_id) || [];
     arr.push(f);
     featuresByPlan.set(f.plan_id, arr);
+  }
+
+  const coverageByPlan = new Map();
+  for (const c of coverage || []) {
+    const byTier = coverageByPlan.get(c.plan_id) || new Map();
+    const key = c.plan_tier_id || '__plan__';
+    byTier.set(key, c);
+    coverageByPlan.set(c.plan_id, byTier);
   }
 
   const exclusionsByPlan = new Map();
@@ -162,7 +189,30 @@ export default async function handler(req, res) {
     const arr = plansByInsurer.get(insurerId) || [];
 
     const allTiers = tiersByPlan.get(p.id) || [];
-    const lowestTier = allTiers.length > 0 ? allTiers[0] : null;
+    const byTierCoverage = coverageByPlan.get(p.id) || new Map();
+    const planLevelCoverage = byTierCoverage.get('__plan__') || null;
+    const tiersModel = allTiers.map((tier) => {
+      const tierCov = byTierCoverage.get(tier.id) || null;
+      const c = tierCov || planLevelCoverage;
+      return {
+        id: tier.id,
+        tierName: tier.tier_name,
+        annualLimit: toNumberOrNull(tier.annual_limit),
+        lifetimeLimit: toNumberOrNull(tier.lifetime_limit),
+        roomBoardDailyLimit: toNumberOrNull(tier.room_board_daily_limit),
+        sortOrder: tier.sort_order ?? null,
+        coverage: c
+          ? {
+              preHospitalizationDays: c.pre_hospitalization_days ?? null,
+              postHospitalizationDays: c.post_hospitalization_days ?? null,
+              icuMaxDays: c.icu_max_days ?? null,
+              icuLimit: c.icu_limit ?? null,
+              roomBoardMaxDays: c.room_board_max_days ?? null
+            }
+          : null
+      };
+    });
+    const defaultTier = tiersModel.length > 0 ? tiersModel[0] : null;
 
     const linkedRiders = planRidersByPlan.get(p.id) || [];
     const riderModels = linkedRiders
@@ -192,19 +242,14 @@ export default async function handler(req, res) {
       id: p.id,
       insurerId,
       name: p.name,
-      defaultTier: lowestTier
-        ? {
-            id: lowestTier.id,
-            tierName: lowestTier.tier_name,
-            annualLimit: toNumberOrNull(lowestTier.annual_limit),
-            lifetimeLimit: toNumberOrNull(lowestTier.lifetime_limit),
-            roomBoardDailyLimit: toNumberOrNull(lowestTier.room_board_daily_limit)
-          }
-        : null,
-      deductible: deductibleByPlan.get(p.id) ?? null,
+      tiers: tiersModel,
+      defaultTier,
+      deductible: deductibleByPlan.get(p.id) || { amount: null, unit: null, notes: null },
       features: (featuresByPlan.get(p.id) || []).map((f) => ({
         name: f.feature_name,
-        description: f.feature_description
+        description: f.feature_description,
+        isSellingPoint: Boolean(f.is_selling_point),
+        sortOrder: f.sort_order ?? null
       })),
       exclusions: exclusionsByPlan.get(p.id) || [],
       riders: riderModels
