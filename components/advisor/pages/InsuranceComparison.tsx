@@ -852,6 +852,14 @@ const InsuranceComparison: React.FC = () => {
                             </div>
 
                             <div className="p-4 space-y-4">
+                              {plans.length === 0 && (
+                                <div className="text-xs text-amber-700">
+                                  {t(
+                                    'No plan details available for this insurer yet. Please complete tiers/coverage/deductible/features in Supabase.',
+                                    '该保险公司目前还没有可用的方案明细（tiers/coverage/deductible/features）。请先在 Supabase 完整录入。'
+                                  )}
+                                </div>
+                              )}
                               <div>
                                 <div className="text-sm font-medium text-slate-700 mb-1">{t('Plan', '方案')}</div>
                                 <select

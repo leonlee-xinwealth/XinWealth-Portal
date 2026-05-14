@@ -284,20 +284,37 @@ export default async function handler(req, res) {
       })
       .filter(Boolean);
 
+    const deductibleModel = deductibleByPlan.get(p.id) || { amount: null, unit: null, notes: null };
+    const featureModels = (featuresByPlan.get(p.id) || []).map((f) => ({
+      name: f.feature_name,
+      description: f.feature_description,
+      isSellingPoint: Boolean(f.is_selling_point),
+      sortOrder: f.sort_order ?? null
+    }));
+    const exclusionModels = exclusionsByPlan.get(p.id) || [];
+
+    const isPlanEmpty =
+      tiersModel.length === 0 &&
+      !defaultTier &&
+      !anyCoverage &&
+      !deductibleModel.amount &&
+      featureModels.length === 0 &&
+      exclusionModels.length === 0 &&
+      riderModels.length === 0;
+    if (isPlanEmpty) {
+      plansByInsurer.set(insurerId, arr);
+      continue;
+    }
+
     arr.push({
       id: p.id,
       insurerId,
       name: p.name,
       tiers: tiersModel,
       defaultTier,
-      deductible: deductibleByPlan.get(p.id) || { amount: null, unit: null, notes: null },
-      features: (featuresByPlan.get(p.id) || []).map((f) => ({
-        name: f.feature_name,
-        description: f.feature_description,
-        isSellingPoint: Boolean(f.is_selling_point),
-        sortOrder: f.sort_order ?? null
-      })),
-      exclusions: exclusionsByPlan.get(p.id) || [],
+      deductible: deductibleModel,
+      features: featureModels,
+      exclusions: exclusionModels,
       riders: riderModels
     });
 
