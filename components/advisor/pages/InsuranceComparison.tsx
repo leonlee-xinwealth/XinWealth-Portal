@@ -54,6 +54,7 @@ type Tier = {
   lifetimeLimit: number | null;
   roomBoardDailyLimit: number | null;
   sortOrder: number | null;
+  benefits: Record<string, string> | null;
   coverage: TierCoverage | null;
 };
 
@@ -333,6 +334,34 @@ const InsuranceComparison: React.FC = () => {
   };
 
   const getBenefitValue = (col: ReviewCol, benefitKey: string) => {
+    const canonicalByKey: Record<string, string> = {
+      cancer_tx: 'Outpatient Cancer Treatment',
+      kidney_dialysis: 'Outpatient Kidney Dialysis',
+      emergency_accidental: 'Emergency Accidental Outpatient',
+      dengue: 'Out-Patient Dengue Fever Treatment',
+      physiotherapy: 'Outpatient Physiotherapy',
+      imaging: 'Outpatient Imaging (MRI/PET)',
+      home_nursing: 'Home Nursing Care',
+      lodger: 'Lodger Benefit',
+      iol: 'Intraocular Lens',
+      tcm: 'Traditional Chinese Medicine & Chiropractic Treatment',
+      organ_transplant: 'Organ/Bone Marrow Transplant',
+      overseas: 'Extend coverage with overseas treatment (Singapore, Hong Kong, China)',
+      alt_cancer: 'Alternative Cancer Treatment',
+      second_opinion: 'Second Medical Opinion',
+      ambulance: 'Ambulance Fees',
+      maternity: 'Specified Maternity Complications',
+      medical_appliances: 'Medical Appliances',
+      health_wallet: 'Health Wallet / No-Claim Bonus',
+      wellness: 'Wellness & Prevention',
+      mental_health: 'Mental Health Benefit',
+      recovery_care: 'Recovery Care & Special Care Benefit'
+    };
+
+    const canonical = canonicalByKey[benefitKey] || '';
+    const v = canonical ? col.tier?.benefits?.[canonical] : '';
+    if (v) return v;
+
     const cov = col.tier?.coverage;
     const infoTexts = [
       cov?.outpatientDetails,

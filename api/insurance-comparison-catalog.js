@@ -138,6 +138,63 @@ export default async function handler(req, res) {
 
   if (riderClausesError) return res.status(500).json({ error: riderClausesError.message });
 
+  const { data: riderTiers, error: riderTiersError } = await supabaseAdmin
+    .from('rider_tiers')
+    .select('id,rider_id,tier_name,annual_limit,lifetime_limit,room_board_daily,deductible_min,deductible_unit,sort_order')
+    .in('rider_id', riderIds)
+    .order('sort_order', { ascending: true, nullsFirst: false });
+
+  if (riderTiersError) return res.status(500).json({ error: riderTiersError.message });
+
+  const riderTiersByRider = new Map();
+  for (const rt of riderTiers || []) {
+    const arr = riderTiersByRider.get(rt.rider_id) || [];
+    arr.push(rt);
+    riderTiersByRider.set(rt.rider_id, arr);
+  }
+
+  const riderTierIds = Array.from(new Set((riderTiers || []).map((rt) => rt.id)));
+
+  const { data: riderTierBenefits, error: riderTierBenefitsError } = await supabaseAdmin
+    .from('rider_tier_benefits')
+    .select('rider_tier_id,benefit_id,value_type,value_amount,value_unit,display_text,notes,sort_order')
+    .in('rider_tier_id', riderTierIds);
+
+  if (riderTierBenefitsError) return res.status(500).json({ error: riderTierBenefitsError.message });
+
+  const benefitIds = Array.from(new Set((riderTierBenefits || []).map((b) => b.benefit_id)));
+
+  const { data: benefitCatalog, error: benefitCatalogError } = await supabaseAdmin
+    .from('benefit_catalog')
+    .select('id,section,canonical_name,sort_order')
+    .in('id', benefitIds);
+
+  if (benefitCatalogError) return res.status(500).json({ error: benefitCatalogError.message });
+
+  const benefitById = new Map();
+  for (const b of benefitCatalog || []) benefitById.set(b.id, b);
+
+  const formatBenefitValue = (b) => {
+    if (b?.display_text) return b.display_text;
+    const type = String(b?.value_type || '').toLowerCase();
+    if (type === 'not_covered') return '—';
+    if (type === 'as_charged') return 'As charged';
+    const amt = toNumberOrNull(b?.value_amount);
+    if (amt === null) return '—';
+    const unit = b?.value_unit ? ` ${b.value_unit}` : '';
+    return `${amt}${unit}`;
+  };
+
+  const benefitsByRiderTierId = new Map();
+  for (const b of riderTierBenefits || []) {
+    const meta = benefitById.get(b.benefit_id);
+    const canonical = meta?.canonical_name;
+    if (!canonical) continue;
+    const cur = benefitsByRiderTierId.get(b.rider_tier_id) || {};
+    cur[canonical] = formatBenefitValue(b);
+    benefitsByRiderTierId.set(b.rider_tier_id, cur);
+  }
+
   const tiersByPlan = new Map();
   for (const t of tiers || []) {
     const arr = tiersByPlan.get(t.plan_id) || [];
@@ -202,6 +259,24 @@ export default async function handler(req, res) {
     const insurerId = p.insurer_id;
     const arr = plansByInsurer.get(insurerId) || [];
 
+    const linkedRiders = planRidersByPlan.get(p.id) || [];
+    const planTierNames = new Set((tiersByPlan.get(p.id) || []).map((t) => t.tier_name));
+
+    let benefitRiderId = null;
+    let bestMatchCount = 0;
+    for (const link of linkedRiders) {
+      const rts = riderTiersByRider.get(link.rider_id) || [];
+      if (rts.length === 0) continue;
+      const cnt = rts.reduce((acc, rt) => (planTierNames.has(rt.tier_name) ? acc + 1 : acc), 0);
+      if (cnt > bestMatchCount) {
+        bestMatchCount = cnt;
+        benefitRiderId = link.rider_id;
+      }
+    }
+
+    const benefitRiderTiers = benefitRiderId ? riderTiersByRider.get(benefitRiderId) || [] : [];
+    const riderTierIdByName = new Map(benefitRiderTiers.map((rt) => [rt.tier_name, rt.id]));
+
     const allTiers = tiersByPlan.get(p.id) || [];
     const byTierCoverage = coverageByPlan.get(p.id) || new Map();
     const planLevelCoverage = byTierCoverage.get('__plan__') || null;
@@ -209,6 +284,8 @@ export default async function handler(req, res) {
     let tiersModel = allTiers.map((tier) => {
       const tierCov = byTierCoverage.get(tier.id) || null;
       const c = tierCov || anyCoverage;
+      const ridTierId = riderTierIdByName.get(tier.tier_name) || null;
+      const benefits = ridTierId ? benefitsByRiderTierId.get(ridTierId) || null : null;
       return {
         id: tier.id,
         tierName: tier.tier_name,
@@ -216,6 +293,7 @@ export default async function handler(req, res) {
         lifetimeLimit: toNumberOrNull(tier.lifetime_limit),
         roomBoardDailyLimit: toNumberOrNull(tier.room_board_daily_limit),
         sortOrder: tier.sort_order ?? null,
+        benefits,
         coverage: c
           ? {
               preHospitalizationDays: c.pre_hospitalization_days ?? null,
@@ -242,6 +320,7 @@ export default async function handler(req, res) {
           lifetimeLimit: undefined,
           roomBoardDailyLimit: undefined,
           sortOrder: null,
+          benefits: null,
           coverage: {
             preHospitalizationDays: planLevelCoverage.pre_hospitalization_days ?? null,
             postHospitalizationDays: planLevelCoverage.post_hospitalization_days ?? null,
@@ -259,8 +338,6 @@ export default async function handler(req, res) {
       ];
     }
     const defaultTier = tiersModel.length > 0 ? tiersModel[0] : null;
-
-    const linkedRiders = planRidersByPlan.get(p.id) || [];
     const riderModels = linkedRiders
       .map((link) => {
         const r = riderById.get(link.rider_id);
