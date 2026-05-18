@@ -5,6 +5,7 @@ import AdvisorApp from './components/advisor/AdvisorApp';
 
 const PortalLayout = lazy(() => import('./components/PortalLayout'));
 const KYCLayout = lazy(() => import('./components/kyc/KYCLayout'));
+const PhillipUTForm = lazy(() => import('./components/forms/PhillipUTForm'));
 
 const Spinner = () => (
   <div className="flex h-screen items-center justify-center bg-xin-bg">
@@ -23,6 +24,9 @@ const App: React.FC = () => {
 
             {/* Client KYC (Fact Finder) */}
             <Route path="/kyc/*" element={<KYCLayout />} />
+
+            {/* Phillip UT Fund Master Form (public, shareable link) */}
+            <Route path="/forms/phillip-ut" element={<PhillipUTForm />} />
 
             {/* Client Portal */}
             <Route path="/*" element={<PortalLayout />} />
