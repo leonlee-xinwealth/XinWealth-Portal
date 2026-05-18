@@ -1,3 +1,5 @@
+import { getVercelOidcToken } from '@vercel/functions/oidc';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -104,23 +106,4 @@ async function getGoogleAccessToken() {
   return accessToken;
 }
 
-async function getVercelOidcToken() {
-  // VERCEL_OIDC_TOKEN_ENDPOINT is automatically set by Vercel at runtime
-  const endpoint = process.env.VERCEL_OIDC_TOKEN_ENDPOINT;
-  if (!endpoint) {
-    throw new Error(
-      'VERCEL_OIDC_TOKEN_ENDPOINT not available — ensure "Enable Vercel OIDC" is turned on in your Vercel project settings (Settings → General → OpenID Connect Token)'
-    );
-  }
-
-  const res = await fetch(endpoint);
-  if (!res.ok) throw new Error(`OIDC token fetch failed: ${await res.text()}`);
-
-  const body = await res.json();
-  // Vercel returns { value: "<jwt>" }
-  const token = body.value ?? body.token;
-  if (typeof token !== 'string') {
-    throw new Error(`Unexpected OIDC response shape: ${JSON.stringify(body)}`);
-  }
-  return token;
-}
+// getVercelOidcToken is imported from @vercel/functions/oidc above
