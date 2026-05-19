@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck, Target } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck, Target, Briefcase } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 
 const AdvisorLayout: React.FC = () => {
@@ -36,7 +36,8 @@ const AdvisorLayout: React.FC = () => {
 
   const navItems = [
     { to: '/advisor/dashboard', icon: <LayoutDashboard size={18} />, label: language === 'zh' ? '主页' : 'Dashboard', badge: 0 },
-    { to: '/advisor/pipeline',  icon: <Target size={18} />,          label: language === 'zh' ? '销售漏斗' : 'Pipeline',  badge: overduePipelineCount },
+    { to: '/advisor/pipeline',  icon: <Target size={18} />,          label: language === 'zh' ? '潜在客户状态板' : 'Prospect Status Board',  badge: overduePipelineCount },
+    { to: '/advisor/cases',     icon: <Briefcase size={18} />,       label: language === 'zh' ? '案件' : 'Cases',          badge: 0 },
     { to: '/advisor/clients',   icon: <Users size={18} />,           label: language === 'zh' ? '客户' : 'Clients',       badge: 0 },
     { to: '/advisor/insurance-comparison', icon: <ShieldCheck size={18} />, label: language === 'zh' ? '保单对比' : 'Insurance Comparison', badge: 0 },
     { to: '/advisor/settings',  icon: <Settings size={18} />,        label: language === 'zh' ? '设置' : 'Settings',      badge: 0 },
