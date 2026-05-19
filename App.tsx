@@ -25,8 +25,8 @@ const App: React.FC = () => {
             {/* Client KYC (Fact Finder) */}
             <Route path="/kyc/*" element={<KYCLayout />} />
 
-            {/* Phillip UT Fund Master Form (public, shareable link) */}
-            <Route path="/forms/phillip-ut" element={<PhillipUTForm />} />
+            {/* Phillip UT Corporate Account Opening Form (public, shareable link) */}
+            <Route path="/phillip/corporate-ut" element={<PhillipUTForm />} />
 
             {/* Client Portal */}
             <Route path="/*" element={<PortalLayout />} />
