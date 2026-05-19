@@ -17,7 +17,13 @@ export default function ClientList() {
       if (!user) return;
       const { data: adv } = await supabase.from('advisors').select('id').eq('user_id', user.id).single();
       if (!adv) return;
-      const { data } = await supabase.from('clients').select('*').eq('advisor_id', adv.id).order('full_name');
+      const { data } = await supabase
+        .from('clients')
+        .select('*')
+        .eq('advisor_id', adv.id)
+        // Exclude closed_lost prospects — they live in the Pipeline view
+        .or('pipeline_stage.is.null,pipeline_stage.neq.closed_lost')
+        .order('full_name');
       setClients(data || []);
       setLoading(false);
     }
