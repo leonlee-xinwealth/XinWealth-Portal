@@ -121,7 +121,7 @@ export async function fillPhillipPdf(formData: PhillipCorpFormData): Promise<Uin
 
   // ── PAGE 2 ── CORPORATE APPLICANT ──────────────────────────────────
   // Corporation Name
-  text(p2, formData.corporateName, 165, y(58));
+  text(p2, formData.corporateName, 165, y(74));
 
   // Registration No. | Nature of Business
   text(p2, formData.registrationNo, 142, y(79));
@@ -213,22 +213,22 @@ export async function fillPhillipPdf(formData: PhillipCorpFormData): Promise<Uin
   text(p3, formData.swiftCode,         135, y(791));
 
   // ── PAGE 4 ── FATCA / CRS ──────────────────────────────────────────
-  // Section B – US Person (text tops: 209.6)
-  if (formData.usPerson === 'USPerson')         tick(p4, 41,  y(210));
-  if (formData.usPerson === 'NonUSNoIndicia')   tick(p4, 194, y(210));
-  if (formData.usPerson === 'NonUSWithIndicia') tick(p4, 364, y(210));
+  // Section B – US Person (text top=209.6; tick size 9 ascends ~9pt, so y+=9 to center on text)
+  if (formData.usPerson === 'USPerson')         tick(p4, 41,  y(218));
+  if (formData.usPerson === 'NonUSNoIndicia')   tick(p4, 194, y(218));
+  if (formData.usPerson === 'NonUSWithIndicia') tick(p4, 364, y(218));
 
-  // Section C – Tax Residency (text tops: 268.9 / 285.0)
-  if (formData.taxResidency === 'Malaysia') tick(p4, 134, y(269));
+  // Section C – Tax Residency
+  if (formData.taxResidency === 'Malaysia') tick(p4, 134, y(278));
   if (formData.taxResidency === 'Foreign') {
-    tick(p4, 134, y(285));
+    tick(p4, 134, y(294));
     text(p4, formData.foreignTaxCountry, 120, y(317));
     text(p4, formData.foreignTaxTIN,     445, y(317));
   }
 
-  // Section D – NFE Type (text tops: 371.0 / 384.7)
-  if (formData.nfeType === 'ActiveNFE')  tick(p4, 134, y(371));
-  if (formData.nfeType === 'PassiveNFE') tick(p4, 134, y(385));
+  // Section D – NFE Type
+  if (formData.nfeType === 'ActiveNFE')  tick(p4, 134, y(380));
+  if (formData.nfeType === 'PassiveNFE') tick(p4, 134, y(394));
 
   // ── PAGE 9 ── SIGNATURE ─────────────────────────────────────────────
   if (formData.signatureDataUrl) {
