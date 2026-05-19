@@ -64,8 +64,7 @@ async function getGoogleAccessToken() {
   const provider = process.env.GOOGLE_WIF_PROVIDER;
   if (!provider) throw new Error('GOOGLE_WIF_PROVIDER not configured');
 
-  // Pass the WIF provider as audience so the token aud claim matches GCP's expectation
-  const oidcToken = await getVercelOidcToken(`//iam.googleapis.com/${provider}`);
+  const oidcToken = await getVercelOidcToken();
 
   // Exchange Vercel OIDC token for Google federated access token
   const stsRes = await fetch('https://sts.googleapis.com/v1/token', {
