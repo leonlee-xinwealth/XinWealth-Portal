@@ -76,7 +76,7 @@ async function getGoogleAccessToken() {
       requestedTokenType: 'urn:ietf:params:oauth:token-type:access_token',
       subjectTokenType: 'urn:ietf:params:oauth:token-type:jwt',
       subjectToken: oidcToken,
-      scope: 'https://www.googleapis.com/auth/drive.file',
+      scope: 'https://www.googleapis.com/auth/cloud-platform',
     }),
   });
 
