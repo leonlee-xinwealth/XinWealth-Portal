@@ -785,7 +785,7 @@ export default function PhillipUTForm() {
           <div className="mt-5 flex items-start gap-2 text-xs text-gray-400 px-2">
             <ShieldCheck size={14} className="text-xin-goldDark flex-shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              Your information is kept private and confidential. It will only be used for processing this account opening with Phillip Mutual.
+              Your personal information will be kept private and confidential. It will be used for the processing of this account opening with Phillip Mutual, as well as for the purpose of providing ongoing financial advisory services by your appointed financial planner and their team. By proceeding, you consent to your information being accessed and used by your financial planner and their authorised team members solely for advisory purposes related to your financial planning needs.
             </p>
           </div>
         )}
