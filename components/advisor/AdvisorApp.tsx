@@ -11,6 +11,7 @@ import Settings from './pages/Settings';
 import InsuranceComparison from './pages/InsuranceComparison';
 import Pipeline from './pages/Pipeline';
 import CaseList from './pages/CaseList';
+import CaseDetail from './pages/CaseDetail';
 
 const AdvisorApp: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -53,7 +54,7 @@ const AdvisorApp: React.FC = () => {
         <Route path="clients/:id" element={<ClientDetail />} />
         <Route path="pipeline" element={<Pipeline />} />
         <Route path="cases" element={<CaseList />} />
-        <Route path="cases/:id" element={<div>Case Detail TODO</div>} />
+        <Route path="cases/:id" element={<CaseDetail />} />
         <Route path="insurance-comparison" element={<InsuranceComparison />} />
         <Route path="settings" element={<Settings />} />
       </Route>
