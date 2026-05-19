@@ -124,15 +124,15 @@ export async function fillPhillipPdf(formData: PhillipCorpFormData): Promise<Uin
   text(p2, formData.corporateName, 165, y(58));
 
   // Registration No. | Nature of Business
-  text(p2, formData.registrationNo, 100, y(79));
+  text(p2, formData.registrationNo, 142, y(79));
   text(p2, formData.natureOfBusiness, 390, y(79));
 
   // Incorporation Date | Place of Incorporation
-  text(p2, formData.incorporationDate, 100, y(97));
+  text(p2, formData.incorporationDate, 142, y(97));
   text(p2, formData.placeOfIncorporation, 390, y(97));
 
   // Paid-up Capital | Shareholder's Equity
-  text(p2, formData.paidUpCapital, 100, y(114));
+  text(p2, formData.paidUpCapital, 142, y(114));
   text(p2, formData.shareholdersEquity, 390, y(114));
 
   // Corporate Status ticks
@@ -156,17 +156,17 @@ export async function fillPhillipPdf(formData: PhillipCorpFormData): Promise<Uin
 
   // Director 1
   text(p2, formData.director1Name, 165, y(229));
-  text(p2, formData.director1Nric, 370, y(233));
+  text(p2, formData.director1Nric, 382, y(233));
   text(p2, formData.director1Address, 165, y(260));
 
   // Director 2 (optional)
   text(p2, formData.director2Name, 165, y(271));
-  text(p2, formData.director2Nric, 370, y(275));
+  text(p2, formData.director2Nric, 382, y(275));
   text(p2, formData.director2Address, 165, y(302));
 
   // Contact Person
   text(p2, formData.contactPersonName, 165, y(313));
-  text(p2, formData.contactPersonNric, 370, y(317));
+  text(p2, formData.contactPersonNric, 382, y(317));
   text(p2, formData.contactPersonDesignation, 144, y(334));
   text(p2, formData.contactPersonMobile, 187, y(352));
   text(p2, formData.contactPersonOffice, 320, y(352));
@@ -213,22 +213,22 @@ export async function fillPhillipPdf(formData: PhillipCorpFormData): Promise<Uin
   text(p3, formData.swiftCode,         135, y(791));
 
   // ── PAGE 4 ── FATCA / CRS ──────────────────────────────────────────
-  // Section B – US Person
-  if (formData.usPerson === 'USPerson')         tick(p4, 41,  y(212));
-  if (formData.usPerson === 'NonUSNoIndicia')   tick(p4, 194, y(212));
-  if (formData.usPerson === 'NonUSWithIndicia') tick(p4, 364, y(212));
+  // Section B – US Person (text tops: 209.6)
+  if (formData.usPerson === 'USPerson')         tick(p4, 41,  y(210));
+  if (formData.usPerson === 'NonUSNoIndicia')   tick(p4, 194, y(210));
+  if (formData.usPerson === 'NonUSWithIndicia') tick(p4, 364, y(210));
 
-  // Section C – Tax Residency
-  if (formData.taxResidency === 'Malaysia') tick(p4, 134, y(271));
+  // Section C – Tax Residency (text tops: 268.9 / 285.0)
+  if (formData.taxResidency === 'Malaysia') tick(p4, 134, y(269));
   if (formData.taxResidency === 'Foreign') {
-    tick(p4, 134, y(287));
+    tick(p4, 134, y(285));
     text(p4, formData.foreignTaxCountry, 120, y(317));
     text(p4, formData.foreignTaxTIN,     445, y(317));
   }
 
-  // Section D – NFE Type
-  if (formData.nfeType === 'ActiveNFE')  tick(p4, 134, y(373));
-  if (formData.nfeType === 'PassiveNFE') tick(p4, 134, y(387));
+  // Section D – NFE Type (text tops: 371.0 / 384.7)
+  if (formData.nfeType === 'ActiveNFE')  tick(p4, 134, y(371));
+  if (formData.nfeType === 'PassiveNFE') tick(p4, 134, y(385));
 
   // ── PAGE 9 ── SIGNATURE ─────────────────────────────────────────────
   if (formData.signatureDataUrl) {
