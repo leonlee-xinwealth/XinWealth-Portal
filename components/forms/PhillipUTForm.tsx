@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ChevronRight, ChevronLeft, Send, AlertCircle, Info, X,
   Check, Building2, Users, Landmark, FileCheck, PenLine, FileText, ShieldCheck,
@@ -618,6 +618,12 @@ function Step6Review({
 // ── Main form component ──────────────────────────────────────────────
 
 export default function PhillipUTForm() {
+  useEffect(() => {
+    const prev = document.title;
+    document.title = 'Phillip Corporate UT Account Opening | XinWealth';
+    return () => { document.title = prev; };
+  }, []);
+
   const [step, setStep] = useState(1);
   const [data, setData] = useState<PhillipCorpFormData>(emptyForm);
   const [generating, setGenerating] = useState(false);
