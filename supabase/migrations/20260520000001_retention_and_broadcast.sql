@@ -13,9 +13,11 @@ ALTER TABLE clients
 CREATE OR REPLACE FUNCTION update_last_contacted_at()
 RETURNS TRIGGER AS $$
 BEGIN
-  UPDATE clients
-    SET last_contacted_at = NOW()
-  WHERE id = NEW.client_id;
+  IF NEW.client_id IS NOT NULL THEN
+    UPDATE clients
+      SET last_contacted_at = NOW()
+    WHERE id = NEW.client_id;
+  END IF;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
