@@ -23,11 +23,20 @@ export default function ClientDetail() {
   const [tab, setTab] = useState<Tab>('activity');
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
+  const [converting, setConverting] = useState(false);
 
   async function loadClient() {
     const { data } = await supabase.from('clients').select('*').eq('id', id).single();
     setClient(data);
     setLoading(false);
+  }
+
+  async function handleConvert() {
+    if (!client || converting) return;
+    setConverting(true);
+    await supabase.from('clients').update({ status: 'active' }).eq('id', client.id);
+    await loadClient();
+    setConverting(false);
   }
 
   async function loadPending() {
@@ -92,9 +101,20 @@ export default function ClientDetail() {
                 </span>
               </>
             )}
-            <span className={`${s.bg} ${s.text} text-xs font-semibold px-2 py-0.5 rounded-full`}>
-              {language === 'zh' ? s.labelZh : s.label}
-            </span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className={`${s.bg} ${s.text} text-xs font-semibold px-2 py-0.5 rounded-full`}>
+                {language === 'zh' ? s.labelZh : s.label}
+              </span>
+              {client.status === 'prospect' && (
+                <button
+                  onClick={handleConvert}
+                  disabled={converting}
+                  className="flex items-center gap-1 bg-emerald-600 text-white text-xs font-semibold px-3 py-1 rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+                >
+                  {converting ? '...' : `✓ ${t('Convert to Active', '转为正式客户')}`}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
