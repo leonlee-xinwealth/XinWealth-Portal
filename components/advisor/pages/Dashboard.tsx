@@ -17,6 +17,7 @@ export default function Dashboard() {
   const [renewalCaseMap, setRenewalCaseMap] = useState<Record<string, string>>({});
   const [incompleteClients, setIncompleteClients] = useState<any[]>([]);
   const [overdueProspects, setOverdueProspects] = useState<any[]>([]);
+  const [notContacted, setNotContacted] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [startingRenewal, setStartingRenewal] = useState<string | null>(null);
 
@@ -32,7 +33,7 @@ export default function Dashboard() {
       // Load all clients
       const { data: cls } = await supabase
         .from('clients')
-        .select('id, full_name, email, phone, status, date_of_birth, nric, risk_profile')
+        .select('id, full_name, email, phone, status, date_of_birth, nric, risk_profile, last_contacted_at')
         .eq('advisor_id', adv.id)
         .order('full_name');
       setClients(cls || []);
@@ -123,6 +124,22 @@ export default function Dashboard() {
         .order('next_action_date');
       setOverdueProspects(prospectActions || []);
 
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const notContactedList = (cls || [])
+        .filter(c => c.status === 'active')
+        .filter(c => {
+          if (!c.last_contacted_at) return true;
+          return new Date(c.last_contacted_at) < thirtyDaysAgo;
+        })
+        .map(c => ({
+          ...c,
+          daysSinceContact: c.last_contacted_at
+            ? Math.floor((Date.now() - new Date(c.last_contacted_at).getTime()) / 86400000)
+            : null,
+        }))
+        .sort((a, b) => (b.daysSinceContact ?? 999) - (a.daysSinceContact ?? 999));
+      setNotContacted(notContactedList);
+
       setLoading(false);
     }
     load();
@@ -145,6 +162,8 @@ export default function Dashboard() {
     })
     .filter(c => c.daysUntil <= 30)
     .sort((a, b) => a.daysUntil - b.daysUntil);
+
+  const urgentBirthdays = upcomingBirthdays.filter(c => c.daysUntil <= 3);
 
   async function handleStartRenewal(policy: any) {
     if (startingRenewal) return; // prevent duplicate clicks
@@ -466,6 +485,56 @@ export default function Dashboard() {
           </div>
         ) : null}
       </ActionCard>
+
+      {/* Block C: Needs Attention */}
+      {(urgentBirthdays.length > 0 || notContacted.length > 0) && (
+        <ActionCard
+          title={t('Needs Attention', '需要关注')}
+          icon="🔔"
+          count={urgentBirthdays.length + notContacted.length}
+          urgent={true}
+          empty={false}
+          emptyText=""
+        >
+          {urgentBirthdays.slice(0, 3).map(c => (
+            <Link key={`bday-${c.id}`} to={`/advisor/clients/${c.id}`}
+              className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors"
+            >
+              <Avatar name={c.full_name} />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-xin-blue truncate">{c.full_name}</div>
+                <div className="text-xs text-slate-500">{c.dobFormatted}</div>
+              </div>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 bg-pink-100 text-pink-600">
+                🎂 {c.daysUntil === 0 ? t('Today!', '今天!') : `${c.daysUntil}d`}
+              </span>
+            </Link>
+          ))}
+          {notContacted.slice(0, 5).map(c => (
+            <Link key={`nc-${c.id}`} to={`/advisor/clients/${c.id}`}
+              className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors"
+            >
+              <Avatar name={c.full_name} />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-xin-blue truncate">{c.full_name}</div>
+                <div className="text-xs text-slate-500">
+                  {c.daysSinceContact === null
+                    ? t('Never contacted', '从未联系')
+                    : `${c.daysSinceContact}${t(' days no contact', ' 天没联系')}`}
+                </div>
+              </div>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 bg-slate-100 text-slate-600">
+                💬
+              </span>
+            </Link>
+          ))}
+          {(urgentBirthdays.length + notContacted.length) > 8 && (
+            <div className="py-2.5 text-center text-xs text-slate-400">
+              + {urgentBirthdays.length + notContacted.length - 8} {t('more', '更多')}
+            </div>
+          )}
+        </ActionCard>
+      )}
 
       {/* Recent clients */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
