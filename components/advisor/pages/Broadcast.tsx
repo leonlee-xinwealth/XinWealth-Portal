@@ -74,11 +74,15 @@ function ComposeTab({ t, language }: { t: (en: string, zh: string) => string; la
       if (!adv || cancelled) return;
 
       if (form.filter === 'has_insurance') {
+        const { data: allClients } = await supabase
+          .from('clients').select('id').eq('advisor_id', adv.id).eq('status', 'active');
+        const allIds = (allClients || []).map((c: any) => c.id);
+        if (!allIds.length) { if (!cancelled) setRecipientCount(0); return; }
         const { data: policyClients } = await supabase
-          .from('insurance_policies').select('client_id').eq('advisor_id', adv.id);
+          .from('insurance_policies').select('client_id').in('client_id', allIds);
         const ids = [...new Set((policyClients || []).map((r: any) => r.client_id))];
         if (cancelled) return;
-        if (ids.length === 0) { setRecipientCount(0); return; }
+        if (!ids.length) { setRecipientCount(0); return; }
         const { count } = await supabase
           .from('clients').select('id', { count: 'exact', head: true })
           .eq('advisor_id', adv.id).eq('status', 'active').not('email', 'is', null).in('id', ids);

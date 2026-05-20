@@ -90,15 +90,19 @@ async function sendBroadcast(broadcastId: string, db: ReturnType<typeof createCl
   const filterType: string = broadcast.recipient_filter?.type ?? 'all'
 
   if (filterType === 'has_insurance') {
+    const { data: allClients } = await db
+      .from('clients')
+      .select('id')
+      .eq('advisor_id', broadcast.advisor_id)
+      .eq('status', 'active')
+    const allIds = (allClients ?? []).map((c: any) => c.id as string)
+    if (allIds.length === 0) { await markSent(db, broadcastId, 0); return { sent: 0 } }
     const { data: policyClients } = await db
       .from('insurance_policies')
       .select('client_id')
-      .eq('advisor_id', broadcast.advisor_id)
+      .in('client_id', allIds)
     const ids = [...new Set((policyClients ?? []).map((r: any) => r.client_id as string))]
-    if (ids.length === 0) {
-      await markSent(db, broadcastId, 0)
-      return { sent: 0 }
-    }
+    if (ids.length === 0) { await markSent(db, broadcastId, 0); return { sent: 0 } }
     query = query.in('id', ids)
   }
 
