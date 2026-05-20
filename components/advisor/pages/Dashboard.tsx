@@ -1,19 +1,24 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
+import { getCaseTemplate } from '../cases/caseTemplates';
 import { Users, UserCheck, Target, AlertCircle, Calendar, Gift, ChevronRight } from 'lucide-react';
 
 export default function Dashboard() {
   const { language } = useLanguage();
   const t = (en: string, zh: string) => language === 'zh' ? zh : en;
+  const navigate = useNavigate();
 
   const [advisor, setAdvisor] = useState<any>(null);
   const [clients, setClients] = useState<any[]>([]);
   const [pendingFollowUps, setPendingFollowUps] = useState<any[]>([]);
   const [expiringPolicies, setExpiringPolicies] = useState<any[]>([]);
+  const [renewalCaseMap, setRenewalCaseMap] = useState<Record<string, string>>({});
   const [incompleteClients, setIncompleteClients] = useState<any[]>([]);
+  const [overdueProspects, setOverdueProspects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [startingRenewal, setStartingRenewal] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -77,19 +82,46 @@ export default function Dashboard() {
         .order('follow_up_date');
       setPendingFollowUps(notes || []);
 
-      // Load expiring insurance policies (within 90 days)
-      const in90days = new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0];
+      // Load expiring insurance policies (within 60 days)
+      const in60days = new Date(Date.now() + 60 * 86400000).toISOString().split('T')[0];
       if (clientIds.length > 0) {
         const { data: policies } = await supabase
           .from('insurance_policies')
-          .select('id, provider, policy_type, end_date, client_id')
+          .select('id, provider, policy_type, policy_number, end_date, client_id')
           .in('client_id', clientIds)
           .not('end_date', 'is', null)
           .gte('end_date', today)
-          .lte('end_date', in90days)
+          .lte('end_date', in60days)
           .order('end_date');
         setExpiringPolicies(policies || []);
+
+        const policyIds = (policies || []).map((p: any) => p.id);
+        if (policyIds.length > 0) {
+          const { data: openRenewalCases } = await supabase
+            .from('cases')
+            .select('renewed_from_policy_id, id')
+            .in('renewed_from_policy_id', policyIds)
+            .eq('status', 'open');
+          const renewalMap: Record<string, string> = {};
+          (openRenewalCases || []).forEach((c: any) => {
+            if (c.renewed_from_policy_id) renewalMap[c.renewed_from_policy_id] = c.id;
+          });
+          setRenewalCaseMap(renewalMap);
+        } else {
+          setRenewalCaseMap({});
+        }
       }
+
+      // Load overdue prospect actions
+      const { data: prospectActions } = await supabase
+        .from('clients')
+        .select('id, full_name, next_action, next_action_date')
+        .eq('advisor_id', adv.id)
+        .eq('status', 'prospect')
+        .not('next_action_date', 'is', null)
+        .lte('next_action_date', today)
+        .order('next_action_date');
+      setOverdueProspects(prospectActions || []);
 
       setLoading(false);
     }
@@ -98,6 +130,7 @@ export default function Dashboard() {
 
   // Birthday calculations
   const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
   const upcomingBirthdays = clients
     .filter(c => c.date_of_birth)
     .map(c => {
@@ -112,6 +145,49 @@ export default function Dashboard() {
     })
     .filter(c => c.daysUntil <= 30)
     .sort((a, b) => a.daysUntil - b.daysUntil);
+
+  async function handleStartRenewal(policy: any) {
+    if (startingRenewal) return; // prevent duplicate clicks
+    setStartingRenewal(policy.id);
+    try {
+      if (!advisor) return;
+
+      const { data: newCase, error } = await supabase
+        .from('cases')
+        .insert({
+          client_id: policy.client_id,
+          advisor_id: advisor.id, // use existing advisor state, no extra query
+          case_type: 'car_insurance', // TODO: map policy_type → case_type when non-car types are supported
+          renewed_from_policy_id: policy.id,
+          due_date: policy.end_date,
+        })
+        .select()
+        .single();
+
+      if (error || !newCase) {
+        alert(t('Failed to create renewal case. Please try again.', '创建续保案件失败，请重试。'));
+        return;
+      }
+
+      const template = getCaseTemplate('car_insurance');
+      if (template.length > 0) {
+        await supabase.from('case_checklist_items').insert(
+          template.map((item, idx) => ({
+            case_id: newCase.id,
+            item_key: item.key,
+            label_en: item.en,
+            label_zh: item.zh,
+            sort_order: idx,
+            completed_at: null,
+          }))
+        );
+      }
+
+      navigate(`/advisor/cases/${newCase.id}`);
+    } finally {
+      setStartingRenewal(null);
+    }
+  }
 
   const active = clients.filter(c => c.status === 'active').length;
   const prospects = clients.filter(c => c.status === 'prospect').length;
@@ -259,36 +335,61 @@ export default function Dashboard() {
           ))}
         </ActionCard>
 
-        {/* Expiring policies */}
+        {/* Upcoming Renewals */}
         <ActionCard
-          title={t('Expiring Policies (90d)', '到期保单（90天内）')}
-          icon="⚠️"
+          title={t('Upcoming Renewals (60d)', '到期续保（60天内）')}
+          icon="🔄"
           count={expiringPolicies.length}
           urgent={expiringPolicies.some(p => {
-            const days = Math.ceil((new Date(p.end_date).getTime() - Date.now()) / 86400000);
-            return days <= 30;
+            const d = Math.ceil((new Date(p.end_date).getTime() - Date.now()) / 86400000);
+            return d <= 30;
           })}
           empty={expiringPolicies.length === 0}
-          emptyText={t('No expiring policies', '没有即将到期的保单')}
+          emptyText={t('No policies expiring soon', '没有即将到期的保单')}
         >
           {expiringPolicies.slice(0, 4).map(policy => {
             const cl = clientMap[policy.client_id];
             const days = Math.ceil((new Date(policy.end_date).getTime() - Date.now()) / 86400000);
+            const existingCaseId = renewalCaseMap[policy.id];
             return (
-              <Link key={policy.id} to={`/advisor/clients/${policy.client_id}`}
-                className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors"
-              >
+              <div key={policy.id} className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors">
                 <Avatar name={cl?.full_name || '?'} />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-semibold text-xin-blue truncate">{cl?.full_name}</div>
                   <div className="text-xs text-slate-500">{policy.provider} · {policy.policy_type}</div>
                 </div>
-                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${days <= 30 ? 'bg-red-100 text-red-600' : 'bg-amber-100 text-amber-700'}`}>
-                  {days}d
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${
+                  days <= 0 ? 'bg-red-100 text-red-600' :
+                  days <= 7 ? 'bg-orange-100 text-orange-600' :
+                  days <= 30 ? 'bg-amber-100 text-amber-700' :
+                  'bg-slate-100 text-slate-500'
+                }`}>
+                  {days <= 0 ? t('Expired', '已过期') : `${days}d`}
                 </span>
-              </Link>
+                {existingCaseId ? (
+                  <Link
+                    to={`/advisor/cases/${existingCaseId}`}
+                    className="text-[10px] font-bold px-2 py-1 rounded-md bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors shrink-0"
+                  >
+                    {t('In Progress', '进行中')}
+                  </Link>
+                ) : (
+                  <button
+                    onClick={() => handleStartRenewal(policy)}
+                    disabled={startingRenewal === policy.id}
+                    className="text-[10px] font-bold px-2 py-1 rounded-md bg-xin-gold/10 text-amber-700 hover:bg-xin-gold/20 transition-colors shrink-0 whitespace-nowrap disabled:opacity-50"
+                  >
+                    {startingRenewal === policy.id ? t('...', '...') : t('+ Renew', '续保')}
+                  </button>
+                )}
+              </div>
             );
           })}
+          {expiringPolicies.length > 4 ? (
+            <div className="py-2.5 text-center text-xs text-slate-400">
+              + {expiringPolicies.length - 4} {t('more', '更多')}
+            </div>
+          ) : null}
         </ActionCard>
 
         <ActionCard
@@ -330,6 +431,41 @@ export default function Dashboard() {
           ) : null}
         </ActionCard>
       </div>
+
+      {/* Prospect pipeline actions */}
+      <ActionCard
+        title={t('Prospect Actions', '潜在客户跟进')}
+        icon="🎯"
+        count={overdueProspects.length}
+        urgent={overdueProspects.length > 0}
+        empty={overdueProspects.length === 0}
+        emptyText={t('All prospects up to date 🎉', '所有潜在客户已跟进 🎉')}
+      >
+        {overdueProspects.slice(0, 4).map(prospect => {
+          const isOverdue = prospect.next_action_date < todayStr;
+          const dueDate = new Date(prospect.next_action_date);
+          const diffDays = Math.round((today.getTime() - dueDate.getTime()) / 86400000);
+          return (
+            <Link key={prospect.id} to="/advisor/pipeline"
+              className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors"
+            >
+              <Avatar name={prospect.full_name || '?'} />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-xin-blue truncate">{prospect.full_name}</div>
+                <div className="text-xs text-slate-500 truncate">{prospect.next_action}</div>
+              </div>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${isOverdue ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
+                {isOverdue ? `${diffDays}${t('d overdue', '天逾期')}` : t('Today', '今天')}
+              </span>
+            </Link>
+          );
+        })}
+        {overdueProspects.length > 4 ? (
+          <div className="py-2.5 text-center text-xs text-slate-400">
+            + {overdueProspects.length - 4} {t('more', '更多')}
+          </div>
+        ) : null}
+      </ActionCard>
 
       {/* Recent clients */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">

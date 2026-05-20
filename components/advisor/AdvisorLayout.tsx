@@ -1,13 +1,33 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck, Target, Briefcase } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 
 const AdvisorLayout: React.FC = () => {
   const { language, setLanguage } = useLanguage();
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [overduePipelineCount, setOverduePipelineCount] = useState(0);
+
+  useEffect(() => {
+    async function loadBadge() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: adv } = await supabase.from('advisors').select('id').eq('user_id', user.id).single();
+      if (!adv) return;
+      const today = new Date().toISOString().split('T')[0];
+      const { count } = await supabase
+        .from('clients')
+        .select('id', { count: 'exact', head: true })
+        .eq('advisor_id', adv.id)
+        .eq('status', 'prospect')
+        .not('next_action_date', 'is', null)
+        .lte('next_action_date', today);
+      setOverduePipelineCount(count ?? 0);
+    }
+    loadBadge();
+  }, []);
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -15,10 +35,12 @@ const AdvisorLayout: React.FC = () => {
   }
 
   const navItems = [
-    { to: '/advisor/dashboard', icon: <LayoutDashboard size={18} />, label: language === 'zh' ? '主页' : 'Dashboard' },
-    { to: '/advisor/clients', icon: <Users size={18} />, label: language === 'zh' ? '客户' : 'Clients' },
-    { to: '/advisor/insurance-comparison', icon: <ShieldCheck size={18} />, label: language === 'zh' ? '保单对比' : 'Insurance Comparison' },
-    { to: '/advisor/settings', icon: <Settings size={18} />, label: language === 'zh' ? '设置' : 'Settings' },
+    { to: '/advisor/dashboard', icon: <LayoutDashboard size={18} />, label: language === 'zh' ? '主页' : 'Dashboard', badge: 0 },
+    { to: '/advisor/pipeline',  icon: <Target size={18} />,          label: language === 'zh' ? '潜在客户状态板' : 'Prospect Status Board',  badge: overduePipelineCount },
+    { to: '/advisor/cases',     icon: <Briefcase size={18} />,       label: language === 'zh' ? '案件' : 'Cases',          badge: 0 },
+    { to: '/advisor/clients',   icon: <Users size={18} />,           label: language === 'zh' ? '客户' : 'Clients',       badge: 0 },
+    { to: '/advisor/insurance-comparison', icon: <ShieldCheck size={18} />, label: language === 'zh' ? '保单对比' : 'Insurance Comparison', badge: 0 },
+    { to: '/advisor/settings',  icon: <Settings size={18} />,        label: language === 'zh' ? '设置' : 'Settings',      badge: 0 },
   ];
 
   const SidebarContent = () => (
@@ -46,7 +68,12 @@ const AdvisorLayout: React.FC = () => {
             }
           >
             {item.icon}
-            {item.label}
+            <span className="flex-1">{item.label}</span>
+            {item.badge > 0 && (
+              <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
+                {item.badge}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>
