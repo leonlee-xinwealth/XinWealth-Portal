@@ -10,6 +10,8 @@ export default function ClientList() {
   const [clients, setClients] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeStatus = searchParams.get('status') || '';
 
   useEffect(() => {
     async function load() {
@@ -23,9 +25,6 @@ export default function ClientList() {
     }
     load();
   }, []);
-
-  const [searchParams, setSearchParams] = useSearchParams();
-  const activeStatus = searchParams.get('status') || '';
 
   const counts = {
     all: clients.length,
@@ -69,6 +68,7 @@ export default function ClientList() {
           return (
             <button
               key={tab.value}
+              aria-pressed={isActive}
               onClick={() => {
                 setSearch('');
                 if (tab.value) setSearchParams({ status: tab.value });
