@@ -13,6 +13,7 @@ export default function Dashboard() {
   const [pendingFollowUps, setPendingFollowUps] = useState<any[]>([]);
   const [expiringPolicies, setExpiringPolicies] = useState<any[]>([]);
   const [incompleteClients, setIncompleteClients] = useState<any[]>([]);
+  const [overdueProspects, setOverdueProspects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -91,6 +92,17 @@ export default function Dashboard() {
           .order('end_date');
         setExpiringPolicies(policies || []);
       }
+
+      // Load overdue prospect actions
+      const { data: prospectActions } = await supabase
+        .from('clients')
+        .select('id, full_name, next_action, next_action_date')
+        .eq('advisor_id', adv.id)
+        .eq('status', 'prospect')
+        .not('next_action_date', 'is', null)
+        .lte('next_action_date', today)
+        .order('next_action_date');
+      setOverdueProspects(prospectActions || []);
 
       setLoading(false);
     }
@@ -295,6 +307,43 @@ export default function Dashboard() {
           ) : null}
         </ActionCard>
       </div>
+
+      {/* Prospect pipeline actions */}
+      <ActionCard
+        title={t('Prospect Actions', '潜在客户跟进')}
+        icon="🎯"
+        count={overdueProspects.length}
+        urgent={overdueProspects.length > 0}
+        empty={overdueProspects.length === 0}
+        emptyText={t('All prospects up to date 🎉', '所有潜在客户已跟进 🎉')}
+      >
+        {overdueProspects.slice(0, 5).map(prospect => {
+          const todayStr = new Date().toISOString().split('T')[0];
+          const isOverdue = prospect.next_action_date < todayStr;
+          const todayDate = new Date(todayStr);
+          const dueDate = new Date(prospect.next_action_date);
+          const diffDays = Math.round((todayDate.getTime() - dueDate.getTime()) / 86400000);
+          return (
+            <Link key={prospect.id} to="/advisor/pipeline"
+              className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors"
+            >
+              <Avatar name={prospect.full_name || '?'} />
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-semibold text-xin-blue truncate">{prospect.full_name}</div>
+                <div className="text-xs text-slate-500 truncate">{prospect.next_action}</div>
+              </div>
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${isOverdue ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
+                {isOverdue ? t(`${diffDays}d overdue`, `逾期 ${diffDays} 天`) : t('Today', '今天')}
+              </span>
+            </Link>
+          );
+        })}
+        {overdueProspects.length > 5 ? (
+          <div className="py-2.5 text-center text-xs text-slate-400">
+            + {overdueProspects.length - 5} {t('more', '更多')}
+          </div>
+        ) : null}
+      </ActionCard>
 
       {/* Recent clients */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
