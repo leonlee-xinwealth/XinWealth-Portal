@@ -44,22 +44,21 @@ export default function Dashboard() {
         const hasAssets = new Set((a || []).map((r: any) => r.client_id));
         const hasInsurance = new Set((ip || []).map((r: any) => r.client_id));
 
-        const miss = (en: string, zh: string) => language === 'zh' ? zh : en;
         const calcMissing = (c: any) => {
-          const reasons: string[] = [];
-          if (!c.date_of_birth) reasons.push(miss('DOB', '生日'));
-          if (!c.phone) reasons.push(miss('Phone', '电话'));
-          if (!c.nric) reasons.push(miss('NRIC', '身份证'));
-          if (!c.risk_profile) reasons.push(miss('Risk', '风险评级'));
-          if (!hasCashflow.has(c.id)) reasons.push(miss('No cashflow', '缺少收支'));
-          if (!hasAssets.has(c.id)) reasons.push(miss('No assets', '缺少资产'));
-          if (!hasInsurance.has(c.id)) reasons.push(miss('No insurance', '缺少保单'));
-          return reasons;
+          const keys: string[] = [];
+          if (!c.date_of_birth) keys.push('dob');
+          if (!c.phone) keys.push('phone');
+          if (!c.nric) keys.push('nric');
+          if (!c.risk_profile) keys.push('risk');
+          if (!hasCashflow.has(c.id)) keys.push('cashflow');
+          if (!hasAssets.has(c.id)) keys.push('assets');
+          if (!hasInsurance.has(c.id)) keys.push('insurance');
+          return keys;
         };
 
         const incompletes = (cls || [])
-          .map((c: any) => ({ ...c, missing: calcMissing(c) }))
-          .filter((c: any) => c.missing.length > 0);
+          .map((c: any) => ({ ...c, missingKeys: calcMissing(c) }))
+          .filter((c: any) => c.missingKeys.length > 0);
         setIncompleteClients(incompletes);
       } else {
         setIncompleteClients([]);
@@ -95,7 +94,7 @@ export default function Dashboard() {
       setLoading(false);
     }
     load();
-  }, [language]);
+  }, []);
 
   // Birthday calculations
   const today = new Date();
@@ -308,7 +307,15 @@ export default function Dashboard() {
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-xin-blue truncate">{c.full_name}</div>
                 <div className="text-[11px] text-slate-500 truncate">
-                  {t('Missing:', '缺少：')} {Array.isArray(c.missing) ? c.missing.join(', ') : ''}
+                  {t('Missing:', '缺少：')} {Array.isArray(c.missingKeys) ? c.missingKeys.map((k: string) => ({
+                    dob: t('DOB', '生日'),
+                    phone: t('Phone', '电话'),
+                    nric: t('NRIC', '身份证'),
+                    risk: t('Risk', '风险评级'),
+                    cashflow: t('No cashflow', '缺少收支'),
+                    assets: t('No assets', '缺少资产'),
+                    insurance: t('No insurance', '缺少保单'),
+                  } as Record<string, string>)[k]).filter(Boolean).join(', ') : ''}
                 </div>
               </div>
               <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 bg-red-100 text-red-600">
