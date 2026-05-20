@@ -278,7 +278,89 @@ function ComposeTab({ t, language }: { t: (en: string, zh: string) => string; la
 }
 
 function HistoryTab({ t, language }: { t: (en: string, zh: string) => string; language: string }) {
-  return <div className="text-slate-400 text-sm p-4">{t('Coming soon...', '即将上线...')}</div>;
+  const [broadcasts, setBroadcasts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: adv } = await supabase.from('advisors').select('id').eq('user_id', user.id).single();
+      if (!adv) { setLoading(false); return; }
+
+      const { data } = await supabase
+        .from('broadcasts')
+        .select('id, title, status, sent_at, scheduled_at, recipient_count, created_at')
+        .eq('advisor_id', adv.id)
+        .order('created_at', { ascending: false });
+      setBroadcasts(data || []);
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const STATUS_STYLE: Record<string, string> = {
+    sent:      'bg-emerald-50 text-emerald-700',
+    scheduled: 'bg-amber-50 text-amber-700',
+    draft:     'bg-slate-100 text-slate-500',
+  };
+  const STATUS_LABEL: Record<string, { en: string; zh: string }> = {
+    sent:      { en: 'Sent',      zh: '已发送' },
+    scheduled: { en: 'Scheduled', zh: '已排程' },
+    draft:     { en: 'Draft',     zh: '草稿' },
+  };
+
+  if (loading) return <Loader />;
+
+  if (broadcasts.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center">
+        <div className="text-3xl mb-3">📭</div>
+        <div className="text-slate-400 text-sm">
+          {t('No broadcasts yet. Write your first one!', '还没有群发记录，写第一封吧！')}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+      {broadcasts.map(b => {
+        const dateStr = b.status === 'sent' ? b.sent_at : b.status === 'scheduled' ? b.scheduled_at : b.created_at;
+        const dateLabel = dateStr
+          ? new Date(dateStr).toLocaleDateString(language === 'zh' ? 'zh-CN' : 'en-MY', {
+              year: 'numeric', month: 'short', day: 'numeric',
+              hour: '2-digit', minute: '2-digit',
+            })
+          : '—';
+        return (
+          <div key={b.id} className="flex items-center gap-4 px-5 py-4 border-b border-slate-50 last:border-0">
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-xin-blue truncate">{b.title}</div>
+              <div className="text-xs text-slate-400 mt-0.5">
+                {b.status === 'sent'
+                  ? `${t('Sent', '发送')} ${dateLabel} · ${b.recipient_count} ${t('recipients', '人')}`
+                  : b.status === 'scheduled'
+                  ? `${t('Scheduled for', '排程')} ${dateLabel}`
+                  : `${t('Draft', '草稿')} · ${t('Created', '创建于')} ${dateLabel}`}
+              </div>
+            </div>
+            <span className={`text-[10px] font-bold px-2 py-1 rounded-md shrink-0 ${STATUS_STYLE[b.status] || STATUS_STYLE.draft}`}>
+              {language === 'zh' ? STATUS_LABEL[b.status]?.zh : STATUS_LABEL[b.status]?.en}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Loader() {
+  return (
+    <div className="flex items-center justify-center h-40">
+      <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-xin-blue" />
+    </div>
+  );
 }
 
 interface RichTextEditorProps {
