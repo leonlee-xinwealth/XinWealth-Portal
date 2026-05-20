@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Plus, Search } from 'lucide-react';
@@ -24,12 +24,31 @@ export default function ClientList() {
     load();
   }, []);
 
-  const filtered = clients.filter(c =>
-    c.full_name.toLowerCase().includes(search.toLowerCase()) ||
-    (c.email || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.phone || '').includes(search) ||
-    (c.nric || '').includes(search)
-  );
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeStatus = searchParams.get('status') || '';
+
+  const counts = {
+    all: clients.length,
+    active: clients.filter(c => c.status === 'active').length,
+    prospect: clients.filter(c => c.status === 'prospect').length,
+    inactive: clients.filter(c => c.status === 'inactive').length,
+  };
+
+  const filtered = clients
+    .filter(c => !activeStatus || c.status === activeStatus)
+    .filter(c =>
+      c.full_name.toLowerCase().includes(search.toLowerCase()) ||
+      (c.email || '').toLowerCase().includes(search.toLowerCase()) ||
+      (c.phone || '').includes(search) ||
+      (c.nric || '').includes(search)
+    );
+
+  const STATUS_TABS = [
+    { value: '', labelEn: 'All', labelZh: '全部', count: counts.all },
+    { value: 'active', labelEn: 'Active', labelZh: '活跃', count: counts.active },
+    { value: 'prospect', labelEn: 'Prospect', labelZh: '潜在', count: counts.prospect },
+    { value: 'inactive', labelEn: 'Inactive', labelZh: '非活跃', count: counts.inactive },
+  ];
 
   return (
     <div>
@@ -41,6 +60,35 @@ export default function ClientList() {
           <Plus size={16} />
           {t('Add Client', '添加客户')}
         </Link>
+      </div>
+
+      {/* Status filter tabs */}
+      <div className="flex gap-2 mb-4 flex-wrap">
+        {STATUS_TABS.map(tab => {
+          const isActive = activeStatus === tab.value;
+          return (
+            <button
+              key={tab.value}
+              onClick={() => {
+                setSearch('');
+                if (tab.value) setSearchParams({ status: tab.value });
+                else setSearchParams({});
+              }}
+              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                isActive
+                  ? 'bg-xin-blue text-white'
+                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+              }`}
+            >
+              {language === 'zh' ? tab.labelZh : tab.labelEn}
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                isActive ? 'bg-white/20 text-white' : 'bg-white text-slate-500'
+              }`}>
+                {tab.count}
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* Search */}
