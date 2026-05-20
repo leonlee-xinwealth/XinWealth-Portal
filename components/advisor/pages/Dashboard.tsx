@@ -18,6 +18,7 @@ export default function Dashboard() {
   const [incompleteClients, setIncompleteClients] = useState<any[]>([]);
   const [overdueProspects, setOverdueProspects] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [startingRenewal, setStartingRenewal] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -107,6 +108,8 @@ export default function Dashboard() {
             if (c.renewed_from_policy_id) renewalMap[c.renewed_from_policy_id] = c.id;
           });
           setRenewalCaseMap(renewalMap);
+        } else {
+          setRenewalCaseMap({});
         }
       }
 
@@ -145,39 +148,46 @@ export default function Dashboard() {
     .sort((a, b) => a.daysUntil - b.daysUntil);
 
   async function handleStartRenewal(policy: any) {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: adv } = await supabase.from('advisors').select('id').eq('user_id', user.id).single();
-    if (!adv) return;
+    if (startingRenewal) return; // prevent duplicate clicks
+    setStartingRenewal(policy.id);
+    try {
+      if (!advisor) return;
 
-    const { data: newCase, error } = await supabase
-      .from('cases')
-      .insert({
-        client_id: policy.client_id,
-        advisor_id: adv.id,
-        case_type: 'car_insurance',
-        renewed_from_policy_id: policy.id,
-        due_date: policy.end_date,
-      })
-      .select()
-      .single();
-    if (error || !newCase) return;
+      const { data: newCase, error } = await supabase
+        .from('cases')
+        .insert({
+          client_id: policy.client_id,
+          advisor_id: advisor.id, // use existing advisor state, no extra query
+          case_type: 'car_insurance', // TODO: map policy_type → case_type when non-car types are supported
+          renewed_from_policy_id: policy.id,
+          due_date: policy.end_date,
+        })
+        .select()
+        .single();
 
-    const template = getCaseTemplate('car_insurance');
-    if (template.length > 0) {
-      await supabase.from('case_checklist_items').insert(
-        template.map((item: any, idx: number) => ({
-          case_id: newCase.id,
-          item_key: item.key,
-          label_en: item.en,
-          label_zh: item.zh,
-          sort_order: idx,
-          completed_at: null,
-        }))
-      );
+      if (error || !newCase) {
+        alert(t('Failed to create renewal case. Please try again.', '创建续保案件失败，请重试。'));
+        return;
+      }
+
+      const template = getCaseTemplate('car_insurance');
+      if (template.length > 0) {
+        await supabase.from('case_checklist_items').insert(
+          template.map((item, idx) => ({
+            case_id: newCase.id,
+            item_key: item.key,
+            label_en: item.en,
+            label_zh: item.zh,
+            sort_order: idx,
+            completed_at: null,
+          }))
+        );
+      }
+
+      navigate(`/advisor/cases/${newCase.id}`);
+    } finally {
+      setStartingRenewal(null);
     }
-
-    navigate(`/advisor/cases/${newCase.id}`);
   }
 
   const active = clients.filter(c => c.status === 'active').length;
@@ -339,9 +349,10 @@ export default function Dashboard() {
                 ) : (
                   <button
                     onClick={() => handleStartRenewal(policy)}
-                    className="text-[10px] font-bold px-2 py-1 rounded-md bg-xin-gold/10 text-amber-700 hover:bg-xin-gold/20 transition-colors shrink-0 whitespace-nowrap"
+                    disabled={startingRenewal === policy.id}
+                    className="text-[10px] font-bold px-2 py-1 rounded-md bg-xin-gold/10 text-amber-700 hover:bg-xin-gold/20 transition-colors shrink-0 whitespace-nowrap disabled:opacity-50"
                   >
-                    {t('+ Renew', '续保')}
+                    {startingRenewal === policy.id ? t('...', '...') : t('+ Renew', '续保')}
                   </button>
                 )}
               </div>
