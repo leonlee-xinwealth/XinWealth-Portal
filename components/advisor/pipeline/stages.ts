@@ -19,6 +19,8 @@ export const LEAD_SOURCES = [
   { key: 'bni',              en: 'BNI',                 zh: 'BNI'      },
   { key: 'event',            en: 'Event / Seminar',     zh: '活动/讲座'},
   { key: 'walk_in',          en: 'Walk-in',             zh: '上门'     },
+  { key: 'cp',               en: 'CP',                  zh: 'CP'       },
+  { key: 'friends',          en: 'Friends',             zh: '朋友'     },
   { key: 'other',            en: 'Other',               zh: '其他'     },
 ] as const;
 

@@ -101,7 +101,7 @@ export default function Pipeline() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-serif text-2xl font-bold text-xin-blue">
-            {t('Lead Pipeline', '销售漏斗')}
+            {t('Prospect Status Board', '潜在客户状态板')}
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
             {leads.filter(l => l.status === 'prospect').length} {t('prospects', '个潜在客户')}
@@ -120,7 +120,7 @@ export default function Pipeline() {
           </label>
           {/* New prospect */}
           <button
-            onClick={() => navigate('/advisor/clients/new?from=pipeline')}
+            onClick={() => navigate('/advisor/clients/new?quick=1')}
             className="flex items-center gap-1.5 bg-xin-blue text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-blueLight transition-colors"
           >
             <Plus size={15} />
