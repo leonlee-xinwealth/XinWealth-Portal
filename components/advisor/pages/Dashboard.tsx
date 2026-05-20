@@ -121,9 +121,30 @@ export default function Dashboard() {
   const clientMap = Object.fromEntries(clients.map(c => [c.id, c]));
 
   const stats = [
-    { label: t('Total Clients', '总客户'), value: clients.length, icon: <Users size={20} />, color: 'text-xin-blue', bg: 'bg-blue-50' },
-    { label: t('Active', '活跃'), value: active, icon: <UserCheck size={20} />, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: t('Prospects', '潜在'), value: prospects, icon: <Target size={20} />, color: 'text-amber-600', bg: 'bg-amber-50' },
+    {
+      label: t('Total Clients', '总客户'),
+      value: clients.length,
+      icon: <Users size={20} />,
+      color: 'text-xin-blue',
+      bg: 'bg-blue-50',
+      href: '/advisor/clients',
+    },
+    {
+      label: t('Active', '活跃'),
+      value: active,
+      icon: <UserCheck size={20} />,
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-50',
+      href: '/advisor/clients?status=active',
+    },
+    {
+      label: t('Prospects', '潜在'),
+      value: prospects,
+      icon: <Target size={20} />,
+      color: 'text-amber-600',
+      bg: 'bg-amber-50',
+      href: '/advisor/clients?status=prospect',
+    },
   ];
 
   if (loading) return <Loader />;
@@ -162,13 +183,20 @@ export default function Dashboard() {
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-4">
         {stats.map(s => (
-          <div key={s.label} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+          <Link
+            key={s.label}
+            to={s.href}
+            className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 hover:shadow-md hover:border-slate-200 transition-all block"
+          >
             <div className="flex items-center justify-between mb-3">
               <span className="text-xs text-slate-500 font-medium">{s.label}</span>
               <div className={`${s.bg} ${s.color} p-2 rounded-xl`}>{s.icon}</div>
             </div>
-            <div className={`text-3xl font-bold ${s.color}`}>{s.value}</div>
-          </div>
+            <div className="flex items-end justify-between">
+              <div className={`text-3xl font-bold ${s.color}`}>{s.value}</div>
+              <ChevronRight size={14} className="text-slate-300 mb-1" />
+            </div>
+          </Link>
         ))}
       </div>
 
