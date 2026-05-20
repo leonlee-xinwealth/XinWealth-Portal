@@ -57,12 +57,21 @@ const STATUS_STYLE: Record<string, { bg: string; text: string; label: string; la
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function daysUntil(dateStr: string | null): string | null {
+/** Calculate the day-diff from today (calendar-day, not millisecond) to `dateStr`. */
+function diffDays(dateStr: string | null): number | null {
   if (!dateStr) return null;
-  const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86400000);
-  if (diff < 0) return `${Math.abs(diff)}d overdue`;
-  if (diff === 0) return 'Today';
-  return `${diff}d left`;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(dateStr);
+  due.setHours(0, 0, 0, 0);
+  return Math.round((due.getTime() - today.getTime()) / 86400000);
+}
+
+function formatDaysLabel(diff: number | null, t: (en: string, zh: string) => string): string | null {
+  if (diff === null) return null;
+  if (diff < 0) return t(`${Math.abs(diff)}d overdue`, `逾期 ${Math.abs(diff)} 天`);
+  if (diff === 0) return t('Today', '今天');
+  return t(`${diff}d left`, `还剩 ${diff} 天`);
 }
 
 function fmtTime(iso: string): string {
@@ -79,7 +88,6 @@ export default function CaseDetail() {
 
   const [caseData, setCaseData] = useState<CaseDetailData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [advisorId, setAdvisorId] = useState<string | null>(null);
 
   // Inline edit state
   const [dueDate, setDueDate] = useState('');
@@ -133,20 +141,8 @@ export default function CaseDetail() {
     setLoading(false);
   }
 
-  async function loadAdvisor() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: adv } = await supabase
-      .from('advisors')
-      .select('id')
-      .eq('user_id', user.id)
-      .single();
-    if (adv) setAdvisorId(adv.id);
-  }
-
   useEffect(() => {
     loadCase();
-    loadAdvisor();
   }, [id]);
 
   // ── Checklist toggle ───────────────────────────────────────────────────────
@@ -229,7 +225,15 @@ export default function CaseDetail() {
 
   function openCompleteModal() {
     if (!caseData) return;
-    const allDone = caseData.case_checklist_items.every(ci => ci.completed_at !== null);
+    const items = caseData.case_checklist_items;
+    if (items.length === 0) {
+      alert(t(
+        'This case has no checklist items. Please contact support.',
+        '此案件没有检查清单，请联系支持人员。'
+      ));
+      return;
+    }
+    const allDone = items.every(ci => ci.completed_at !== null);
     if (!allDone) {
       alert(t(
         'Please complete all checklist items before marking this case as completed.',
@@ -248,17 +252,18 @@ export default function CaseDetail() {
   }
 
   async function handleMarkCompleted() {
-    if (!id || !caseData || !advisorId) return;
+    if (!id || !caseData) return;
     if (!provider || !policyNumber || !premium || !startDate || !endDate) return;
 
     setCompleteSaving(true);
 
-    // 1. Insert policy
-    const { error: pError } = await supabase
+    // 1. Insert policy first (creates the durable record).
+    //    insurance_policies has no advisor_id column — RLS resolves access
+    //    via client_id ∈ my_advisor_client_ids().
+    const { data: newPolicy, error: pError } = await supabase
       .from('insurance_policies')
       .insert({
         client_id: caseData.clients.id,
-        advisor_id: advisorId,
         policy_type: policyType,
         provider,
         policy_number: policyNumber,
@@ -267,19 +272,29 @@ export default function CaseDetail() {
         start_date: startDate,
         end_date: endDate,
         case_id: id,
-      });
+      })
+      .select('id')
+      .single();
 
-    if (pError) {
+    if (pError || !newPolicy) {
       alert(t('Failed to create policy. Please try again.', '创建保单失败，请重试。'));
       setCompleteSaving(false);
       return;
     }
 
-    // 2. Update case status
-    await supabase
+    // 2. Update case status. If this fails, roll back the policy insert
+    //    so we don't leave an orphan policy with no completed case.
+    const { error: cError } = await supabase
       .from('cases')
       .update({ status: 'completed' })
       .eq('id', id);
+
+    if (cError) {
+      await supabase.from('insurance_policies').delete().eq('id', newPolicy.id);
+      alert(t('Failed to complete case. Please try again.', '完成案件失败，请重试。'));
+      setCompleteSaving(false);
+      return;
+    }
 
     setCompleteSaving(false);
     setShowCompleteModal(false);
@@ -301,7 +316,9 @@ export default function CaseDetail() {
   );
 
   const ss = STATUS_STYLE[caseData.status] ?? STATUS_STYLE.open;
-  const daysLabel = daysUntil(caseData.due_date);
+  const dueDiff = diffDays(caseData.due_date);
+  const daysLabel = formatDaysLabel(dueDiff, t);
+  const isOverdue = dueDiff !== null && dueDiff < 0;
   const caseTypeLabel = getCaseTypeLabel(caseData.case_type, language);
   const isOpen = caseData.status === 'open';
 
@@ -331,7 +348,7 @@ export default function CaseDetail() {
             {daysLabel && (
               <>
                 <span className="text-slate-300">·</span>
-                <span className={daysLabel.includes('overdue') ? 'text-rose-500' : 'text-slate-400'}>
+                <span className={isOverdue ? 'text-rose-500' : 'text-slate-400'}>
                   {t('Due', '到期')}: {daysLabel}
                 </span>
               </>

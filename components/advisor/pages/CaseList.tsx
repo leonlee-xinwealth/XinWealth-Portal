@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Briefcase, Search, Plus } from 'lucide-react';
-import { getCaseTypeLabel, getCaseTemplate } from '../cases/caseTemplates';
+import { getCaseTypeLabel } from '../cases/caseTemplates';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ function getDueDateLabel(dueDate: string | null, t: (en: string, zh: string) => 
   const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
   if (diffDays < 0) return t(`${Math.abs(diffDays)}d overdue`, `逾期 ${Math.abs(diffDays)} 天`);
   if (diffDays === 0) return t('Today', '今天');
-  return t(`${diffDays}d`, `${diffDays} 天后`);
+  return t(`${diffDays}d left`, `还剩 ${diffDays} 天`);
 }
 
 function getStatusBadge(status: string, t: (en: string, zh: string) => string) {
@@ -73,9 +73,10 @@ function getStatusBadge(status: string, t: (en: string, zh: string) => string) {
 
 // ─── Progress Bar ─────────────────────────────────────────────────────────────
 
-function ProgressBar({ caseType, items }: { caseType: string; items: ChecklistItemRaw[] }) {
-  const template = getCaseTemplate(caseType);
-  const total = template.length;
+function ProgressBar({ items }: { items: ChecklistItemRaw[] }) {
+  // Use actual stored items as the denominator so historical cases stay accurate
+  // even if a future template gains/loses steps.
+  const total = items.length;
   const completed = items.filter(i => i.completed_at !== null).length;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
@@ -279,7 +280,7 @@ export default function CaseList() {
 
                 {/* Progress bar */}
                 <div>
-                  <ProgressBar caseType={c.case_type} items={c.case_checklist_items} />
+                  <ProgressBar items={c.case_checklist_items} />
                 </div>
 
                 {/* Due date */}
