@@ -184,7 +184,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-3 gap-4">
         {stats.map(s => (
           <Link
-            key={s.label}
+            key={s.href}
             to={s.href}
             className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 hover:shadow-md hover:border-slate-200 transition-all block"
           >
