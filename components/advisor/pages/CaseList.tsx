@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Briefcase, Search, Plus } from 'lucide-react';
-import { getCaseTypeLabel } from '../cases/caseTemplates';
+import { Briefcase, Search, Plus, X } from 'lucide-react';
+import { getCaseTypeLabel, getCaseTemplate, CASE_TYPE_LABELS } from '../cases/caseTemplates';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -105,15 +105,30 @@ type CaseTypeFilter = typeof CASE_TYPE_OPTIONS[number];
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
+interface ClientOption {
+  id: string;
+  full_name: string;
+}
+
 export default function CaseList() {
   const { language } = useLanguage();
   const t = (en: string, zh: string) => language === 'zh' ? zh : en;
+  const navigate = useNavigate();
 
   const [cases, setCases] = useState<CaseRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [caseTypeFilter, setCaseTypeFilter] = useState<CaseTypeFilter>('all');
+
+  // New Case modal state
+  const [showNewCase, setShowNewCase] = useState(false);
+  const [clients, setClients] = useState<ClientOption[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState('');
+  const [newCaseType, setNewCaseType] = useState('car_insurance');
+  const [newCaseDueDate, setNewCaseDueDate] = useState('');
+  const [creatingCase, setCreatingCase] = useState(false);
+  const [caseError, setCaseError] = useState('');
 
   useEffect(() => {
     async function load() {
@@ -122,14 +137,18 @@ export default function CaseList() {
       const { data: adv } = await supabase.from('advisors').select('id').eq('user_id', user.id).single();
       if (!adv) return;
 
-      const { data } = await supabase
-        .from('cases')
-        .select(`
-          *,
-          clients(full_name),
-          case_checklist_items(id, completed_at)
-        `)
-        .eq('advisor_id', adv.id);
+      const [{ data }, { data: cls }] = await Promise.all([
+        supabase
+          .from('cases')
+          .select(`*, clients(full_name), case_checklist_items(id, completed_at)`)
+          .eq('advisor_id', adv.id),
+        supabase
+          .from('clients')
+          .select('id, full_name')
+          .eq('advisor_id', adv.id)
+          .eq('status', 'active')
+          .order('full_name'),
+      ]);
 
       if (data) {
         // Sort: due_date ascending, nulls last
@@ -141,10 +160,65 @@ export default function CaseList() {
         });
         setCases(sorted as CaseRow[]);
       }
+      setClients((cls as ClientOption[]) || []);
       setLoading(false);
     }
     load();
   }, []);
+
+  async function openNewCaseModal() {
+    setSelectedClientId('');
+    setNewCaseType('car_insurance');
+    setNewCaseDueDate('');
+    setCaseError('');
+    setShowNewCase(true);
+  }
+
+  async function handleCreateCase() {
+    if (!selectedClientId) return;
+    setCreatingCase(true);
+    setCaseError('');
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+      const { data: adv } = await supabase.from('advisors').select('id').eq('user_id', user.id).single();
+      if (!adv) throw new Error('Advisor not found');
+
+      const { data: newCase, error: caseErr } = await supabase
+        .from('cases')
+        .insert({
+          client_id: selectedClientId,
+          advisor_id: adv.id,
+          case_type: newCaseType,
+          due_date: newCaseDueDate || null,
+        })
+        .select()
+        .single();
+
+      if (caseErr) throw new Error(caseErr.message);
+
+      const template = getCaseTemplate(newCaseType);
+      if (template.length > 0) {
+        await supabase.from('case_checklist_items').insert(
+          template.map((item, idx) => ({
+            case_id: newCase.id,
+            item_key: item.key,
+            label_en: item.en,
+            label_zh: item.zh,
+            sort_order: idx,
+            completed_at: null,
+          }))
+        );
+      }
+
+      setShowNewCase(false);
+      navigate(`/advisor/cases/${newCase.id}`);
+    } catch (err: any) {
+      setCaseError(err.message || 'Failed to create case');
+    } finally {
+      setCreatingCase(false);
+    }
+  }
 
   // Apply filters
   const filtered = cases.filter(c => {
@@ -172,7 +246,7 @@ export default function CaseList() {
           <h1 className="font-serif text-2xl font-bold text-xin-blue">{t('Cases', '案件')}</h1>
         </div>
         <button
-          onClick={() => { /* TODO: Sprint 4 T5 — New Case flow */ }}
+          onClick={openNewCaseModal}
           className="flex items-center gap-2 bg-xin-blue text-white text-sm font-semibold px-4 py-2.5 rounded-xl hover:bg-xin-blueLight transition-colors"
         >
           <Plus size={16} />
@@ -317,6 +391,91 @@ export default function CaseList() {
         <p className="text-xs text-slate-400 mt-3">
           {filtered.length} {t('cases', '个案件')}
         </p>
+      )}
+
+      {/* New Case Modal */}
+      {showNewCase && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-serif text-lg font-bold text-xin-blue">
+                {t('New Case', '新建案件')}
+              </h2>
+              <button onClick={() => setShowNewCase(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* Client */}
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  {t('Client', '客户')} <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedClientId}
+                  onChange={e => setSelectedClientId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold focus:bg-white transition-colors"
+                >
+                  <option value="">{t('— Select client —', '— 选择客户 —')}</option>
+                  {clients.map(c => (
+                    <option key={c.id} value={c.id}>{c.full_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Case Type */}
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  {t('Case Type', '案件类型')} <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={newCaseType}
+                  onChange={e => setNewCaseType(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold focus:bg-white transition-colors"
+                >
+                  {Object.entries(CASE_TYPE_LABELS).map(([key, label]) => (
+                    <option key={key} value={key}>{label.en} / {label.zh}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Due Date */}
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  {t('Due Date', '到期日')}
+                </label>
+                <input
+                  type="date"
+                  value={newCaseDueDate}
+                  onChange={e => setNewCaseDueDate(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold focus:bg-white transition-colors"
+                />
+                <p className="text-xs text-slate-400 mt-1">{t('Policy expiry date (optional)', '保单到期日（可选）')}</p>
+              </div>
+
+              {caseError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-600 text-sm">{caseError}</div>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={handleCreateCase}
+                disabled={!selectedClientId || creatingCase}
+                className="flex-1 px-5 py-2.5 bg-xin-blue text-white font-semibold rounded-xl hover:bg-xin-blueLight transition-colors disabled:opacity-50 text-sm"
+              >
+                {creatingCase ? t('Creating...', '创建中...') : t('Create Case', '创建案件')}
+              </button>
+              <button
+                onClick={() => setShowNewCase(false)}
+                className="px-5 py-2.5 bg-white border border-slate-200 text-slate-600 font-medium rounded-xl hover:bg-slate-50 transition-colors text-sm"
+              >
+                {t('Cancel', '取消')}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
