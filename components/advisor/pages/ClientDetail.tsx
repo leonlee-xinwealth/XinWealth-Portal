@@ -34,9 +34,15 @@ export default function ClientDetail() {
   async function handleConvert() {
     if (!client || converting) return;
     setConverting(true);
-    await supabase.from('clients').update({ status: 'active' }).eq('id', client.id);
-    await loadClient();
-    setConverting(false);
+    try {
+      const { error } = await supabase.from('clients').update({ status: 'active' }).eq('id', client.id);
+      if (error) throw error;
+      await loadClient();
+    } catch (e) {
+      console.error('Convert failed:', e);
+    } finally {
+      setConverting(false);
+    }
   }
 
   async function loadPending() {
