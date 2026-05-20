@@ -95,7 +95,7 @@ export default function Dashboard() {
       setLoading(false);
     }
     load();
-  }, []);
+  }, [language]);
 
   // Birthday calculations
   const today = new Date();
@@ -154,7 +154,7 @@ export default function Dashboard() {
       {/* Greeting */}
       <div>
         <h1 className="font-serif text-2xl font-bold text-xin-blue">
-          {t('Good morning', '早上好')}{advisor ? `, ${advisor.display_name.split(' ')[0]}` : ''} 👋
+          {t('Good morning', '早上好')}{advisor ? `, ${advisor.display_name?.split(' ')[0] ?? ''}` : ''} 👋
         </h1>
         {advisor && (
           <div className="flex items-center gap-2 mt-1">
