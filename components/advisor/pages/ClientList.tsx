@@ -36,7 +36,7 @@ export default function ClientList() {
   const filtered = clients
     .filter(c => !activeStatus || c.status === activeStatus)
     .filter(c =>
-      c.full_name.toLowerCase().includes(search.toLowerCase()) ||
+      (c.full_name || '').toLowerCase().includes(search.toLowerCase()) ||
       (c.email || '').toLowerCase().includes(search.toLowerCase()) ||
       (c.phone || '').includes(search) ||
       (c.nric || '').includes(search)

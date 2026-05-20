@@ -40,6 +40,7 @@ export default function ClientDetail() {
       await loadClient();
     } catch (e) {
       console.error('Convert failed:', e);
+      alert('转换失败，请重试。');
     } finally {
       setConverting(false);
     }
