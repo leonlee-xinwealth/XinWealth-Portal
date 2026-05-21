@@ -22,6 +22,13 @@ interface Policy {
   policy_type: string;
 }
 
+const maskNric = (value?: string | null) => {
+  if (!value) return '';
+  const raw = String(value);
+  if (raw.length <= 4) return '****';
+  return `${raw.slice(0, Math.min(10, raw.length - 4))}****`;
+};
+
 export default function ClientDetail() {
   const { id } = useParams();
   const { language } = useLanguage();
@@ -183,7 +190,7 @@ export default function ClientDetail() {
             {client.salutation ? `${client.salutation} ` : ''}{client.full_name}
           </h1>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-            {client.nric && <span className="text-xs text-slate-400">{client.nric}</span>}
+            {client.nric && <span className="text-xs text-slate-400">{maskNric(client.nric)}</span>}
             {client.date_of_birth && (
               <>
                 <span className="text-xs text-slate-300">·</span>

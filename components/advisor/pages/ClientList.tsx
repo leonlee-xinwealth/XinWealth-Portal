@@ -4,6 +4,13 @@ import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Plus, Search } from 'lucide-react';
 
+const maskNric = (value?: string | null) => {
+  if (!value) return '';
+  const raw = String(value);
+  if (raw.length <= 4) return '****';
+  return `${raw.slice(0, Math.min(10, raw.length - 4))}****`;
+};
+
 export default function ClientList() {
   const { language } = useLanguage();
   const t = (en: string, zh: string) => language === 'zh' ? zh : en;
@@ -130,7 +137,7 @@ export default function ClientList() {
                 </div>
                 <div>
                   <div className="text-sm font-medium text-xin-blue">{c.salutation ? `${c.salutation} ` : ''}{c.full_name}</div>
-                  {c.nric && <div className="text-xs text-slate-400">{c.nric}</div>}
+                  {c.nric && <div className="text-xs text-slate-400">{maskNric(c.nric)}</div>}
                 </div>
               </div>
               <div className="text-sm text-slate-600">{c.phone || '—'}</div>

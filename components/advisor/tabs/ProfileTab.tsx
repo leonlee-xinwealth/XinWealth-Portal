@@ -11,7 +11,20 @@ export default function ProfileTab({ client, onSave }: { client: any; onSave: ()
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ ...client });
   const [ok, setOk] = useState(false);
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({});
   const set = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }));
+
+  async function revealSensitive(fieldName: 'nric' | 'bank_account_number') {
+    const { error } = await supabase.rpc('log_sensitive_field_access', {
+      p_client_id: client.id,
+      p_field_name: fieldName,
+    });
+    if (error) {
+      alert(error.message || t('Unable to show full value.', '无法显示完整资料。'));
+      return;
+    }
+    setRevealed(prev => ({ ...prev, [fieldName]: true }));
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -54,7 +67,7 @@ export default function ProfileTab({ client, onSave }: { client: any; onSave: ()
         <Card title={t('Personal','个人资料')}>
           <Row label={t('Salutation','称谓')}>{editing ? <Sel value={form.salutation||''} onChange={v2 => set('salutation',v2)} opts={[['','—'],['Mr.','Mr.'],['Mrs.','Mrs.'],['Ms.','Ms.'],['Dr.','Dr.']]} /> : v.salutation||'—'}</Row>
           <Row label={t('Full Name','全名')}>{editing ? <Inp value={form.full_name} onChange={v2 => set('full_name',v2)} /> : v.full_name}</Row>
-          <Row label="NRIC">{editing ? <Inp value={form.nric||''} onChange={v2 => set('nric',v2)} /> : v.nric||'—'}</Row>
+          <Row label="NRIC">{editing ? <Inp value={form.nric||''} onChange={v2 => set('nric',v2)} /> : <SensitiveValue value={v.nric} fieldName="nric" revealed={revealed.nric} onReveal={revealSensitive} />}</Row>
           <Row label={t('Date of Birth','出生日期')}>{editing ? <Inp type="date" value={form.date_of_birth||''} onChange={v2 => set('date_of_birth',v2)} /> : v.date_of_birth||'—'}</Row>
           <Row label={t('Gender','性别')}>{editing ? <Sel value={form.gender||''} onChange={v2 => set('gender',v2)} opts={[['','—'],['male',t('Male','男')],['female',t('Female','女')]]} /> : v.gender||'—'}</Row>
           <Row label={t('Nationality','国籍')}>{editing ? <Inp value={form.nationality||''} onChange={v2 => set('nationality',v2)} /> : v.nationality||'—'}</Row>
@@ -81,6 +94,7 @@ export default function ProfileTab({ client, onSave }: { client: any; onSave: ()
           <Row label={t('Risk Profile','风险评级')}>{editing ? <Sel value={form.risk_profile||''} onChange={v2 => set('risk_profile',v2)} opts={[['','—'],['conservative',t('Conservative','保守')],['moderate',t('Moderate','稳健')],['balanced',t('Balanced','平衡')],['growth',t('Growth','成长')],['aggressive',t('Aggressive','进取')]]} /> : v.risk_profile||'—'}</Row>
           <Row label={t('Retirement Age','退休年龄')}>{editing ? <Inp type="number" value={String(form.retirement_age||60)} onChange={v2 => set('retirement_age',parseInt(v2))} /> : String(v.retirement_age||'—')}</Row>
           <Row label="EPF No.">{editing ? <Inp value={form.epf_account_number||''} onChange={v2 => set('epf_account_number',v2)} /> : v.epf_account_number||'—'}</Row>
+          <Row label={t('Bank Account No.','银行账号')}>{editing ? <Inp value={form.bank_account_number||''} onChange={v2 => set('bank_account_number',v2)} /> : <SensitiveValue value={v.bank_account_number} fieldName="bank_account_number" revealed={revealed.bank_account_number} onReveal={revealSensitive} />}</Row>
           <Row label={t('Client Status','客户状态')}>{editing ? <Sel value={form.status} onChange={v2 => set('status',v2)} opts={[['prospect',t('Prospect','潜在')],['active',t('Active','活跃')],['inactive',t('Inactive','非活跃')]]} /> : v.status}</Row>
         </Card>
       </div>
@@ -104,6 +118,26 @@ const Btn = ({ onClick, primary, children, disabled }: any) => (
   <button onClick={onClick} disabled={disabled}
     className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${primary ? 'bg-xin-blue text-white hover:bg-xin-blueLight' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'} disabled:opacity-50`}
   >{children}</button>
+);
+const maskSensitive = (value: string, visiblePrefix = 10) => {
+  if (!value) return '—';
+  const raw = String(value);
+  if (raw.length <= 4) return '****';
+  return `${raw.slice(0, Math.min(visiblePrefix, raw.length - 4))}****`;
+};
+const SensitiveValue = ({ value, fieldName, revealed, onReveal }: any) => (
+  <span className="inline-flex items-center gap-2 flex-wrap">
+    <span>{revealed ? (value || '—') : maskSensitive(value)}</span>
+    {value && !revealed ? (
+      <button
+        type="button"
+        onClick={() => onReveal(fieldName)}
+        className="text-xs font-semibold text-xin-blue hover:text-xin-gold"
+      >
+        Show full
+      </button>
+    ) : null}
+  </span>
 );
 const Inp = ({ value, onChange, type = 'text' }: any) => (
   <input type={type} value={value} onChange={(e: any) => onChange(e.target.value)}
