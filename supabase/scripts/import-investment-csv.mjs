@@ -69,19 +69,28 @@ async function main() {
   const emailToClientId = await clientIdsByEmail();
   const investmentRows = parseCsv(join(CSV_DIR, 'investments.csv'));
   const snapshotRows = parseCsv(join(CSV_DIR, 'portfolio_snapshots.csv'));
+  const { data: existingAccounts, error: existingAccountsError } = await supabase
+    .from('investment_accounts')
+    .select('id,client_id,account_name,platform');
+  if (existingAccountsError) throw existingAccountsError;
+  const existingAccountKeys = new Set(
+    (existingAccounts || []).map(a => `${a.client_id}:${a.platform || 'other'}:${a.account_name}`)
+  );
 
   const accountRows = [];
   const accountKeyToClient = new Map();
   for (const row of investmentRows) {
     const clientId = emailToClientId.get(String(row.client_email || '').toLowerCase());
     if (!clientId) continue;
-    const key = `${clientId}:${row.asset_class || 'other'}:${row.name || row.ticker || 'Portfolio'}`;
+    const accountName = slug(row.name || row.ticker || row.asset_class || 'Investment Portfolio');
+    const key = `${clientId}:${row.asset_class || 'other'}:${accountName}`;
     if (accountKeyToClient.has(key)) continue;
     accountKeyToClient.set(key, clientId);
+    if (existingAccountKeys.has(key)) continue;
     accountRows.push({
       client_id: clientId,
       account_type: 'other',
-      account_name: slug(row.name || row.ticker || row.asset_class || 'Investment Portfolio'),
+      account_name: accountName,
       platform: str(row.asset_class),
       opened_date: date(row.purchased_at),
       currency: row.currency || 'MYR',
@@ -94,14 +103,17 @@ async function main() {
   const accountResult = await insert('investment_accounts', accountRows);
   console.log(`investment_accounts prepared/inserted=${accountResult.inserted} failed=${accountResult.failed}`);
 
-  let accountIds = [];
+  let accountIds = existingAccounts || [];
   if (!DRY_RUN) {
-    const { data, error } = await supabase
-      .from('investment_accounts')
-      .select('id,client_id,account_name,platform')
-      .in('client_id', Array.from(new Set(accountRows.map(r => r.client_id))));
-    if (error) throw error;
-    accountIds = data || [];
+    const clientIds = Array.from(new Set([...accountRows.map(r => r.client_id), ...Array.from(accountKeyToClient.values())]));
+    if (clientIds.length > 0) {
+      const { data, error } = await supabase
+        .from('investment_accounts')
+        .select('id,client_id,account_name,platform')
+        .in('client_id', clientIds);
+      if (error) throw error;
+      accountIds = data || [];
+    }
   }
 
   const findAccountId = (clientId, sourceRow) => {
@@ -112,41 +124,66 @@ async function main() {
       || null;
   };
 
+  const { data: existingHoldings, error: existingHoldingsError } = await supabase
+    .from('portfolio_holdings')
+    .select('client_id,account_id,snapshot_month,instrument_code,instrument_name,market_value');
+  if (existingHoldingsError) throw existingHoldingsError;
+  const existingHoldingKeys = new Set((existingHoldings || []).map(h =>
+    `${h.client_id}:${h.account_id}:${h.snapshot_month}:${h.instrument_code}:${h.instrument_name}:${Number(h.market_value || 0)}`
+  ));
+
   const holdingRows = investmentRows.map((row) => {
     const clientId = emailToClientId.get(String(row.client_email || '').toLowerCase());
     if (!clientId) return null;
     const units = num(row.units) || 1;
     const marketValue = num(row.current_value) || 0;
     const accountId = findAccountId(clientId, row);
-    return {
+    const holding = {
       client_id: clientId,
       account_id: accountId,
       snapshot_month: date(row.purchased_at) || new Date().toISOString().slice(0, 7) + '-01',
-      instrument_code: str(row.ticker),
+      instrument_code: str(row.ticker) || slug(row.name || row.asset_class || 'investment').toUpperCase().replace(/\s+/g, '_'),
       instrument_name: str(row.name) || str(row.ticker) || str(row.asset_class) || 'Investment',
       units_held: units,
       nav_per_unit: units ? marketValue / units : marketValue,
       market_value: marketValue,
       cost_basis: num(row.cost_basis),
     };
+    const key = `${holding.client_id}:${holding.account_id}:${holding.snapshot_month}:${holding.instrument_code}:${holding.instrument_name}:${Number(holding.market_value || 0)}`;
+    return holding.account_id && !existingHoldingKeys.has(key) ? holding : null;
   }).filter(Boolean);
 
   console.log(`${DRY_RUN ? 'DRY RUN' : 'RUN'}: ${holdingRows.length} portfolio_holdings`);
   const holdingResult = await insert('portfolio_holdings', holdingRows);
   console.log(`portfolio_holdings prepared/inserted=${holdingResult.inserted} failed=${holdingResult.failed}`);
 
+  const { data: existingTransactions, error: existingTransactionsError } = await supabase
+    .from('investment_transactions')
+    .select('account_id,client_id,category_code,tx_date,amount,instrument_code,instrument_name,notes');
+  if (existingTransactionsError) throw existingTransactionsError;
+  const existingTransactionKeys = new Set((existingTransactions || []).map(tx =>
+    `${tx.account_id}:${tx.client_id}:${tx.category_code}:${tx.tx_date}:${Number(tx.amount || 0)}:${tx.instrument_code || ''}:${tx.instrument_name || ''}:${tx.notes || ''}`
+  ));
+
   const txRows = investmentRows.map((row) => {
     const clientId = emailToClientId.get(String(row.client_email || '').toLowerCase());
     if (!clientId) return null;
-    return {
+    const accountId = findAccountId(clientId, row);
+    const tx = {
+      account_id: accountId,
       client_id: clientId,
-      transaction_type: 'deposit',
+      category_code: 'deposit',
+      tx_date: date(row.purchased_at) || new Date().toISOString().slice(0, 10),
       amount: num(row.cost_basis) || num(row.current_value) || 0,
-      units: num(row.units),
+      currency: row.currency || 'MYR',
+      instrument_code: str(row.ticker),
+      instrument_name: str(row.name) || str(row.ticker) || str(row.asset_class) || 'Investment',
+      units_transacted: num(row.units),
       price_per_unit: num(row.units) ? (num(row.cost_basis) || num(row.current_value) || 0) / num(row.units) : null,
-      occurred_at: date(row.purchased_at) || new Date().toISOString().slice(0, 10),
-      note: `Imported ${row.name || row.ticker || row.asset_class || 'investment'}`,
+      notes: `Imported ${row.name || row.ticker || row.asset_class || 'investment'}`,
     };
+    const key = `${tx.account_id}:${tx.client_id}:${tx.category_code}:${tx.tx_date}:${Number(tx.amount || 0)}:${tx.instrument_code || ''}:${tx.instrument_name || ''}:${tx.notes || ''}`;
+    return tx.account_id && !existingTransactionKeys.has(key) ? tx : null;
   }).filter(Boolean);
 
   console.log(`${DRY_RUN ? 'DRY RUN' : 'RUN'}: ${txRows.length} investment_transactions`);
