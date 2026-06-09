@@ -74,8 +74,10 @@ export default function MarketValues() {
   // Expand/collapse + history
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [history, setHistory] = useState<Record<string, HistoryRow[]>>({});
-  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [loadingHistoryIds, setLoadingHistoryIds] = useState<Set<string>>(new Set());
   const [deletingHistoryId, setDeletingHistoryId] = useState<string | null>(null);
+
+  const selectedClientIdRef = React.useRef<string | null>(null);
 
   // Modals
   const [recordModal, setRecordModal] = useState<{ portfolio: PortfolioRow; editRow?: HistoryRow } | null>(null);
@@ -97,6 +99,11 @@ export default function MarketValues() {
     }
     load();
   }, []);
+
+  // ── Keep ref in sync with selectedClientId
+  useEffect(() => {
+    selectedClientIdRef.current = selectedClientId;
+  }, [selectedClientId]);
 
   // ── Load portfolios when client changes
   useEffect(() => {
@@ -139,7 +146,8 @@ export default function MarketValues() {
   }
 
   async function reloadPortfolios() {
-    if (selectedClientId) await loadPortfoliosForClient(selectedClientId);
+    const cid = selectedClientIdRef.current;
+    if (cid) await loadPortfoliosForClient(cid);
   }
 
   async function reloadHistory(portId: string) {
@@ -156,20 +164,22 @@ export default function MarketValues() {
     setExpandedId(portId);
     setDeletingHistoryId(null);
     if (!history[portId]) {
-      setLoadingHistory(true);
+      setLoadingHistoryIds(prev => new Set(prev).add(portId));
       await reloadHistory(portId);
-      setLoadingHistory(false);
+      setLoadingHistoryIds(prev => { const s = new Set(prev); s.delete(portId); return s; });
     }
   }
 
   async function handleDeleteHistory(portId: string, rowId: string) {
-    await supabase.from('portfolio_history').delete().eq('id', rowId);
+    const { error } = await supabase.from('portfolio_history').delete().eq('id', rowId);
+    if (error) { alert(`Delete failed: ${error.message}`); return; }
     setDeletingHistoryId(null);
     await Promise.all([reloadHistory(portId), reloadPortfolios()]);
   }
 
   async function handleDeletePortfolio(portId: string) {
-    await supabase.from('portfolios').delete().eq('id', portId);
+    const { error } = await supabase.from('portfolios').delete().eq('id', portId);
+    if (error) { alert(`Delete failed: ${error.message}`); return; }
     setDeletePortDialog(null);
     setExpandedId(null);
     setHistory(prev => { const n = { ...prev }; delete n[portId]; return n; });
@@ -310,7 +320,7 @@ export default function MarketValues() {
                       {/* Expanded: history sub-table */}
                       {isExpanded && (
                         <div className="px-6 pb-5 bg-slate-50/60">
-                          {loadingHistory && portHistory.length === 0 ? (
+                          {loadingHistoryIds.has(p.id) && portHistory.length === 0 ? (
                             <div className="py-6 flex justify-center"><Spinner /></div>
                           ) : portHistory.length === 0 ? (
                             <p className="py-4 text-center text-slate-400 text-xs">
