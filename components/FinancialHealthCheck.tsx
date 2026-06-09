@@ -101,18 +101,19 @@ const FinancialHealthCheck: React.FC = () => {
   };
 
   const getCategoryScores = (d: FinancialHealthData) => {
-    const s = (id: string) =>
+    const score = (id: string) =>
       getMetricScore(id, d[id as keyof Omit<FinancialHealthData, 'raw'>] as number);
-    const avg = (...scores: number[]) =>
-      Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    const average = (...values: number[]) =>
+      Math.round(values.reduce((a, b) => a + b, 0) / values.length);
     return {
-      liquidity:   avg(s('basicLiquidityRatio'), s('liquidAssetToNetWorth')),
-      debt:        avg(s('solvencyRatio'), s('debtServiceRatio'), s('nonMortgageDSR')),
-      protection:  s('lifeInsuranceCoverage'),
-      growth:      avg(s('savingsRatio'), s('investAssetsToNetWorth'), s('passiveIncomeCoverage')),
+      liquidity:   average(score('basicLiquidityRatio'), score('liquidAssetToNetWorth')),
+      debt:        average(score('solvencyRatio'), score('debtServiceRatio'), score('nonMortgageDSR')),
+      protection:  score('lifeInsuranceCoverage'),
+      growth:      average(score('savingsRatio'), score('investAssetsToNetWorth'), score('passiveIncomeCoverage')),
     };
   };
 
+  // Each of the 4 categories carries equal weight (25%) regardless of how many metrics it contains — by design.
   const getTotalScore = (cats: ReturnType<typeof getCategoryScores>): number =>
     Math.round((cats.liquidity + cats.debt + cats.protection + cats.growth) / 4);
 
