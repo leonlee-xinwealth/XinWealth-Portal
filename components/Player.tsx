@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
-// TODO: will be replaced in Task 5
-// import { fetchFinancialHealth, fetchClientProfile, updateClientInfo, updateSession } from '../services/apiService';
 import { fetchFinancialHealth, updateClientInfo, updateSession } from '../services/apiService';
 import { getSession } from '../services/apiService';
-import { FinancialHealthData, ClientProfile, UserSession } from '../types';
+import { FinancialHealthData, UserSession } from '../types';
 import { Loader2, AlertCircle, Gamepad2, Shield, Heart, Brain, Sparkles, Sword, Coins, User, Edit2, X, Check, Save, ArrowBigUpDash } from 'lucide-react';
 import LevelUp from './LevelUp';
 
@@ -31,7 +29,6 @@ const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?
 
 const Player: React.FC = () => {
   const [healthData, setHealthData] = useState<FinancialHealthData | null>(null);
-  const [profileData, setProfileData] = useState<ClientProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'stats' | 'info' | 'levelup'>('stats');
@@ -47,12 +44,8 @@ const Player: React.FC = () => {
     const loadData = async () => {
       try {
         setLoading(true);
-        const [health, profile] = await Promise.all([
-          fetchFinancialHealth(),
-          Promise.resolve(null as ClientProfile | null) // TODO: will be replaced in Task 5
-        ]);
+        const health = await fetchFinancialHealth();
         setHealthData(health);
-        setProfileData(profile);
       } catch (err: any) {
         setError(err.message || 'Failed to load player data');
       } finally {
@@ -71,7 +64,7 @@ const Player: React.FC = () => {
     );
   }
 
-  if (error || !healthData || !profileData) {
+  if (error || !healthData) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4">
         <AlertCircle className="w-12 h-12 text-red-500" />
@@ -151,8 +144,8 @@ const Player: React.FC = () => {
     defValue = Math.round((finalTargets / 6) * 100);
   }
 
-  // 5) INT (智力) - Net Worth Growth Rate
-  const intValue = profileData.returnPercentage; // 5% base, 10% standard, 15% excellent
+  // 5) INT (智力) - Net Worth Growth Rate (placeholder until portfolio data is wired here)
+  const intValue = 0;
   let intStatus = 'Needs Improvement';
   if (intValue >= 15) intStatus = 'Excellent';
   else if (intValue >= 10) intStatus = 'Standard';
