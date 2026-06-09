@@ -7,6 +7,9 @@ Add a dedicated **Market Values** page to the Advisor Portal that lets advisors:
 1. Record monthly portfolio market values for each client (into `portfolio_history`)
 2. Record additional capital injections (top-ups)
 3. Create new portfolios for clients (into `portfolios`)
+4. Edit portfolio metadata (name, currency, capital, start date)
+5. Delete individual monthly history records
+6. Delete an entire portfolio (with all its history)
 
 Data entered here is immediately reflected in the Client Portal's Investment tab.
 
@@ -16,14 +19,15 @@ Data entered here is immediately reflected in the Client Portal's Investment tab
 
 - New sidebar nav item: **Market Values** (`/advisor/market-values`)
 - New page component: `MarketValuesPage`
-- Modal: **Record Monthly Value** (upsert into `portfolio_history`)
-- Modal: **New Portfolio** (insert into `portfolios`)
+- Modal 1: **Record Monthly Value** (upsert into `portfolio_history`)
+- Modal 2: **New Portfolio** (insert into `portfolios`)
+- Modal 3: **Edit Portfolio** (update name/currency/capital/date in `portfolios`)
+- Delete portfolio with confirmation (cascade deletes all history)
+- Delete individual history record with confirmation
 - No changes to Client Portal code — it already reads from `portfolios` + `portfolio_history`
 
 Out of scope:
-- Deleting portfolios or history records
 - Bulk CSV import (future)
-- Portfolio editing (name/currency/capital changes)
 
 ---
 
@@ -132,20 +136,64 @@ Portfolio rows are **expandable**. Clicking a portfolio row toggles a history su
 
 ### Expanded Row Layout
 ```
-▼ PGWA Quant Global   16,435.08   May ✓   [+ 录入]
-  ┌────────────────────────────────────────────────┐
-  │ 月份      市值 (SGD)   追加      │
-  │ May 2026  16,435.08    —        ✏️ │
-  │ Apr 2026  15,717.03    —        ✏️ │
-  │ Mar 2026  14,990.66    —        ✏️ │
-  │ Feb 2026  16,243.19    —        ✏️ │
-  └────────────────────────────────────────────────┘
+▼ PGWA Quant Global   16,435.08   May ✓   [+ 录入]  [✏️ Edit]  [🗑️ Delete]
+  ┌──────────────────────────────────────────────────────┐
+  │ 月份      市值 (SGD)   追加                          │
+  │ May 2026  16,435.08    —        ✏️     🗑️           │
+  │ Apr 2026  15,717.03    —        ✏️     🗑️           │
+  │ Mar 2026  14,990.66    —        ✏️     🗑️           │
+  │ Feb 2026  16,243.19    —        ✏️     🗑️           │
+  └──────────────────────────────────────────────────────┘
 ```
 
-- Clicking ✏️ opens the **same Record Monthly Value modal**, pre-filled with that month's existing `end_value` and `cashflow`.
-- The modal header changes to "修改市值 — May 2026" to make it clear this is an edit, not a new entry.
-- On save: UPSERT (same logic — overwrites the existing row for that `portfolio_id` + `snapshot_date`).
+- **✏️ (per month row):** Opens the **Record Monthly Value modal**, pre-filled with that month's existing `end_value` and `cashflow`. Modal header becomes "修改市值 — May 2026". On save: UPSERT (overwrites the existing row).
+- **🗑️ (per month row):** Shows an inline confirmation prompt ("Delete May 2026 record? This cannot be undone.") with Cancel / Delete buttons. On confirm: DELETE single row from `portfolio_history`. The expanded table refreshes; if no rows remain, the portfolio row shows no last-recorded date.
+- **✏️ Edit (portfolio row header):** Opens **Modal 3 — Edit Portfolio** (see below).
+- **🗑️ Delete (portfolio row header):** Shows a confirmation dialog warning about cascade delete (see Delete Portfolio section below).
 - Only one portfolio row is expanded at a time (clicking another collapses the current).
+
+---
+
+---
+
+## Modal 3 — Edit Portfolio
+
+Triggered by: clicking **✏️ Edit** button on a portfolio row header (visible in expanded state).
+
+### Fields
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| Portfolio Name | Text | Yes | Pre-filled with current name |
+| Currency | Select | Yes | Pre-filled; options: SGD, MYR, USD |
+| 起始注资 (Capital) | Number | Yes | Pre-filled with `capital_injection` |
+| 注资日期 (Start Month) | `<input type="month">` | Yes | Pre-filled with `injection_date` |
+
+### Warning Banner
+Display a yellow warning inside the modal:
+> ⚠️ Changing the capital or start date will affect CAGR and FD comparison calculations visible to the client.
+
+### Behaviour
+- On **Save**: UPDATE `portfolios` row — set `name`, `currency`, `capital_injection`, `injection_date` (first day of selected month).
+- On success: close modal, refresh portfolio row header to show updated name/currency.
+- Currency change does NOT convert existing history values — it only changes the label displayed. Advisor is responsible for ensuring values are consistent.
+
+---
+
+## Delete Portfolio
+
+Triggered by: clicking **🗑️ Delete** on a portfolio row header (visible in expanded state).
+
+### Confirmation Dialog
+Display a destructive-action modal:
+> **Delete "PGWA Quant Global"?**
+>
+> This will permanently delete the portfolio and all **N recorded months** of history. This action cannot be undone and will remove this portfolio from the client's Investment tab immediately.
+>
+> [Cancel]  [Delete Portfolio ← red button]
+
+- "N recorded months" is the count of rows in `portfolio_history` for this portfolio (show 0 if none).
+- On confirm: DELETE from `portfolios` where `id = portfolio_id`. Because `portfolio_history.portfolio_id` has `ON DELETE CASCADE`, all history rows are automatically removed.
+- On success: close dialog, remove portfolio row from the panel, refresh the panel.
 
 ---
 
@@ -191,6 +239,28 @@ DO UPDATE SET end_value = EXCLUDED.end_value, cashflow = EXCLUDED.cashflow;
 **Insert new portfolio + first history row:**
 Two sequential inserts — first `portfolios`, then `portfolio_history` using returned id.
 
+**Update portfolio metadata:**
+```sql
+UPDATE portfolios
+SET name = <name>, currency = <currency>,
+    capital_injection = <capital>, injection_date = <first_day_of_month>
+WHERE id = <portfolio_id>;
+```
+
+**Delete a single history record:**
+```sql
+DELETE FROM portfolio_history
+WHERE id = <history_row_id>;
+```
+(Load the `id` alongside other history columns when the row is expanded, so this is available.)
+
+**Delete a portfolio (cascades to history):**
+```sql
+DELETE FROM portfolios
+WHERE id = <portfolio_id>;
+```
+`portfolio_history` rows are removed automatically via `ON DELETE CASCADE` on the FK constraint.
+
 ---
 
 ## File Plan
@@ -207,12 +277,12 @@ No backend API changes needed — page talks to Supabase directly (same pattern 
 
 **Load full history for expanded portfolio:**
 ```sql
-SELECT snapshot_date, end_value, cashflow
+SELECT id, snapshot_date, end_value, cashflow
 FROM portfolio_history
 WHERE portfolio_id = <portfolio_id>
 ORDER BY snapshot_date DESC;
 ```
-Loaded on demand when advisor expands a portfolio row (not on page load).
+Loaded on demand when advisor expands a portfolio row (not on page load). The `id` column is needed for single-row deletion.
 
 ---
 
@@ -223,5 +293,10 @@ Loaded on demand when advisor expands a portfolio row (not on page load).
 - Advisor can create a new portfolio — appears in both Advisor Portal and Client Portal
 - UPSERT is safe: recording the same month twice overwrites without error
 - Amber warning dot correctly highlights portfolios not updated for the current month
-- Expanding a portfolio row loads and shows all historical months with ✏️ edit buttons
-- Clicking ✏️ opens the modal pre-filled with the existing values; saving overwrites correctly
+- Expanding a portfolio row loads and shows all historical months with ✏️ and 🗑️ buttons per row
+- Clicking ✏️ on a month row opens the modal pre-filled with the existing values; saving overwrites correctly
+- Clicking 🗑️ on a month row shows inline confirmation; confirming deletes the single history row and refreshes the table
+- Clicking ✏️ Edit on a portfolio row header opens the Edit Portfolio modal pre-filled with current metadata; saving updates the portfolio
+- Edit Portfolio modal displays the yellow warning about capital/date affecting calculations
+- Clicking 🗑️ Delete on a portfolio row header shows the confirmation dialog with correct history count; confirming removes the portfolio and all its history from both portals
+- Delete portfolio confirmation dialog uses a visually distinct (red) destructive action button
