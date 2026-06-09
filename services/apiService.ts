@@ -121,38 +121,6 @@ const calculateXIRR = (values: number[], dates: Date[], guess = 0.1): number => 
   return 0; // Failed to converge
 };
 
-// Calculate TWR
-// Formula per period: (End - (Start + CF)) / (Start + CF)
-const calculateTWR = (records: any[]): number => {
-  let cumulativeTwr = 1;
-  let prevEndValue = 0; // Represents "Start Value" of current period
-
-  for (const record of records) {
-    const endValue = safeFloat(record.fields["End Value"] || record.fields["end value"]);
-    const cashflow = safeFloat(record.fields["Cashflow"] || record.fields["cashflow"]);
-
-    // Denominator (Capital Base) = Start Value + Cashflow
-    const capitalBase = prevEndValue + cashflow;
-
-    if (capitalBase === 0) {
-      // Handle edge case (e.g. first month no money yet? or full withdrawal)
-      prevEndValue = endValue;
-      continue;
-    }
-
-    // Gain = End - CapitalBase
-    // Return = Gain / CapitalBase
-    const gain = endValue - capitalBase;
-    const periodReturn = gain / capitalBase;
-
-    cumulativeTwr *= (1 + periodReturn);
-
-    // The End Value of this month becomes the Start Value of next month
-    prevEndValue = endValue;
-  }
-
-  return (cumulativeTwr - 1) * 100;
-};
 
 export const fetchTransactions = async (): Promise<Transaction[]> => {
   return [];
@@ -180,10 +148,6 @@ export const fetchPortfolios = async (): Promise<Portfolio[]> => {
 
 const FD_ANNUAL_RATE = 0.03;
 
-const _calcCAGR = (endValue: number, capital: number, monthsElapsed: number): number => {
-  if (monthsElapsed <= 0 || capital <= 0) return 0;
-  return (Math.pow(endValue / capital, 12 / monthsElapsed) - 1) * 100;
-};
 
 const _calcTWRFromSnapshots = (history: PortfolioSnapshot[]): number => {
   let cumulative = 1;
@@ -212,16 +176,26 @@ export const computePortfolioMetrics = (portfolio: Portfolio): PortfolioMetrics 
   const currentValue = latest.end_value;
   const latestDate = new Date(latest.snapshot_date);
 
-  const totalCashflow = history.reduce((s, h) => s + h.cashflow, 0) || capital;
+  const sumCashflows = history.reduce((s, h) => s + h.cashflow, 0);
+  if (sumCashflows === 0) {
+    console.warn(`[computePortfolioMetrics] portfolio ${portfolio.id}: all cashflows are 0, falling back to capital_injection for totalReturnPct`);
+  }
+  const totalCashflow = sumCashflows || capital;
   const totalReturnPct = totalCashflow > 0 ? ((currentValue / totalCashflow) - 1) * 100 : 0;
 
   const monthsElapsed =
     (latestDate.getFullYear() - injectionDate.getFullYear()) * 12
     + (latestDate.getMonth() - injectionDate.getMonth());
-  const cagr = _calcCAGR(currentValue, capital, monthsElapsed);
+  // CAGR uses exact days for annualisation; FD uses integer months (matches snapshot granularity)
+  const yearsElapsed = (latestDate.getTime() - injectionDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
+  const cagr = yearsElapsed > 0 && capital > 0
+    ? (Math.pow(currentValue / capital, 1 / yearsElapsed) - 1) * 100
+    : 0;
 
   const twr = _calcTWRFromSnapshots(history);
 
+  // XIRR: cashflow dates use snapshot_date as proxy for injection timing.
+  // Initial injection is modelled as end-of-month; slight timing offset vs injection_date is acceptable.
   const xirrStreams = history
     .filter(h => h.cashflow !== 0)
     .map(h => ({ amount: -h.cashflow, date: new Date(h.snapshot_date) }));

@@ -39,7 +39,8 @@ export default async function handler(req, res) {
       )
     `)
     .eq('client_id', clientRow.id)
-    .order('injection_date', { ascending: true });
+    .order('injection_date', { ascending: true })
+    .order('snapshot_date', { referencedTable: 'portfolio_history', ascending: true });
 
   if (portErr) {
     return res.status(500).json({ error: 'Failed to fetch portfolios', details: portErr.message });
