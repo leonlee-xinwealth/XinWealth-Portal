@@ -271,6 +271,42 @@ export interface KYCData {
   investments: KYCInvestmentsData;
 }
 
+// ── Investment Tab (New Multi-Portfolio Architecture) ──
+
+export interface Portfolio {
+  id: string;
+  name: string;
+  currency: string;          // "SGD" | "MYR"
+  capital_injection: number;
+  injection_date: string;    // ISO date e.g. "2025-12-01"
+  portfolio_history: PortfolioSnapshot[];
+}
+
+export interface PortfolioSnapshot {
+  snapshot_date: string;     // ISO date e.g. "2025-12-31"
+  end_value: number;
+  cashflow: number;
+}
+
+export interface PortfolioMetrics {
+  currentValue: number;
+  totalReturnPct: number;    // simple return % since inception
+  cagr: number;              // annualised compound return %
+  xirr: number;              // money-weighted annualised %
+  twr: number;               // time-weighted cumulative %
+  fdCurrentValue: number;    // FD equivalent at latest month
+  fdDiffAbsolute: number;    // portfolio − FD in currency units
+  fdDiffPct: number;         // (portfolio − FD) / FD × 100
+  monthlyData: PortfolioMonthlyPoint[];
+}
+
+export interface PortfolioMonthlyPoint {
+  label: string;             // "Dec 25", "Jan 26", …
+  portfolioValue: number;
+  fdValue: number;
+  fdDiff: number;            // portfolioValue − fdValue
+}
+
 export const initialKYCData: KYCData = {
   globalMonth: new Date().getMonth().toString(),
   globalYear: new Date().getFullYear().toString(),
