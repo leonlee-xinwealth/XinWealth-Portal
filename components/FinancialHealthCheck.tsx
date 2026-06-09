@@ -93,6 +93,70 @@ const FinancialHealthCheck: React.FC = () => {
     }
   };
 
+  const getMetricScore = (ratioId: string, value: number): number => {
+    const status = getStatus(ratioId, value);
+    if (status.color === 'text-green-500') return 100;
+    if (status.color === 'text-yellow-500') return 60;
+    return 20;
+  };
+
+  const getCategoryScores = (d: FinancialHealthData) => {
+    const s = (id: string) =>
+      getMetricScore(id, d[id as keyof Omit<FinancialHealthData, 'raw'>] as number);
+    const avg = (...scores: number[]) =>
+      Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+    return {
+      liquidity:   avg(s('basicLiquidityRatio'), s('liquidAssetToNetWorth')),
+      debt:        avg(s('solvencyRatio'), s('debtServiceRatio'), s('nonMortgageDSR')),
+      protection:  s('lifeInsuranceCoverage'),
+      growth:      avg(s('savingsRatio'), s('investAssetsToNetWorth'), s('passiveIncomeCoverage')),
+    };
+  };
+
+  const getTotalScore = (cats: ReturnType<typeof getCategoryScores>): number =>
+    Math.round((cats.liquidity + cats.debt + cats.protection + cats.growth) / 4);
+
+  const scoreColor = (s: number): string =>
+    s >= 80 ? '#22c55e' : s >= 60 ? '#eab308' : s >= 40 ? '#f97316' : '#ef4444';
+
+  const getScoreSubtitle = (score: number): string => {
+    if (score >= 80) return '财务状况优秀，继续保持';
+    if (score >= 60) return '整体状况良好，有提升空间';
+    if (score >= 40) return '存在明显薄弱环节，建议优先改善';
+    return '财务风险较高，需立即关注';
+  };
+
+  const getBarWidth = (id: string, value: number): number => {
+    const ranges: Record<string, number> = {
+      basicLiquidityRatio:    12,
+      liquidAssetToNetWorth:  0.40,
+      solvencyRatio:          1.0,
+      debtServiceRatio:       0.70,
+      nonMortgageDSR:         0.40,
+      lifeInsuranceCoverage:  20,
+      savingsRatio:           0.50,
+      investAssetsToNetWorth: 1.0,
+      passiveIncomeCoverage:  1.50,
+    };
+    const max = ranges[id] ?? 1;
+    return Math.min(100, Math.max(0, (value / max) * 100));
+  };
+
+  const getBenchmarkPct = (id: string): number => {
+    const marks: Record<string, number> = {
+      basicLiquidityRatio:    (6  / 12)   * 100,
+      liquidAssetToNetWorth:  (0.15/0.40) * 100,
+      solvencyRatio:          (0.5 / 1.0) * 100,
+      debtServiceRatio:       (0.35/0.70) * 100,
+      nonMortgageDSR:         (0.15/0.40) * 100,
+      lifeInsuranceCoverage:  (10  / 20)  * 100,
+      savingsRatio:           (0.20/0.50) * 100,
+      investAssetsToNetWorth: (0.5 / 1.0) * 100,
+      passiveIncomeCoverage:  (1.0 /1.50) * 100,
+    };
+    return marks[id] ?? 50;
+  };
+
   const formatValue = (id: string, value: number) => {
     if (isNaN(value) || !isFinite(value)) return '0.0';
     if (id === 'basicLiquidityRatio') {
@@ -345,6 +409,10 @@ const FinancialHealthCheck: React.FC = () => {
       </div>
     );
   }
+
+  const catScores = data ? getCategoryScores(data) : { liquidity: 0, debt: 0, protection: 0, growth: 0 };
+  const totalScore = getTotalScore(catScores);
+  const ringOffset = 226.2 * (1 - totalScore / 100); // SVG stroke-dashoffset for r=36 ring
 
   return (
     <div className="animate-fade-in-up pb-10">
