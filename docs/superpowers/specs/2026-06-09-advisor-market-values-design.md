@@ -126,6 +126,29 @@ Triggered by: clicking **「+ New Portfolio」** button in the portfolio panel h
 
 ---
 
+## Editing Historical Records
+
+Portfolio rows are **expandable**. Clicking a portfolio row toggles a history sub-table showing all recorded months.
+
+### Expanded Row Layout
+```
+▼ PGWA Quant Global   16,435.08   May ✓   [+ 录入]
+  ┌────────────────────────────────────────────────┐
+  │ 月份      市值 (SGD)   追加      │
+  │ May 2026  16,435.08    —        ✏️ │
+  │ Apr 2026  15,717.03    —        ✏️ │
+  │ Mar 2026  14,990.66    —        ✏️ │
+  │ Feb 2026  16,243.19    —        ✏️ │
+  └────────────────────────────────────────────────┘
+```
+
+- Clicking ✏️ opens the **same Record Monthly Value modal**, pre-filled with that month's existing `end_value` and `cashflow`.
+- The modal header changes to "修改市值 — May 2026" to make it clear this is an edit, not a new entry.
+- On save: UPSERT (same logic — overwrites the existing row for that `portfolio_id` + `snapshot_date`).
+- Only one portfolio row is expanded at a time (clicking another collapses the current).
+
+---
+
 ## Data Access
 
 The page is in the Advisor Portal and uses the existing `supabase` client (advisor session).
@@ -140,7 +163,7 @@ WHERE advisor_id = <advisor_id>
 ORDER BY full_name;
 ```
 
-**Load portfolios for selected client (with latest snapshot):**
+**Load portfolios for selected client (with latest snapshot + full history for expansion):**
 ```sql
 SELECT p.id, p.name, p.currency, p.capital_injection, p.injection_date,
        h.snapshot_date AS last_date,
@@ -182,6 +205,17 @@ No backend API changes needed — page talks to Supabase directly (same pattern 
 
 ---
 
+**Load full history for expanded portfolio:**
+```sql
+SELECT snapshot_date, end_value, cashflow
+FROM portfolio_history
+WHERE portfolio_id = <portfolio_id>
+ORDER BY snapshot_date DESC;
+```
+Loaded on demand when advisor expands a portfolio row (not on page load).
+
+---
+
 ## Success Criteria
 
 - Advisor can select any client and see all their portfolios with last-updated status
@@ -189,3 +223,5 @@ No backend API changes needed — page talks to Supabase directly (same pattern 
 - Advisor can create a new portfolio — appears in both Advisor Portal and Client Portal
 - UPSERT is safe: recording the same month twice overwrites without error
 - Amber warning dot correctly highlights portfolios not updated for the current month
+- Expanding a portfolio row loads and shows all historical months with ✏️ edit buttons
+- Clicking ✏️ opens the modal pre-filled with the existing values; saving overwrites correctly
