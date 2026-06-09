@@ -16,7 +16,7 @@ const fmtPct = (n: number) => `${n >= 0 ? '+' : ''}${fmt(n)}%`;
 
 const fmtCurrency = (currency: string, n: number, showSign = false) => {
   const sign = showSign && n > 0 ? '+' : '';
-  return `${sign}${currency} ${fmt(Math.abs(n))}`;
+  return `${sign}${currency} ${fmt(n)}`;
 };
 
 // ── Sub-components ──
@@ -68,11 +68,11 @@ const Investment: React.FC = () => {
 
   const overviewTotalValue = useMemo(
     () => portfolios.reduce((sum, p) => sum + (metricsMap.get(p.id)?.currentValue ?? 0), 0),
-    [portfolios, metricsMap]
+    [metricsMap]
   );
   const overviewFdDiff = useMemo(
     () => portfolios.reduce((sum, p) => sum + (metricsMap.get(p.id)?.fdDiffAbsolute ?? 0), 0),
-    [portfolios, metricsMap]
+    [metricsMap]
   );
   const overviewTotalCapital = useMemo(
     () => portfolios.reduce((sum, p) => sum + p.capital_injection, 0),
@@ -144,7 +144,7 @@ const Investment: React.FC = () => {
                 <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${isActive ? 'text-white/50' : 'text-slate-400'}`}>
                   {p.currency}
                 </p>
-                <p className={`text-xs font-bold leading-tight mb-2 ${isActive ? 'text-white' : 'text-xin-blue'}`}>
+                <p className={`text-xs font-bold leading-tight mb-2 line-clamp-2 ${isActive ? 'text-white' : 'text-xin-blue'}`}>
                   {p.name}
                 </p>
                 <p className={`text-base font-black ${isActive ? 'text-xin-gold' : 'text-xin-blue'}`}>
