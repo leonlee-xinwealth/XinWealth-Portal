@@ -3,7 +3,8 @@ import {
   Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, ComposedChart
 } from 'recharts';
 import { DollarSign, Percent, BarChart3 } from 'lucide-react';
-import { fetchPortfolioHistory, fetchClientProfile } from '../services/apiService';
+// TODO: will be replaced in Task 5
+// import { fetchPortfolioHistory, fetchClientProfile } from '../services/apiService';
 import { PortfolioDataPoint, ClientProfile } from '../types';
 
 const Investment: React.FC = () => {
@@ -15,9 +16,10 @@ const Investment: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
+        // TODO: will be replaced in Task 5
         const [histData, profileData] = await Promise.all([
-          fetchPortfolioHistory(),
-          fetchClientProfile()
+          Promise.resolve([] as PortfolioDataPoint[]),
+          Promise.resolve(null as ClientProfile | null)
         ]);
         setHistory(histData);
         setProfile(profileData);

@@ -1,4 +1,4 @@
-import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics, AnalyticsItem } from '../types';
+import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics, AnalyticsItem, Portfolio, PortfolioSnapshot, PortfolioMetrics, PortfolioMonthlyPoint } from '../types';
 
 import { getAccessToken, supabase } from '../lib/supabase';
 
@@ -26,29 +26,6 @@ const safeFloat = (val: any): number => {
   }
   return 0;
 };
-
-// --- DATA CLEANING HELPER ---
-// Groups records by Month-Year (YYYY-MM) and keeps only the LATEST record for that month.
-// This fixes the chart duplication issue and prevents double-counting cashflows in math formulas.
-const deduplicateByMonth = (records: any[]) => {
-  const map = new Map<string, any>();
-
-  records.forEach(record => {
-    const d = new Date(record.fields["Date"] || record.fields["date"]);
-    if (isNaN(d.getTime())) return;
-
-    // Key format: 2025-08
-    const key = `${d.getFullYear()}-${d.getMonth() + 1}`;
-
-    // Since records are sorted by date from API, setting it repeatedly 
-    // ensures the Map holds the *last* (latest) record for that month.
-    map.set(key, record);
-  });
-
-  // Convert map values back to array
-  return Array.from(map.values());
-};
-
 
 export const authenticateUser = async (email: string, pass: string): Promise<boolean> => {
   try {
@@ -177,121 +154,115 @@ const calculateTWR = (records: any[]): number => {
   return (cumulativeTwr - 1) * 100;
 };
 
-export const fetchClientProfile = async (): Promise<ClientProfile> => {
-  const data = await fetchData();
-  let rawRecords = data.records;
-
-  if (!rawRecords || rawRecords.length === 0) {
-    const session = getSession();
-    const displayName = session?.familyName || session?.givenName 
-      ? `${session?.familyName || ''} ${session?.givenName || ''}`.trim() 
-      : session?.name || 'Client';
-
-    return {
-      name: displayName,
-      totalValue: 0,
-      totalInvested: 0,
-      totalReturn: 0,
-      returnPercentage: 0,
-      twr: 0,
-      mwr: 0,
-      fdDifference: 0,
-      fdDifferenceValue: 0,
-      lastUpdated: '-'
-    };
-  }
-
-  // CRITICAL STEP: CLEAN DATA
-  // Use unique monthly records for calculations to avoid double counting
-  const cleanRecords = deduplicateByMonth(rawRecords);
-
-  const latestRecord = cleanRecords[cleanRecords.length - 1];
-  const currentVal = safeFloat(latestRecord.fields["End Value"]);
-
-  // 1. Total Invested (Sum of Net Cashflow)
-  // Use cleanRecords to avoid double counting if API returns duplicates
-  const totalInvested = cleanRecords.reduce((acc: number, r: any) => {
-    return acc + safeFloat(r.fields["Cashflow"]);
-  }, 0);
-
-  // 2. Total Return Formula: (Portfolio Market Value / Sum of Net Cashflow) - 1
-  const retPercent = totalInvested !== 0 ? ((currentVal / totalInvested) - 1) * 100 : 0;
-  const totalRet = currentVal - totalInvested;
-
-  // 3. TWR Calculation
-  const twr = calculateTWR(cleanRecords);
-
-  // 4. MWR (XIRR) Calculation
-  const xirrStreams = cleanRecords
-    .filter((r: any) => safeFloat(r.fields["Cashflow"]) !== 0)
-    .map((r: any) => ({
-      amount: -safeFloat(r.fields["Cashflow"]), // Cash IN is negative for XIRR
-      date: new Date(r.fields["Date"] || r.fields["date"])
-    }));
-
-  // Add terminal value
-  xirrStreams.push({
-    amount: currentVal,
-    date: new Date(latestRecord.fields["Date"] || latestRecord.fields["date"])
-  });
-
-  const mwr = calculateXIRR(
-    xirrStreams.map(s => s.amount),
-    xirrStreams.map(s => s.date)
-  );
-
-  // 5. FD Difference (Based on Latest Lark FD Value)
-  const latestFDValue = safeFloat(latestRecord.fields["FD"] || latestRecord.fields["fd"]);
-
-  let fdDiff = 0;
-  let fdDiffValue = 0;
-  if (latestFDValue > 0) {
-    fdDiff = ((currentVal - latestFDValue) / latestFDValue) * 100;
-    fdDiffValue = currentVal - latestFDValue;
-  }
-
-  return {
-    name: getSession()?.familyName || getSession()?.givenName 
-      ? `${getSession()?.familyName || ''} ${getSession()?.givenName || ''}`.trim() 
-      : getSession()?.name || 'Client',
-    totalValue: currentVal,
-    totalInvested: totalInvested,
-    totalReturn: totalRet,
-    returnPercentage: parseFloat(retPercent.toFixed(2)),
-    twr: parseFloat(twr.toFixed(2)),
-    mwr: parseFloat(mwr.toFixed(2)),
-    fdDifference: parseFloat(fdDiff.toFixed(2)),
-    fdDifferenceValue: fdDiffValue,
-    lastUpdated: new Date(latestRecord.fields["Date"] || latestRecord.fields["date"]).toLocaleDateString()
-  };
-};
-
-export const fetchPortfolioHistory = async (): Promise<PortfolioDataPoint[]> => {
-  const data = await fetchData();
-  const rawRecords = data.records;
-
-  // Clean duplicates so the chart doesn't show "Aug 25" twice
-  const cleanRecords = deduplicateByMonth(rawRecords);
-
-  return cleanRecords
-    .map((record: any) => {
-      const val = safeFloat(record.fields["End Value"] || record.fields["end value"]);
-      const fd = safeFloat(record.fields["FD"] || record.fields["fd"]);
-
-      return {
-        date: new Date(record.fields["Date"] || record.fields["date"]).toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
-        portfolioValue: val,
-        fdValue: fd
-      };
-    })
-    .filter((point) => {
-      // Keep point if value is valid, or if it's explicitly 0 but has a valid date
-      return !isNaN(point.portfolioValue);
-    });
-};
-
 export const fetchTransactions = async (): Promise<Transaction[]> => {
   return [];
+};
+
+export const fetchPortfolios = async (): Promise<Portfolio[]> => {
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new Error('Authentication error. Please login again.');
+
+  const res = await fetch('/api/portfolios', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+
+  const contentType = res.headers.get('content-type');
+  if (!contentType?.includes('application/json')) {
+    throw new Error('Server connection failed (Invalid Response)');
+  }
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to fetch portfolios');
+  return (data.portfolios || []) as Portfolio[];
+};
+
+// ── Private helpers for portfolio metrics ──
+
+const FD_ANNUAL_RATE = 0.03;
+
+const _calcCAGR = (endValue: number, capital: number, monthsElapsed: number): number => {
+  if (monthsElapsed <= 0 || capital <= 0) return 0;
+  return (Math.pow(endValue / capital, 12 / monthsElapsed) - 1) * 100;
+};
+
+const _calcTWRFromSnapshots = (history: PortfolioSnapshot[]): number => {
+  let cumulative = 1;
+  let prevEndValue = 0;
+  for (const snap of history) {
+    const capitalBase = prevEndValue + snap.cashflow;
+    if (capitalBase === 0) { prevEndValue = snap.end_value; continue; }
+    cumulative *= (1 + (snap.end_value - capitalBase) / capitalBase);
+    prevEndValue = snap.end_value;
+  }
+  return (cumulative - 1) * 100;
+};
+
+const _emptyMetrics = (): PortfolioMetrics => ({
+  currentValue: 0, totalReturnPct: 0, cagr: 0, xirr: 0, twr: 0,
+  fdCurrentValue: 0, fdDiffAbsolute: 0, fdDiffPct: 0, monthlyData: []
+});
+
+export const computePortfolioMetrics = (portfolio: Portfolio): PortfolioMetrics => {
+  const history = portfolio.portfolio_history;
+  if (!history.length) return _emptyMetrics();
+
+  const capital = portfolio.capital_injection;
+  const injectionDate = new Date(portfolio.injection_date);
+  const latest = history[history.length - 1];
+  const currentValue = latest.end_value;
+  const latestDate = new Date(latest.snapshot_date);
+
+  const totalCashflow = history.reduce((s, h) => s + h.cashflow, 0) || capital;
+  const totalReturnPct = totalCashflow > 0 ? ((currentValue / totalCashflow) - 1) * 100 : 0;
+
+  const monthsElapsed =
+    (latestDate.getFullYear() - injectionDate.getFullYear()) * 12
+    + (latestDate.getMonth() - injectionDate.getMonth());
+  const cagr = _calcCAGR(currentValue, capital, monthsElapsed);
+
+  const twr = _calcTWRFromSnapshots(history);
+
+  const xirrStreams = history
+    .filter(h => h.cashflow !== 0)
+    .map(h => ({ amount: -h.cashflow, date: new Date(h.snapshot_date) }));
+  xirrStreams.push({ amount: currentValue, date: latestDate });
+  const xirr = calculateXIRR(
+    xirrStreams.map(x => x.amount),
+    xirrStreams.map(x => x.date)
+  );
+
+  const monthlyRate = FD_ANNUAL_RATE / 12;
+  const monthlyData: PortfolioMonthlyPoint[] = history.map(h => {
+    const snapDate = new Date(h.snapshot_date);
+    const months =
+      (snapDate.getFullYear() - injectionDate.getFullYear()) * 12
+      + (snapDate.getMonth() - injectionDate.getMonth());
+    const fdValue = parseFloat((capital * Math.pow(1 + monthlyRate, months)).toFixed(2));
+    return {
+      label: snapDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+      portfolioValue: h.end_value,
+      fdValue,
+      fdDiff: parseFloat((h.end_value - fdValue).toFixed(2))
+    };
+  });
+
+  const fdCurrentValue = monthlyData[monthlyData.length - 1].fdValue;
+  const fdDiffAbsolute = parseFloat((currentValue - fdCurrentValue).toFixed(2));
+  const fdDiffPct = fdCurrentValue > 0
+    ? parseFloat(((fdDiffAbsolute / fdCurrentValue) * 100).toFixed(2))
+    : 0;
+
+  return {
+    currentValue,
+    totalReturnPct: parseFloat(totalReturnPct.toFixed(2)),
+    cagr: parseFloat(cagr.toFixed(2)),
+    xirr: parseFloat(xirr.toFixed(2)),
+    twr: parseFloat(twr.toFixed(2)),
+    fdCurrentValue,
+    fdDiffAbsolute,
+    fdDiffPct,
+    monthlyData
+  };
 };
 
 export const checkEmailAvailable = async (

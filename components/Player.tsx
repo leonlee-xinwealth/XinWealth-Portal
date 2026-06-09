@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { fetchFinancialHealth, fetchClientProfile, updateClientInfo, updateSession } from '../services/apiService';
+// TODO: will be replaced in Task 5
+// import { fetchFinancialHealth, fetchClientProfile, updateClientInfo, updateSession } from '../services/apiService';
+import { fetchFinancialHealth, updateClientInfo, updateSession } from '../services/apiService';
 import { getSession } from '../services/apiService';
 import { FinancialHealthData, ClientProfile, UserSession } from '../types';
 import { Loader2, AlertCircle, Gamepad2, Shield, Heart, Brain, Sparkles, Sword, Coins, User, Edit2, X, Check, Save, ArrowBigUpDash } from 'lucide-react';
@@ -47,7 +49,7 @@ const Player: React.FC = () => {
         setLoading(true);
         const [health, profile] = await Promise.all([
           fetchFinancialHealth(),
-          fetchClientProfile()
+          Promise.resolve(null as ClientProfile | null) // TODO: will be replaced in Task 5
         ]);
         setHealthData(health);
         setProfileData(profile);
