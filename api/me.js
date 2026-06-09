@@ -30,12 +30,23 @@ export default async function handler(req, res) {
     return res.status(404).json({ error: 'Client profile not found' });
   }
 
+  // Fetch advisor display name
+  let advisorName = '';
+  if (clientRow.advisor_id) {
+    const { data: advisorRow } = await supabaseAdmin
+      .from('advisors')
+      .select('display_name')
+      .eq('id', clientRow.advisor_id)
+      .maybeSingle();
+    advisorName = advisorRow?.display_name || '';
+  }
+
   return res.status(200).json({
     success: true,
     email,
     name: clientRow.full_name || email,
     recordId: clientRow.id,
-    advisor: clientRow.advisor_id || '',
+    advisor: advisorName,
     nric: clientRow.nric || '',
     dob: clientRow.date_of_birth || '',
     gender: clientRow.gender || '',
