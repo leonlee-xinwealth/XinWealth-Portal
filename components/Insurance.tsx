@@ -167,8 +167,24 @@ const Insurance: React.FC = () => {
     planName: extractString(record, ['Plan Name', 'plan name', 'Plan', 'plan', 'Policy Name', 'policy name']),
     policyNumber: extractString(record, ['Policy Number', 'policy number', 'Policy No', 'policy no']),
     premium: extractValue(record, ['Premium', 'premium']),
-    policyUrl: getPolicyUrl(record)
+    policyUrl: getPolicyUrl(record),
+    rawRecord: record,
   })).filter(p => p.planName !== 'Unknown' || p.policyNumber !== 'Unknown');
+
+  const INSURER_PALETTE = ['#c2410c', '#b91c1c', '#1d4ed8', '#166534', '#7e22ce', '#0369a1', '#b45309', '#0f766e'];
+
+  const policyGroups = (() => {
+    const map = new Map<string, { color: string; policies: typeof policies }>();
+    let colorIdx = 0;
+    policies.forEach(p => {
+      if (!map.has(p.insurer)) {
+        map.set(p.insurer, { color: INSURER_PALETTE[colorIdx % INSURER_PALETTE.length], policies: [] });
+        colorIdx++;
+      }
+      map.get(p.insurer)!.policies.push(p);
+    });
+    return Array.from(map.entries()).map(([insurer, val]) => ({ insurer, ...val }));
+  })();
 
   // Requirements Map
   const requirements = [
@@ -373,8 +389,9 @@ const Insurance: React.FC = () => {
           </div>
         </div>
       ) : (
-        <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-100 animate-fade-in overflow-hidden">
-          <div className="flex items-center justify-between mb-6">
+        <div className="space-y-6 animate-fade-in">
+          {/* Header */}
+          <div className="flex items-center justify-between">
             <h3 className="text-xl font-bold text-xin-blue">Your Policies</h3>
             <span className="bg-xin-blue/10 text-xin-blue px-3 py-1 rounded-full text-xs font-bold">
               {policies.length} Active
@@ -382,53 +399,75 @@ const Insurance: React.FC = () => {
           </div>
 
           {policies.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
-                <FileText className="text-slate-400 w-8 h-8" />
-              </div>
+            <div className="text-center py-12 bg-white rounded-3xl border border-slate-100">
               <p className="text-slate-500 font-medium">No policies found</p>
             </div>
           ) : (
-            <div className="overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-100">
-                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400">Insurer</th>
-                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400">Plan Name</th>
-                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400">Policy Number</th>
-                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400 text-right">Premium</th>
-                    <th className="pb-4 pt-2 px-4 font-bold text-xs uppercase tracking-wider text-slate-400 text-center">Policy</th>
-                  </tr>
-                </thead>
-                <tbody className="text-sm">
-                  {policies.map((policy) => (
-                    <tr key={policy.id} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                      <td className="py-4 px-4 font-semibold text-slate-800 whitespace-nowrap">{policy.insurer}</td>
-                      <td className="py-4 px-4 text-slate-600">{policy.planName}</td>
-                      <td className="py-4 px-4 font-mono text-xs text-slate-500">{policy.policyNumber}</td>
-                      <td className="py-4 px-4 font-bold text-xin-blue text-right whitespace-nowrap">{formatRM(policy.premium)}</td>
-                      <td className="py-4 px-4 text-center">
-                        {policy.policyUrl ? (
-                          <a 
-                            href={policy.policyUrl} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-600 transition-colors"
-                            title="View E-Policy"
-                          >
-                            <FileText className="w-4 h-4" />
-                          </a>
-                        ) : (
-                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-50 text-slate-300" title="No E-Policy available">
-                            <FileText className="w-4 h-4" />
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* Legend */}
+              <div className="bg-white rounded-2xl border border-slate-100 px-4 py-3 flex flex-wrap gap-x-5 gap-y-2 shadow-sm">
+                {COVERAGE_TAGS.map(tag => (
+                  <div key={tag.key} className="flex items-center gap-1.5">
+                    <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: tag.color }} />
+                    <span className="text-xs font-semibold text-slate-600">{tag.label}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Grouped by insurer */}
+              {policyGroups.map(group => (
+                <div key={group.insurer}>
+                  {/* Insurer header row */}
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: group.color }} />
+                    <span className="text-xs font-extrabold uppercase tracking-widest" style={{ color: group.color }}>
+                      {group.insurer}
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      {group.policies.length} {group.policies.length === 1 ? 'policy' : 'policies'}
+                    </span>
+                    <div className="flex-1 h-px bg-slate-100" />
+                  </div>
+
+                  {/* Policy cards grid */}
+                  <div className={`grid gap-3 ${group.policies.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                    {group.policies.map(policy => {
+                      const tags = getPolicyCoverageTags(policy.rawRecord);
+                      return (
+                        <div
+                          key={policy.id}
+                          className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm"
+                          style={{ borderLeft: `3px solid ${group.color}` }}
+                        >
+                          <p className="text-sm font-bold text-slate-800 mb-0.5 leading-tight">{policy.planName}</p>
+                          <p className="font-mono text-xs text-slate-400 mb-3">{policy.policyNumber}</p>
+
+                          {tags.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-3">
+                              {tags.map(tag => (
+                                <span
+                                  key={tag.key}
+                                  className="text-xs font-bold px-1.5 py-0.5 rounded"
+                                  style={{ background: tag.bg, color: tag.color }}
+                                >
+                                  {tag.label}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="border-t border-slate-50 pt-3">
+                            <p className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-0.5">Premium</p>
+                            <p className="text-base font-extrabold" style={{ color: group.color }}>{formatRM(policy.premium)}</p>
+                            <p className="text-xs text-slate-400">per year</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </>
           )}
         </div>
       )}
