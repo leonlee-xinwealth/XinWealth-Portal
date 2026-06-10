@@ -161,8 +161,8 @@ const Insurance: React.FC = () => {
   };
 
   // Parse policies for the table
-  const policies = insuranceRecords.map(record => ({
-    id: record.id || record.record_id,
+  const policies = insuranceRecords.map((record, idx) => ({
+    id: record.id || record.record_id || `policy-${idx}`,
     insurer: extractString(record, ['Insurer', 'insurer', 'Company', 'company']),
     planName: extractString(record, ['Plan Name', 'plan name', 'Plan', 'plan', 'Policy Name', 'policy name']),
     policyNumber: extractString(record, ['Policy Number', 'policy number', 'Policy No', 'policy no']),
