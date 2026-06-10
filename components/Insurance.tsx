@@ -203,6 +203,11 @@ const Insurance: React.FC = () => {
     }
   ];
 
+  const bannerData = getBannerScore(requirements);
+  const RING_R = 30;
+  const RING_CIRC = 2 * Math.PI * RING_R;
+  const ringDash = (bannerData.scorePct / 100) * RING_CIRC;
+
   return (
     <div className="space-y-8 animate-fade-in-up pb-20">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -248,67 +253,49 @@ const Insurance: React.FC = () => {
       </div>
 
       {activeTab === 'overview' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-fade-in">
-          {requirements.map((req) => {
-            const isSufficient = req.current >= req.required;
-            const percentage = req.required > 0 ? Math.min(100, (req.current / req.required) * 100) : 100;
-            const shortfall = req.required - req.current;
-
-          return (
-            <div key={req.id} className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 flex flex-col hover:shadow-md transition-shadow relative overflow-hidden">
-              {/* Progress Bar Background */}
-              <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-100">
-                <div 
-                  className={`h-full transition-all duration-1000 ${isSufficient ? 'bg-emerald-500' : 'bg-rose-500'}`} 
-                  style={{ width: `${percentage}%` }}
-                ></div>
-              </div>
-
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-xin-blue mb-1">{req.title}</h3>
-                  <p className="text-xs text-slate-500">{req.description}</p>
-                </div>
-                {isSufficient ? (
-                  <div className="bg-emerald-50 text-emerald-600 p-2 rounded-full">
-                    <CheckCircle2 className="w-5 h-5" />
-                  </div>
-                ) : (
-                  <div className="bg-rose-50 text-rose-600 p-2 rounded-full">
-                    <AlertCircle className="w-5 h-5" />
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-4 mt-auto pt-6">
-                <div>
-                  <p className="text-xs text-slate-400 font-medium mb-1">Current Coverage</p>
-                  <p className="text-xl font-bold text-slate-800">{formatRM(req.current)}</p>
-                </div>
-                
-                <div className="flex justify-between items-end pt-4 border-t border-slate-50">
-                  <div>
-                    <p className="text-xs text-slate-400 font-medium mb-1">Required</p>
-                    <p className="text-sm font-semibold text-slate-600">{formatRM(req.required)}</p>
-                  </div>
-                  {!isSufficient && shortfall > 0 && (
-                    <div className="text-right">
-                      <p className="text-xs text-rose-400 font-medium mb-1">Shortfall</p>
-                      <p className="text-sm font-bold text-rose-600">{formatRM(shortfall)}</p>
-                    </div>
-                  )}
-                  {isSufficient && (
-                    <div className="text-right">
-                      <p className="text-xs text-emerald-400 font-medium mb-1">Status</p>
-                      <p className="text-sm font-bold text-emerald-600">Sufficient</p>
-                    </div>
-                  )}
-                </div>
+        <div className="space-y-4 animate-fade-in">
+          {/* Score Banner */}
+          <div
+            className="rounded-3xl p-5 flex items-center gap-5"
+            style={{ background: 'linear-gradient(135deg, #0f2d5e 0%, #1e4a8a 100%)' }}
+          >
+            <div className="flex-shrink-0">
+              <svg width="72" height="72" viewBox="0 0 72 72">
+                <circle cx="36" cy="36" r={RING_R} fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="7" />
+                <circle
+                  cx="36" cy="36" r={RING_R}
+                  fill="none"
+                  stroke={bannerData.color}
+                  strokeWidth="7"
+                  strokeLinecap="round"
+                  strokeDasharray={`${ringDash} ${RING_CIRC - ringDash}`}
+                  transform="rotate(-90 36 36)"
+                />
+                <text x="36" y="41" textAnchor="middle" fill="white" fontSize="14" fontWeight="800">
+                  {bannerData.scorePct}%
+                </text>
+              </svg>
+            </div>
+            <div className="flex-1">
+              <p className="text-xs font-bold uppercase tracking-widest text-white/60 mb-1">Protection Score</p>
+              <p className="text-2xl font-extrabold text-white mb-2">{bannerData.label}</p>
+              <div className="flex gap-1.5">
+                {requirements.map(req => {
+                  const pct = req.required > 0 ? req.current / req.required : 1;
+                  const dotColor = pct >= 1 ? '#10b981' : pct >= 0.5 ? '#f59e0b' : '#ef4444';
+                  return (
+                    <div
+                      key={req.id}
+                      className="w-2 h-2 rounded-full"
+                      style={{ background: dotColor }}
+                      title={req.title}
+                    />
+                  );
+                })}
               </div>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        </div>
       ) : (
         <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-100 animate-fade-in overflow-hidden">
           <div className="flex items-center justify-between mb-6">
