@@ -415,6 +415,68 @@ const FinancialHealthCheck: React.FC = () => {
   const totalScore = getTotalScore(catScores);
   const ringOffset = 226.2 * (1 - totalScore / 100); // SVG stroke-dashoffset for r=36 ring
 
+  const renderCategoryCard = (category: (typeof categories)[0]) => {
+    const catKey = ((): keyof typeof catScores => {
+      if (category.name.includes('流动')) return 'liquidity';
+      if (category.name.includes('债务')) return 'debt';
+      if (category.name.includes('保障')) return 'protection';
+      return 'growth';
+    })();
+    const catScore = catScores[catKey];
+    const color = scoreColor(catScore);
+
+    return (
+      <div key={category.name} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-bold text-slate-600">{category.name}</span>
+          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full"
+                style={{ background: `${color}22`, color }}>
+            {catScore} / 100
+          </span>
+        </div>
+        <div className="h-1.5 bg-slate-100 rounded-full mb-3">
+          <div className="h-1.5 rounded-full transition-all duration-700"
+               style={{ width: `${catScore}%`, background: color }} />
+        </div>
+        <div className="flex flex-col gap-2">
+          {category.items.map((item) => {
+            const val = (data ? data[item.id as keyof Omit<FinancialHealthData, 'raw'>] : 0) as number;
+            const status = getStatus(item.id, val);
+            const StatusIcon = status.icon;
+            return (
+              <div key={item.id} className="flex items-center gap-2 min-w-0">
+                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                  <span className="text-xs text-slate-500 truncate">{item.name.split('(')[0].trim()}</span>
+                  {tooltips[item.id] && (
+                    <button
+                      onClick={() => setActiveModal(item.id)}
+                      className="flex-shrink-0 w-4 h-4 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-400 hover:text-xin-blue transition-colors flex items-center justify-center font-bold text-[10px]"
+                    >!</button>
+                  )}
+                </div>
+                <div className="w-28 flex-shrink-0">
+                  <div className="relative h-1.5 bg-slate-100 rounded-full">
+                    <div className="h-1.5 rounded-full transition-all duration-700"
+                         style={{ width: `${getBarWidth(item.id, val)}%`, background: scoreColor(getMetricScore(item.id, val)) }} />
+                    <div className="absolute top-[-3px] w-0.5 h-[10px] bg-slate-400 rounded-sm"
+                         style={{ left: `${getBenchmarkPct(item.id)}%` }} />
+                  </div>
+                </div>
+                <span className="text-xs font-bold text-slate-700 w-14 text-right flex-shrink-0">
+                  {formatValue(item.id, val)}
+                </span>
+                <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 ${status.bg} ${status.color}`}>
+                  <StatusIcon size={10} strokeWidth={2.5} />
+                  {status.label}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="animate-fade-in-up pb-10 max-w-5xl">
 
@@ -529,8 +591,15 @@ const FinancialHealthCheck: React.FC = () => {
           </div>
         </div>
 
-        {/* RIGHT: Categories — Task 4 */}
-        {/* CATEGORIES_PLACEHOLDER */}
+        {/* RIGHT: Category cards */}
+        <div className="flex-1 flex flex-col gap-3 min-w-0">
+          {renderCategoryCard(categories[0])}
+          {renderCategoryCard(categories[1])}
+          <div className="grid grid-cols-2 gap-3">
+            {renderCategoryCard(categories[2])}
+            {renderCategoryCard(categories[3])}
+          </div>
+        </div>
 
       </div>
 
