@@ -635,16 +635,16 @@ export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
   // Total Sum Assured - hardcoded to 0 for now as no insurance table
   const totalSumAssured = 0;
 
-  // 2. Calculate Ratios
-  const basicLiquidityRatio = monthlyExpenses > 0 ? cashAndFD / monthlyExpenses : 0;
-  const liquidAssetToNetWorth = netWorth > 0 ? cashAndFD / netWorth : 0;
-  const solvencyRatio = totalAssets > 0 ? netWorth / totalAssets : 0;
-  const debtServiceRatio = monthlyNetIncome > 0 ? totalMonthlyDebtRepayment / monthlyNetIncome : 0;
-  const nonMortgageDSR = monthlyNetIncome > 0 ? consumerDebtRepayment / monthlyNetIncome : 0;
-  const lifeInsuranceCoverage = annualIncome > 0 ? totalSumAssured / annualIncome : 0;
-  const savingsRatio = monthlyGrossIncome > 0 ? monthlySavings / monthlyGrossIncome : 0;
-  const investAssetsToNetWorth = netWorth > 0 ? investmentAssets / netWorth : 0;
-  const passiveIncomeCoverage = annualExpenses > 0 ? annualPassiveIncome / annualExpenses : 0;
+  // 2. Calculate Ratios — NaN signals "no data" (denominator is zero / client hasn't filled in)
+  const basicLiquidityRatio = monthlyExpenses > 0 ? cashAndFD / monthlyExpenses : NaN;
+  const liquidAssetToNetWorth = netWorth > 0 ? cashAndFD / netWorth : NaN;
+  const solvencyRatio = totalAssets > 0 ? netWorth / totalAssets : NaN;
+  const debtServiceRatio = monthlyNetIncome > 0 ? totalMonthlyDebtRepayment / monthlyNetIncome : NaN;
+  const nonMortgageDSR = monthlyNetIncome > 0 ? consumerDebtRepayment / monthlyNetIncome : NaN;
+  const lifeInsuranceCoverage = annualIncome > 0 ? totalSumAssured / annualIncome : NaN;
+  const savingsRatio = monthlyGrossIncome > 0 ? monthlySavings / monthlyGrossIncome : NaN;
+  const investAssetsToNetWorth = netWorth > 0 ? investmentAssets / netWorth : NaN;
+  const passiveIncomeCoverage = annualExpenses > 0 ? annualPassiveIncome / annualExpenses : NaN;
 
   return {
     basicLiquidityRatio,

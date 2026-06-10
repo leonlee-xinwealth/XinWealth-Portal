@@ -56,6 +56,8 @@ const FinancialHealthCheck: React.FC = () => {
   }, []);
 
   const getStatus = (ratioId: string, value: number) => {
+    if (isNaN(value) || !isFinite(value))
+      return { label: '无数据', color: 'text-slate-400', bg: 'bg-slate-100', icon: Activity };
     switch (ratioId) {
       case 'basicLiquidityRatio':
         if (value >= 6) return { label: '健康', color: 'text-green-500', bg: 'bg-green-50', icon: CheckCircle2 };
@@ -94,6 +96,7 @@ const FinancialHealthCheck: React.FC = () => {
   };
 
   const getMetricScore = (ratioId: string, value: number): number => {
+    if (isNaN(value) || !isFinite(value)) return 0;
     const status = getStatus(ratioId, value);
     if (status.color === 'text-green-500') return 100;
     if (status.color === 'text-yellow-500') return 60;
@@ -159,7 +162,7 @@ const FinancialHealthCheck: React.FC = () => {
   };
 
   const formatValue = (id: string, value: number) => {
-    if (isNaN(value) || !isFinite(value)) return '0.0';
+    if (isNaN(value) || !isFinite(value)) return '–';
     if (id === 'basicLiquidityRatio') {
       return value.toFixed(1) + ' 个月';
     }
