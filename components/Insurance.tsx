@@ -52,6 +52,39 @@ const formatRM = (value: number) => {
   }).format(value);
 };
 
+// 颜色阈值（Overview 横幅 + 拨盘共用）
+const getCoverageColor = (pct: number): string => {
+  if (pct >= 100) return '#10b981';
+  if (pct >= 50) return '#f59e0b';
+  return '#ef4444';
+};
+
+// 整体保障评分（充足类别数 / 总类别数 * 100）
+const getBannerScore = (reqs: Array<{ current: number; required: number }>) => {
+  const total = reqs.length;
+  const sufficient = reqs.filter(r => r.current >= r.required).length;
+  const atRisk = reqs.filter(r => {
+    const pct = r.required > 0 ? r.current / r.required : 1;
+    return pct >= 0.5 && pct < 1;
+  }).length;
+  const critical = reqs.filter(r => {
+    const pct = r.required > 0 ? r.current / r.required : 1;
+    return pct < 0.5;
+  }).length;
+  const scorePct = total > 0 ? Math.round((sufficient / total) * 100) : 0;
+  const label = scorePct >= 80 ? 'Protected' : scorePct >= 50 ? 'Partial' : 'At Risk';
+  const color = getCoverageColor(scorePct);
+  return { scorePct, label, color, sufficient, atRisk, critical };
+};
+
+// 拨盘每格配置
+const getDialConfig = (req: { current: number; required: number }) => {
+  const pct = req.required > 0 ? Math.min(100, (req.current / req.required) * 100) : 100;
+  const color = getCoverageColor(pct);
+  const shortfall = req.required - req.current;
+  return { pct: Math.round(pct), color, shortfall };
+};
+
 const Insurance: React.FC = () => {
   const [data, setData] = useState<FinancialHealthData | null>(null);
   const [loading, setLoading] = useState(true);
