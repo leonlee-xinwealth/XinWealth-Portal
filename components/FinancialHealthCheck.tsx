@@ -452,7 +452,7 @@ const FinancialHealthCheck: React.FC = () => {
             ].map(({ label, score }) => (
               <div key={label} className="flex items-center gap-2">
                 <span className="text-[11px] opacity-85 w-16 flex-shrink-0">{label}</span>
-                <div className="flex-1 h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }}>
+                <div className="flex-1 h-1.5 rounded-full bg-white/20">
                   <div className="h-1.5 rounded-full transition-all duration-700"
                        style={{ width: `${score}%`, background: scoreColor(score) }} />
                 </div>
