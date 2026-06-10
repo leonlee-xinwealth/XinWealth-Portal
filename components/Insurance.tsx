@@ -295,6 +295,24 @@ const Insurance: React.FC = () => {
               </div>
             </div>
           </div>
+          {/* Status Badges */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Protected', count: bannerData.sufficient, color: '#10b981', border: '#10b981' },
+              { label: 'At Risk',   count: bannerData.atRisk,    color: '#f59e0b', border: '#f59e0b' },
+              { label: 'Critical',  count: bannerData.critical,  color: '#ef4444', border: '#ef4444' },
+            ].map(({ label, count, color, border }) => (
+              <div
+                key={label}
+                className="rounded-2xl p-3 text-center bg-white shadow-sm border border-slate-100"
+                style={{ borderTop: `3px solid ${border}` }}
+              >
+                <p className="text-2xl font-extrabold" style={{ color }}>{count}</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mt-1">{label}</p>
+              </div>
+            ))}
+          </div>
+          {/* Dial grid will be added in Task 4 */}
         </div>
       ) : (
         <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-100 animate-fade-in overflow-hidden">
