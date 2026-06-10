@@ -466,8 +466,68 @@ const FinancialHealthCheck: React.FC = () => {
       {/* ── MAIN LAYOUT (Radar + Categories) — Tasks 3 & 4 ── */}
       <div className="flex gap-4 items-start">
 
-        {/* LEFT: Radar — Task 3 */}
-        {/* RADAR_PLACEHOLDER */}
+        {/* LEFT: Radar chart */}
+        <div className="hidden lg:flex flex-col bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex-shrink-0 w-52">
+          <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3 text-center">健康形态图</h3>
+          <svg viewBox="0 0 180 180" className="w-full">
+            {/* Grid — full diamond & inner rings */}
+            <polygon points="90,18 162,90 90,162 18,90"
+                     fill="none" stroke="#f1f5f9" strokeWidth="1.5" strokeDasharray="4 3"/>
+            <polygon points="90,54 126,90 90,126 54,90"
+                     fill="none" stroke="#f1f5f9" strokeWidth="1"/>
+            <polygon points="90,72 108,90 90,108 72,90"
+                     fill="none" stroke="#f1f5f9" strokeWidth="1"/>
+            {/* Axes */}
+            <line x1="90" y1="18" x2="90" y2="162" stroke="#e2e8f0" strokeWidth="1"/>
+            <line x1="18" y1="90" x2="162" y2="90" stroke="#e2e8f0" strokeWidth="1"/>
+            {/* Data polygon: N=liquidity, E=debt, S=growth, W=protection */}
+            {(() => {
+              const r = 72;
+              const cx = 90, cy = 90;
+              const nl = catScores.liquidity / 100;
+              const nd = catScores.debt / 100;
+              const ng = catScores.growth / 100;
+              const np = catScores.protection / 100;
+              const pts = [
+                `${cx},${cy - r * nl}`,
+                `${cx + r * nd},${cy}`,
+                `${cx},${cy + r * ng}`,
+                `${cx - r * np},${cy}`,
+              ].join(' ');
+              return (
+                <>
+                  <polygon points={pts}
+                           fill="rgba(37,99,235,0.12)" stroke="#2563eb"
+                           strokeWidth="2.5" strokeLinejoin="round"/>
+                  <circle cx={cx}          cy={cy - r * nl} r="5" fill={scoreColor(catScores.liquidity)}  stroke="white" strokeWidth="2"/>
+                  <circle cx={cx + r * nd} cy={cy}          r="5" fill={scoreColor(catScores.debt)}        stroke="white" strokeWidth="2"/>
+                  <circle cx={cx}          cy={cy + r * ng} r="5" fill={scoreColor(catScores.growth)}      stroke="white" strokeWidth="2"/>
+                  <circle cx={cx - r * np} cy={cy}          r="5" fill={scoreColor(catScores.protection)}  stroke="white" strokeWidth="2"/>
+                </>
+              );
+            })()}
+            {/* Labels */}
+            <text x="90"  y="12"  textAnchor="middle" fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">流动性</text>
+            <text x="168" y="93"  textAnchor="start"  fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">债务</text>
+            <text x="90"  y="175" textAnchor="middle" fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">积累</text>
+            <text x="2"   y="93"  textAnchor="start"  fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">保障</text>
+          </svg>
+          {/* Legend */}
+          <div className="mt-3 flex flex-col gap-1.5">
+            {[
+              { label: '流动性', score: catScores.liquidity },
+              { label: '债务管理', score: catScores.debt },
+              { label: '风险保障', score: catScores.protection },
+              { label: '财富积累', score: catScores.growth },
+            ].map(({ label, score }) => (
+              <div key={label} className="flex items-center gap-2 text-[11px] text-slate-500">
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: scoreColor(score) }}/>
+                <span className="flex-1">{label}</span>
+                <span className="font-bold" style={{ color: scoreColor(score) }}>{score}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* RIGHT: Categories — Task 4 */}
         {/* CATEGORIES_PLACEHOLDER */}
