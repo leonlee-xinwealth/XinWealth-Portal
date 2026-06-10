@@ -418,6 +418,12 @@ const FinancialHealthCheck: React.FC = () => {
   const totalScore = getTotalScore(catScores);
   const ringOffset = 226.2 * (1 - totalScore / 100); // SVG stroke-dashoffset for r=36 ring
 
+  const hasAnyData = data ? [
+    data.basicLiquidityRatio, data.liquidAssetToNetWorth, data.solvencyRatio,
+    data.debtServiceRatio, data.nonMortgageDSR, data.lifeInsuranceCoverage,
+    data.savingsRatio, data.investAssetsToNetWorth, data.passiveIncomeCoverage,
+  ].some(v => !isNaN(v) && isFinite(v)) : false;
+
   const renderCategoryCard = (category: (typeof categories)[0]) => {
     const catKey = ((): keyof typeof catScores => {
       if (category.name.includes('流动')) return 'liquidity';
@@ -500,15 +506,17 @@ const FinancialHealthCheck: React.FC = () => {
                     style={{ transition: 'stroke-dashoffset 1s ease' }} />
           </svg>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-2xl font-black leading-none">{totalScore}</span>
-            <span className="text-[10px] opacity-70">/ 100</span>
+            <span className="text-2xl font-black leading-none">{hasAnyData ? totalScore : '–'}</span>
+            {hasAnyData && <span className="text-[10px] opacity-70">/ 100</span>}
           </div>
         </div>
 
         {/* Title + mini bars */}
         <div className="flex-1 min-w-0">
           <h2 className="text-xl font-bold mb-0.5">Financial Health Check</h2>
-          <p className="text-sm opacity-75 mb-3">{getScoreSubtitle(totalScore)}</p>
+          <p className="text-sm opacity-75 mb-3">
+            {hasAnyData ? getScoreSubtitle(totalScore) : '暂无财务数据，请先填写财务信息'}
+          </p>
           <div className="flex flex-col gap-1.5">
             {[
               { label: '💧 流动性', score: catScores.liquidity },
@@ -519,10 +527,14 @@ const FinancialHealthCheck: React.FC = () => {
               <div key={label} className="flex items-center gap-2">
                 <span className="text-[11px] opacity-85 w-16 flex-shrink-0">{label}</span>
                 <div className="flex-1 h-1.5 rounded-full bg-white/20">
-                  <div className="h-1.5 rounded-full transition-all duration-700"
-                       style={{ width: `${score}%`, background: scoreColor(score) }} />
+                  {hasAnyData && (
+                    <div className="h-1.5 rounded-full transition-all duration-700"
+                         style={{ width: `${score}%`, background: scoreColor(score) }} />
+                  )}
                 </div>
-                <span className="text-[11px] font-bold w-7 text-right opacity-90">{score}</span>
+                <span className="text-[11px] font-bold w-7 text-right opacity-90">
+                  {hasAnyData ? score : '–'}
+                </span>
               </div>
             ))}
           </div>
@@ -547,7 +559,7 @@ const FinancialHealthCheck: React.FC = () => {
             <line x1="90" y1="18" x2="90" y2="162" stroke="#e2e8f0" strokeWidth="1"/>
             <line x1="18" y1="90" x2="162" y2="90" stroke="#e2e8f0" strokeWidth="1"/>
             {/* Data polygon: N=liquidity, E=debt, S=growth, W=protection */}
-            {(() => {
+            {hasAnyData ? (() => {
               const r = 72;
               const cx = 90, cy = 90;
               const nl = catScores.liquidity / 100;
@@ -571,7 +583,10 @@ const FinancialHealthCheck: React.FC = () => {
                   <circle cx={cx - r * np} cy={cy}          r="5" fill={scoreColor(catScores.protection)}  stroke="white" strokeWidth="2"/>
                 </>
               );
-            })()}
+            })() : (
+              <text x="90" y="94" textAnchor="middle" fontSize="10" fill="#94a3b8"
+                    fontFamily="sans-serif">暂无数据</text>
+            )}
             {/* Labels */}
             <text x="90"  y="12"  textAnchor="middle" fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">流动性</text>
             <text x="176" y="93"  textAnchor="end"    fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">债务</text>
@@ -587,9 +602,12 @@ const FinancialHealthCheck: React.FC = () => {
               { label: '财富积累', score: catScores.growth },
             ].map(({ label, score }) => (
               <div key={label} className="flex items-center gap-2 text-[11px] text-slate-500">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: scoreColor(score) }}/>
+                <span className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: hasAnyData ? scoreColor(score) : '#cbd5e1' }}/>
                 <span className="flex-1">{label}</span>
-                <span className="font-bold" style={{ color: scoreColor(score) }}>{score}%</span>
+                <span className="font-bold" style={{ color: hasAnyData ? scoreColor(score) : '#94a3b8' }}>
+                  {hasAnyData ? `${score}%` : '–'}
+                </span>
               </div>
             ))}
           </div>
