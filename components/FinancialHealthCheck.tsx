@@ -416,92 +416,68 @@ const FinancialHealthCheck: React.FC = () => {
   const ringOffset = 226.2 * (1 - totalScore / 100); // SVG stroke-dashoffset for r=36 ring
 
   return (
-    <div className="animate-fade-in-up pb-10">
-      <div className="mb-8">
-        <h2 className="text-3xl font-serif font-bold text-xin-blue mb-2">Financial Health Check</h2>
-        <p className="text-slate-500">Based on your submitted KYC data, here is an analysis of your financial health.</p>
-      </div>
+    <div className="animate-fade-in-up pb-10 max-w-5xl">
 
-      <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100">
-                <th className="p-4 font-semibold text-slate-600 text-sm w-1/5">类别</th>
-                <th className="p-4 font-semibold text-slate-600 text-sm w-1/4">关键指标 (Key Ratio)</th>
-                <th className="p-4 font-semibold text-slate-600 text-sm w-1/4">计算公式 (Formula)</th>
-                <th className="p-4 font-semibold text-slate-600 text-sm">健康基准参考 (Benchmark)</th>
-                <th className="p-4 font-semibold text-slate-600 text-sm text-center">你的状态</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {categories.map((category, catIndex) => (
-                <React.Fragment key={catIndex}>
-                  {category.items.map((item, itemIndex) => {
-                    const val = (data ? data[item.id as keyof Omit<FinancialHealthData, 'raw'>] : 0) as number;
-                    const status = getStatus(item.id, val);
-                    const StatusIcon = status.icon;
+      {/* ── SCORE BANNER ── */}
+      <div className="mb-5 rounded-2xl p-6 flex items-center gap-7 text-white shadow-lg"
+           style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #1d4ed8 100%)' }}>
 
-                    return (
-                      <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                        {itemIndex === 0 && (
-                          <td 
-                            rowSpan={category.items.length} 
-                            className="p-4 font-bold text-xin-blue align-top bg-slate-50/30 border-r border-slate-100"
-                          >
-                            {category.name}
-                          </td>
-                        )}
-                        <td className="p-4">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-slate-700">{item.name.split('(')[0]}</span>
-                            {tooltips[item.id] && (
-                              <button 
-                                onClick={() => setActiveModal(item.id)}
-                                className="text-slate-400 hover:text-xin-blue transition-colors focus:outline-none flex-shrink-0 bg-slate-100 hover:bg-slate-200 w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs"
-                                title="点击查看详情"
-                              >
-                                !
-                              </button>
-                            )}
-                          </div>
-                          <span className="text-xs text-slate-500 block mt-0.5">({item.name.split('(')[1]}</span>
-                        </td>
-                        <td className="p-4 text-sm text-slate-600 font-mono bg-slate-50/30">
-                          <div>{item.formula}</div>
-                          {data?.raw && getCalculationDetail(item.id, data.raw) && (
-                            <div className="text-xs text-slate-400 mt-1">
-                              = {getCalculationDetail(item.id, data.raw)}
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-4 text-sm text-slate-600">
-                          {item.benchmark}
-                        </td>
-                        <td className="p-4 text-center">
-                          <div className="flex flex-col items-center justify-center gap-1.5">
-                            <span className="font-bold text-lg text-slate-700">
-                              {formatValue(item.id, val)}
-                            </span>
-                            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${status.bg} ${status.color}`}>
-                              <StatusIcon size={14} strokeWidth={2.5} />
-                              {status.label}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
+        {/* Ring chart */}
+        <div className="relative flex-shrink-0 w-24 h-24">
+          <svg className="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
+            <circle cx="50" cy="50" r="36" fill="none"
+                    stroke="rgba(255,255,255,0.2)" strokeWidth="8" />
+            <circle cx="50" cy="50" r="36" fill="none"
+                    stroke="#c9a227" strokeWidth="8" strokeLinecap="round"
+                    strokeDasharray="226.2"
+                    strokeDashoffset={ringOffset}
+                    style={{ transition: 'stroke-dashoffset 1s ease' }} />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-2xl font-black leading-none">{totalScore}</span>
+            <span className="text-[10px] opacity-70">/ 100</span>
+          </div>
+        </div>
+
+        {/* Title + mini bars */}
+        <div className="flex-1 min-w-0">
+          <h2 className="text-xl font-bold mb-0.5">Financial Health Check</h2>
+          <p className="text-sm opacity-75 mb-3">{getScoreSubtitle(totalScore)}</p>
+          <div className="flex flex-col gap-1.5">
+            {[
+              { label: '💧 流动性', score: catScores.liquidity },
+              { label: '🏦 债务',   score: catScores.debt },
+              { label: '🛡️ 保障',  score: catScores.protection },
+              { label: '📈 积累',   score: catScores.growth },
+            ].map(({ label, score }) => (
+              <div key={label} className="flex items-center gap-2">
+                <span className="text-[11px] opacity-85 w-16 flex-shrink-0">{label}</span>
+                <div className="flex-1 h-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.2)' }}>
+                  <div className="h-1.5 rounded-full transition-all duration-700"
+                       style={{ width: `${score}%`, background: scoreColor(score) }} />
+                </div>
+                <span className="text-[11px] font-bold w-7 text-right opacity-90">{score}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <InfoModal 
-        isOpen={activeModal !== null} 
-        onClose={() => setActiveModal(null)} 
+      {/* ── MAIN LAYOUT (Radar + Categories) — Tasks 3 & 4 ── */}
+      <div className="flex gap-4 items-start">
+
+        {/* LEFT: Radar — Task 3 */}
+        {/* RADAR_PLACEHOLDER */}
+
+        {/* RIGHT: Categories — Task 4 */}
+        {/* CATEGORIES_PLACEHOLDER */}
+
+      </div>
+
+      {/* InfoModal */}
+      <InfoModal
+        isOpen={activeModal !== null}
+        onClose={() => setActiveModal(null)}
         title={activeModal ? categories.flatMap(c => c.items).find(i => i.id === activeModal)?.name.split('(')[0] || '' : ''}
         content={activeModal ? tooltips[activeModal] : null}
       />
