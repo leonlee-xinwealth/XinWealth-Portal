@@ -62,13 +62,13 @@ const getCoverageColor = (pct: number): string => {
 // 整体保障评分（充足类别数 / 总类别数 * 100）
 const getBannerScore = (reqs: Array<{ current: number; required: number }>) => {
   const total = reqs.length;
-  const sufficient = reqs.filter(r => r.current >= r.required).length;
+  const sufficient = reqs.filter(r => r.required > 0 && r.current >= r.required).length;
   const atRisk = reqs.filter(r => {
-    const pct = r.required > 0 ? r.current / r.required : 1;
+    const pct = r.required > 0 ? r.current / r.required : 0;
     return pct >= 0.5 && pct < 1;
   }).length;
   const critical = reqs.filter(r => {
-    const pct = r.required > 0 ? r.current / r.required : 1;
+    const pct = r.required > 0 ? r.current / r.required : 0;
     return pct < 0.5;
   }).length;
   const scorePct = total > 0 ? Math.round((sufficient / total) * 100) : 0;
@@ -79,7 +79,7 @@ const getBannerScore = (reqs: Array<{ current: number; required: number }>) => {
 
 // 拨盘每格配置
 const getDialConfig = (req: { current: number; required: number }) => {
-  const pct = req.required > 0 ? Math.min(100, (req.current / req.required) * 100) : 100;
+  const pct = req.required > 0 ? Math.min(100, (req.current / req.required) * 100) : 0;
   const color = getCoverageColor(pct);
   const shortfall = req.required - req.current;
   return { pct: Math.round(pct), color, shortfall };
@@ -348,7 +348,7 @@ const Insurance: React.FC = () => {
               const DIAL_CIRC = 2 * Math.PI * DIAL_R;
               const { pct, color, shortfall } = getDialConfig(req);
               const dash = (pct / 100) * DIAL_CIRC;
-              const isSufficient = req.current >= req.required;
+              const isSufficient = req.required > 0 && req.current >= req.required;
 
               return (
                 <div
