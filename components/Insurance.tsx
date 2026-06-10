@@ -85,6 +85,19 @@ const getDialConfig = (req: { current: number; required: number }) => {
   return { pct: Math.round(pct), color, shortfall };
 };
 
+const COVERAGE_TAGS = [
+  { key: 'dd',  label: 'Death & Disability', bg: '#eff6ff', color: '#1d4ed8', fields: ['Death', 'death', 'TPD', 'tpd'] },
+  { key: 'med', label: 'Medical',             bg: '#f0fdf4', color: '#166534', fields: ['Medical Annual limit', 'medical annual limit'] },
+  { key: 'ci',  label: 'Critical Illness',   bg: '#fdf4ff', color: '#7e22ce', fields: ['Advance Critical Illness', 'advance critical illness', 'Early Critical Illness', 'early critical illness'] },
+  { key: 'acc', label: 'Accident',            bg: '#fff7ed', color: '#c2410c', fields: ['Personal Accident', 'personal accident'] },
+] as const;
+
+const getPolicyCoverageTags = (record: any) => {
+  return COVERAGE_TAGS.filter(tag =>
+    tag.fields.some(field => extractValue(record, [field]) > 0)
+  );
+};
+
 const Insurance: React.FC = () => {
   const [data, setData] = useState<FinancialHealthData | null>(null);
   const [loading, setLoading] = useState(true);
