@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth } from '../services/apiService';
-import { Loader2, Shield, AlertTriangle, CheckCircle2, AlertCircle, FileText, ExternalLink } from 'lucide-react';
+import { Loader2, Shield, AlertTriangle } from 'lucide-react';
 import { FinancialHealthData } from '../types';
 
 type TabType = 'overview' | 'policies';
