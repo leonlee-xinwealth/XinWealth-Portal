@@ -94,7 +94,7 @@ const COVERAGE_TAGS = [
 
 const getPolicyCoverageTags = (record: any) => {
   return COVERAGE_TAGS.filter(tag =>
-    tag.fields.some(field => extractValue(record, [field]) > 0)
+    tag.fields.some((field: string) => extractValue(record, [field]) > 0)
   );
 };
 
