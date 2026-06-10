@@ -469,7 +469,7 @@ const FinancialHealthCheck: React.FC = () => {
         {/* LEFT: Radar chart */}
         <div className="hidden lg:flex flex-col bg-white rounded-2xl border border-slate-100 shadow-sm p-5 flex-shrink-0 w-52">
           <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3 text-center">健康形态图</h3>
-          <svg viewBox="0 0 180 180" className="w-full">
+          <svg viewBox="0 0 180 180" className="w-full" aria-hidden="true">
             {/* Grid — full diamond & inner rings */}
             <polygon points="90,18 162,90 90,162 18,90"
                      fill="none" stroke="#f1f5f9" strokeWidth="1.5" strokeDasharray="4 3"/>
@@ -508,7 +508,7 @@ const FinancialHealthCheck: React.FC = () => {
             })()}
             {/* Labels */}
             <text x="90"  y="12"  textAnchor="middle" fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">流动性</text>
-            <text x="168" y="93"  textAnchor="start"  fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">债务</text>
+            <text x="176" y="93"  textAnchor="end"    fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">债务</text>
             <text x="90"  y="175" textAnchor="middle" fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">积累</text>
             <text x="2"   y="93"  textAnchor="start"  fontSize="9" fill="#475569" fontFamily="sans-serif" fontWeight="600">保障</text>
           </svg>
@@ -521,7 +521,7 @@ const FinancialHealthCheck: React.FC = () => {
               { label: '财富积累', score: catScores.growth },
             ].map(({ label, score }) => (
               <div key={label} className="flex items-center gap-2 text-[11px] text-slate-500">
-                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: scoreColor(score) }}/>
+                <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: scoreColor(score) }}/>
                 <span className="flex-1">{label}</span>
                 <span className="font-bold" style={{ color: scoreColor(score) }}>{score}%</span>
               </div>
