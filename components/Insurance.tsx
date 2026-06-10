@@ -312,7 +312,52 @@ const Insurance: React.FC = () => {
               </div>
             ))}
           </div>
-          {/* Dial grid will be added in Task 4 */}
+          {/* Dial Grid */}
+          <div className="grid grid-cols-3 gap-3">
+            {requirements.map(req => {
+              const DIAL_R = 22;
+              const DIAL_CIRC = 2 * Math.PI * DIAL_R;
+              const { pct, color, shortfall } = getDialConfig(req);
+              const dash = (pct / 100) * DIAL_CIRC;
+              const isSufficient = req.current >= req.required;
+
+              return (
+                <div
+                  key={req.id}
+                  className="bg-white rounded-2xl p-3 text-center shadow-sm border border-slate-100 flex flex-col items-center"
+                >
+                  <svg width="56" height="56" viewBox="0 0 56 56">
+                    <circle
+                      cx="28" cy="28" r={DIAL_R}
+                      fill="none"
+                      stroke={`${color}22`}
+                      strokeWidth="5"
+                    />
+                    <circle
+                      cx="28" cy="28" r={DIAL_R}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth="5"
+                      strokeLinecap="round"
+                      strokeDasharray={`${dash} ${DIAL_CIRC - dash}`}
+                      transform="rotate(-90 28 28)"
+                    />
+                    {isSufficient ? (
+                      <text x="28" y="33" textAnchor="middle" fill={color} fontSize="14" fontWeight="800">✓</text>
+                    ) : (
+                      <text x="28" y="33" textAnchor="middle" fill={color} fontSize="10" fontWeight="800">{pct}%</text>
+                    )}
+                  </svg>
+                  <p className="text-xs font-bold text-slate-600 mt-2 leading-tight">{req.title}</p>
+                  {isSufficient ? (
+                    <p className="text-xs font-semibold mt-1" style={{ color: '#10b981' }}>Sufficient</p>
+                  ) : (
+                    <p className="text-xs font-semibold mt-1" style={{ color: '#ef4444' }}>-{formatRM(shortfall)}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       ) : (
         <div className="bg-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-100 animate-fade-in overflow-hidden">
