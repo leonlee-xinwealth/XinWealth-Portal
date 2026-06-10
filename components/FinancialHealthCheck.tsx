@@ -420,6 +420,7 @@ const FinancialHealthCheck: React.FC = () => {
       if (category.name.includes('流动')) return 'liquidity';
       if (category.name.includes('债务')) return 'debt';
       if (category.name.includes('保障')) return 'protection';
+      if (category.name.includes('积累')) return 'growth';
       return 'growth';
     })();
     const catScore = catScores[catKey];
@@ -462,7 +463,7 @@ const FinancialHealthCheck: React.FC = () => {
                          style={{ left: `${getBenchmarkPct(item.id)}%` }} />
                   </div>
                 </div>
-                <span className="text-xs font-bold text-slate-700 w-14 text-right flex-shrink-0">
+                <span className="text-xs font-bold text-slate-700 w-16 text-right flex-shrink-0">
                   {formatValue(item.id, val)}
                 </span>
                 <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 ${status.bg} ${status.color}`}>
