@@ -5,9 +5,10 @@ import { PDFDocument } from 'pdf-lib';
 import type { FormMapping } from '../mappingTypes';
 import { initialPrsFormData } from '../../types/prs';
 import { declarationMapping } from '../mappings/declaration';
+import { ppaNominationMapping } from '../mappings/ppaNomination';
 
-// Tasks 7-10 will append: ppaNominationMapping, topUpMapping, isaIndividualMapping, accOpeningMapping
-const ALL_MAPPINGS: FormMapping[] = [declarationMapping];
+// Tasks 8-10 will append: topUpMapping, isaIndividualMapping, accOpeningMapping
+const ALL_MAPPINGS: FormMapping[] = [declarationMapping, ppaNominationMapping];
 
 describe.each(ALL_MAPPINGS.map(m => [m.id, m] as const))('mapping %s', (_id, mapping) => {
   it('all field keys root segment exists in PrsFormData', () => {
