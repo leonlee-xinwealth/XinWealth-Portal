@@ -6,8 +6,9 @@ import { samplePrsData } from '../pdf/sampleData';
 import type { FormMapping } from '../pdf/mappingTypes';
 import { declarationMapping } from '../pdf/mappings/declaration';
 import { ppaNominationMapping } from '../pdf/mappings/ppaNomination';
-// Tasks 8-10 will append imports and add to array
-const mappings: FormMapping[] = [declarationMapping, ppaNominationMapping];
+import { topUpMapping } from '../pdf/mappings/topUp';
+// Tasks 9-10 will append imports and add to array
+const mappings: FormMapping[] = [declarationMapping, ppaNominationMapping, topUpMapping];
 
 async function main() {
   mkdirSync('tmp/proofs', { recursive: true });
