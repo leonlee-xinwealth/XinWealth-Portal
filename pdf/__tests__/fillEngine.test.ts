@@ -33,6 +33,10 @@ describe('resolveValue', () => {
   it('顶层键', () => expect(resolveValue(data, 'full_name')).toBe('Tan Ah Kow'));
   it('点路径', () => expect(resolveValue(data, 'nominees.0.percentage')).toBe('100'));
   it('空值返回空字符串', () => expect(resolveValue(data, 'email')).toBe(''));
+  it('returns empty string for boolean values', () => {
+    const boolData = { ...data, rsp_enabled: true } as any;
+    expect(resolveValue(boolData, 'rsp_enabled')).toBe('');
+  });
 });
 
 describe('fillForm', () => {
@@ -57,5 +61,29 @@ describe('fillForm', () => {
     const tight: FormMapping = { ...mapping, fields: [{ key: 'full_name', page: 1, x: 100, y: 200, maxWidth: 30 }] };
     const { warnings } = await fillForm(tpl, tight, longData);
     expect(warnings.length).toBe(1);
+  });
+
+  it('comb 格数不足时警告含 截断', async () => {
+    const tpl = readFileSync('public/forms/prs/declaration.pdf');
+    // nric 去掉分隔符后有 12 个字符，但只给 3 格 → 触发截断警告
+    const combMapping: FormMapping = {
+      ...mapping,
+      fields: [{ type: 'comb', key: 'nric', page: 1, x: 100, y: 180, cellWidth: 14, cells: 3, strip: /[\s-]/g }],
+    };
+    const { warnings } = await fillForm(tpl, combMapping, data);
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain('截断');
+  });
+
+  it('date-split 日期格式无效时警告含 日期格式无效 且不抛错', async () => {
+    const tpl = readFileSync('public/forms/prs/declaration.pdf');
+    const badDateData = { ...data, date_of_birth: 'not-a-date' };
+    const dateMapping: FormMapping = {
+      ...mapping,
+      fields: [{ type: 'date-split', key: 'date_of_birth', page: 1, x: 100, y: 140, cellWidth: 14 }],
+    };
+    const { warnings } = await fillForm(tpl, dateMapping, badDateData);
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain('日期格式无效');
   });
 });

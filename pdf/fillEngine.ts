@@ -16,8 +16,8 @@ export function resolveValue(data: PrsFormData, path: string): string {
     if (cur == null || typeof cur !== 'object') return '';
     cur = (cur as Record<string, unknown>)[part];
   }
-  if (cur == null || cur === false) return '';
-  if (cur === true) return 'true';
+  if (cur == null || typeof cur === 'boolean') return '';
+  // PrsFormData 数值型字段均为 string 类型；此处不处理 number 格式化
   return String(cur);
 }
 
@@ -33,6 +33,7 @@ export async function fillForm(
   const warnings: string[] = [];
 
   for (const f of mapping.fields) {
+    // page 是 0-based：page:1 即 declaration.pdf 的第 2 页
     const page = pages[f.page];
     if (!page) {
       warnings.push(`[${mapping.id}] ${f.key}: 页码 ${f.page} 不存在（共 ${pages.length} 页）`);
