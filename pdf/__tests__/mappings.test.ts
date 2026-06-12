@@ -8,9 +8,9 @@ import { declarationMapping } from '../mappings/declaration';
 import { ppaNominationMapping } from '../mappings/ppaNomination';
 import { topUpMapping } from '../mappings/topUp';
 import { isaIndividualMapping } from '../mappings/isaIndividual';
+import { accOpeningMapping } from '../mappings/accOpening';
 
-// Task 10 will append: accOpeningMapping
-const ALL_MAPPINGS: FormMapping[] = [declarationMapping, ppaNominationMapping, topUpMapping, isaIndividualMapping];
+const ALL_MAPPINGS: FormMapping[] = [declarationMapping, ppaNominationMapping, topUpMapping, isaIndividualMapping, accOpeningMapping];
 
 describe.each(ALL_MAPPINGS.map(m => [m.id, m] as const))('mapping %s', (_id, mapping) => {
   it('all field keys root segment exists in PrsFormData', () => {
