@@ -1,5 +1,6 @@
 // pdf/__tests__/mappings.test.ts
 import { describe, it, expect } from 'vitest';
+import { PRS_SECTIONS } from '../../components/advisor/prs/prsFields';
 import { readFileSync } from 'node:fs';
 import { PDFDocument } from 'pdf-lib';
 import type { FormMapping } from '../mappingTypes';
@@ -11,6 +12,21 @@ import { isaIndividualMapping } from '../mappings/isaIndividual';
 import { accOpeningMapping } from '../mappings/accOpening';
 
 const ALL_MAPPINGS: FormMapping[] = [declarationMapping, ppaNominationMapping, topUpMapping, isaIndividualMapping, accOpeningMapping];
+
+it('PRS_SECTIONS covers all PrsFormData keys without duplicates', () => {
+  const covered = new Set<string>();
+  for (const s of PRS_SECTIONS) {
+    for (const f of s.fields) {
+      const k = f.key as string;
+      expect(covered.has(k), `duplicate key: ${k}`).toBe(false);
+      covered.add(k);
+    }
+    if (s.repeat) covered.add(s.repeat.key);
+  }
+  const allKeys = Object.keys(initialPrsFormData);
+  const missing = allKeys.filter(k => !covered.has(k));
+  expect(missing, `keys not in any UI section: ${missing.join(', ')}`).toEqual([]);
+});
 
 describe.each(ALL_MAPPINGS.map(m => [m.id, m] as const))('mapping %s', (_id, mapping) => {
   it('all field keys root segment exists in PrsFormData', () => {
