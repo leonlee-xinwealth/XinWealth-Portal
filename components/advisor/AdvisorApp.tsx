@@ -14,6 +14,8 @@ import CaseList from './pages/CaseList';
 import CaseDetail from './pages/CaseDetail';
 import Broadcast from './pages/Broadcast';
 import MarketValues from './pages/MarketValues';
+import PrsApplicationList from './pages/PrsApplicationList';
+import PrsApplicationEditor from './pages/PrsApplicationEditor';
 
 const AdvisorApp: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -57,6 +59,8 @@ const AdvisorApp: React.FC = () => {
         <Route path="pipeline" element={<Pipeline />} />
         <Route path="cases" element={<CaseList />} />
         <Route path="cases/:id" element={<CaseDetail />} />
+        <Route path="prs" element={<PrsApplicationList />} />
+        <Route path="prs/:id" element={<PrsApplicationEditor />} />
         <Route path="insurance-comparison" element={<InsuranceComparison />} />
         <Route path="broadcast" element={<Broadcast />} />
         <Route path="market-values" element={<MarketValues />} />
