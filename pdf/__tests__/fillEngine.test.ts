@@ -2,6 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { PDFDocument } from 'pdf-lib';
+import { buildDataForPdf, mergePdfs, ALL_PRS_MAPPINGS } from '../generatePrsPack';
+import { samplePrsData } from '../sampleData';
 import { fillForm, resolveValue } from '../fillEngine';
 import type { FormMapping } from '../mappingTypes';
 import { initialPrsFormData, type PrsFormData } from '../../types/prs';
@@ -85,5 +87,46 @@ describe('fillForm', () => {
     const { warnings } = await fillForm(tpl, dateMapping, badDateData);
     expect(warnings.length).toBe(1);
     expect(warnings[0]).toContain('日期格式无效');
+  });
+});
+
+// ── Task 11 additions ──
+
+describe('buildDataForPdf', () => {
+  it('injects __isa_total derived key', () => {
+    // samplePrsData: isa_q1=3, q2=3, q3=3, q4=3, q5=5, q6=3 → total 20
+    const d = buildDataForPdf(samplePrsData);
+    expect((d as any).__isa_total).toBe('20');
+  });
+
+  it('flattens dim_allocations into __dim_pct_* keys', () => {
+    const withDim = {
+      ...samplePrsData,
+      dim_allocations: [{ fund: 'Principal RetireEasy 2050', percent: '100' }],
+    };
+    const d = buildDataForPdf(withDim);
+    expect((d as any).__dim_pct_principal_retireeasy_2050).toBe('100');
+  });
+
+  it('leaves __isa_total empty string when any ISA question is blank', () => {
+    const noScore = { ...samplePrsData, isa_q1_age: '' as const };
+    const d = buildDataForPdf(noScore);
+    expect((d as any).__isa_total).toBe('');
+  });
+});
+
+describe('mergePdfs', () => {
+  it('merged page count equals sum of all form page counts', async () => {
+    // acc-opening=12, isa-individual=3, ppa-nomination=4, declaration=2, top-up=2 → total 23
+    const enriched = buildDataForPdf(samplePrsData);
+    const all = await Promise.all(
+      ALL_PRS_MAPPINGS.map(async m => {
+        const tpl = readFileSync(`public/forms/prs/${m.templateFile}`);
+        return (await fillForm(tpl, m, enriched)).bytes;
+      }),
+    );
+    const merged = await mergePdfs(all);
+    const doc = await PDFDocument.load(merged);
+    expect(doc.getPageCount()).toBe(23);
   });
 });
