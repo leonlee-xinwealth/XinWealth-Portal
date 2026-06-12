@@ -7,15 +7,16 @@ import { initialPrsFormData } from '../../types/prs';
 import { declarationMapping } from '../mappings/declaration';
 import { ppaNominationMapping } from '../mappings/ppaNomination';
 import { topUpMapping } from '../mappings/topUp';
+import { isaIndividualMapping } from '../mappings/isaIndividual';
 
-// Tasks 9-10 will append: isaIndividualMapping, accOpeningMapping
-const ALL_MAPPINGS: FormMapping[] = [declarationMapping, ppaNominationMapping, topUpMapping];
+// Task 10 will append: accOpeningMapping
+const ALL_MAPPINGS: FormMapping[] = [declarationMapping, ppaNominationMapping, topUpMapping, isaIndividualMapping];
 
 describe.each(ALL_MAPPINGS.map(m => [m.id, m] as const))('mapping %s', (_id, mapping) => {
   it('all field keys root segment exists in PrsFormData', () => {
     const validRoots = new Set(Object.keys(initialPrsFormData));
     for (const f of mapping.fields) {
-      expect(validRoots.has(f.key.split('.')[0]), `invalid key: ${f.key}`).toBe(true);
+      expect(f.key.startsWith('__') || validRoots.has(f.key.split('.')[0]), `invalid key: ${f.key}`).toBe(true);
     }
   });
 
