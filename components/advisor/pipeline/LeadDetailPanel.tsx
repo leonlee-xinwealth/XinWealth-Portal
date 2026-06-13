@@ -237,6 +237,30 @@ export default function LeadDetailPanel({ lead, onClose, onMoveStage, onUpdateLe
             </select>
           </Section>
 
+          {/* ── Website Quiz Background ── */}
+          {lead.metadata?.source === 'invest_check' && (
+            <Section title={t('Website Quiz Background', '网站测评背景')}>
+              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 space-y-1">
+                <div className="text-xs font-semibold text-blue-800">
+                  {t('Investment Power Index', '投资力指数')}：<span className="font-bold">{lead.metadata.score}</span>
+                  {lead.metadata.weakest_label_zh && (
+                    <span className="font-normal"> · {t('Weakest', '最弱')}：{lead.metadata.weakest_label_zh}</span>
+                  )}
+                </div>
+                {(lead.metadata.investable_range || lead.metadata.preferred_date) && (
+                  <div className="text-xs text-blue-900">
+                    {lead.metadata.investable_range && (
+                      <span>{t('Investable Range', '可投资区间')}：{lead.metadata.investable_range}</span>
+                    )}
+                    {lead.metadata.preferred_date && (
+                      <span className="ml-2">· {t('Preferred', '偏好')}：{lead.metadata.preferred_date}{lead.metadata.preferred_time_slot ? ` ${lead.metadata.preferred_time_slot}` : ''}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Section>
+          )}
+
           {/* ── Next Action ── */}
           <Section title={t('Next Action', '下一步行动')}>
             {showNextForm ? (

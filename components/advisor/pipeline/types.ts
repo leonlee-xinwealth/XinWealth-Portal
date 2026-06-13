@@ -12,6 +12,7 @@ export interface Lead {
   stage_updated_at: string | null;
   status: 'prospect' | 'active' | 'inactive';
   created_at: string;
+  metadata?: Record<string, any>;
 }
 
 export interface LostPayload {
