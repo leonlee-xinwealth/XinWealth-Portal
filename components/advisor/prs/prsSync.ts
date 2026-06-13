@@ -1,5 +1,7 @@
 // components/advisor/prs/prsSync.ts
 // form_data ↔ clients table bidirectional field sync (design doc §5 sync rules)
+// NOTE: toClientsPayload logic is duplicated in api/prs-application.js (JS version).
+// Both files must be kept in sync when field mappings change.
 import { isaTotalScore, riskProfileFromScore, type PrsFormData } from '../../../types/prs';
 
 const RACE_LABELS: Record<string, string> = {
