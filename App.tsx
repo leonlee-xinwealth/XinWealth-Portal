@@ -5,6 +5,7 @@ import AdvisorApp from './components/advisor/AdvisorApp';
 
 const PortalLayout = lazy(() => import('./components/PortalLayout'));
 const KYCLayout = lazy(() => import('./components/kyc/KYCLayout'));
+const PrsPublicPage = lazy(() => import('./components/prs/PrsPublicPage'));
 
 const Spinner = () => (
   <div className="flex h-screen items-center justify-center bg-xin-bg">
@@ -23,6 +24,9 @@ const App: React.FC = () => {
 
             {/* Client KYC (Fact Finder) */}
             <Route path="/kyc/*" element={<KYCLayout />} />
+
+            {/* PRS public client form (token link) */}
+            <Route path="/prs/:token" element={<PrsPublicPage />} />
 
             {/* Client Portal */}
             <Route path="/*" element={<PortalLayout />} />
