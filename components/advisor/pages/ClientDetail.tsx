@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { ChevronLeft, Plus, X } from 'lucide-react';
+import { ChevronLeft, FileText, Plus, X } from 'lucide-react';
+import { initialPrsFormData } from '../../../types/prs';
+import { fromClient } from '../prs/prsSync';
 import ProfileTab from '../tabs/ProfileTab';
 import CashflowTab from '../tabs/CashflowTab';
 import NetworthTab from '../tabs/NetworthTab';
@@ -48,6 +50,7 @@ export default function ClientDetail() {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [creatingCase, setCreatingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
+  const [startingPrs, setStartingPrs] = useState(false);
 
   async function loadClient() {
     const { data } = await supabase.from('clients').select('*').eq('id', id).single();
@@ -95,6 +98,18 @@ export default function ClientDetail() {
     loadPending();
     loadPolicies();
   }, [id]);
+
+  async function startPrsApplication() {
+    if (!client) return;
+    setStartingPrs(true);
+    const { data, error } = await supabase.from('prs_applications').insert({
+      advisor_id: client.advisor_id,
+      client_id: client.id,
+      form_data: { ...initialPrsFormData, ...fromClient(client) },
+    }).select('id').single();
+    setStartingPrs(false);
+    if (!error && data) navigate(`/advisor/prs/${(data as any).id}`);
+  }
 
   async function openNewCaseModal() {
     setCaseType('car_insurance');
@@ -215,6 +230,14 @@ export default function ClientDetail() {
             </div>
           </div>
         </div>
+        <button
+          onClick={startPrsApplication}
+          disabled={startingPrs}
+          className="flex items-center gap-1.5 bg-white border border-xin-blue/20 text-xin-blue text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-blue/5 transition-colors shrink-0 disabled:opacity-50"
+        >
+          <FileText size={15} />
+          {startingPrs ? '...' : t('PRS Account', 'PRS 开户')}
+        </button>
         <button
           onClick={openNewCaseModal}
           className="flex items-center gap-1.5 bg-xin-blue text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-blueLight transition-colors shrink-0"
