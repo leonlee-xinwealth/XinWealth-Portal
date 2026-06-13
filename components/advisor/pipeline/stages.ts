@@ -22,6 +22,7 @@ export const LEAD_SOURCES = [
   { key: 'cp',               en: 'CP',                  zh: 'CP'       },
   { key: 'friends',          en: 'Friends',             zh: '朋友'     },
   { key: 'other',            en: 'Other',               zh: '其他'     },
+  { key: 'website_quiz',    en: 'Website Quiz',        zh: '网站测评' },
 ] as const;
 
 export type LeadSourceKey = typeof LEAD_SOURCES[number]['key'];
