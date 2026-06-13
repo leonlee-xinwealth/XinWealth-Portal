@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { ChevronLeft, Printer, Download } from 'lucide-react';
+import { ChevronLeft, Printer, Download, CheckCircle2 } from 'lucide-react';
 import PrsForm from '../prs/PrsForm';
 import { toClientsPayload } from '../prs/prsSync';
 import { initialPrsFormData, type PrsApplication, type PrsFormData } from '../../../types/prs';
@@ -22,6 +22,8 @@ export default function PrsApplicationEditor() {
   const [generating, setGenerating] = useState(false);
   const [genWarnings, setGenWarnings] = useState<string[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -102,8 +104,39 @@ export default function PrsApplicationEditor() {
     }
   }
 
+  async function sendToClient() {
+    if (!(await save())) return;
+    const token = crypto.randomUUID();
+    const expires = new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString();
+    const { error } = await supabase.from('prs_applications')
+      .update({ token, token_expires_at: expires, status: 'awaiting_client' })
+      .eq('id', app!.id);
+    if (!error) {
+      setApp(a => a ? { ...a, token, token_expires_at: expires, status: 'awaiting_client' } : a);
+      setShareOpen(true);
+    }
+  }
+
+  async function markCompleted() {
+    const { error } = await supabase.from('prs_applications')
+      .update({ status: 'completed' })
+      .eq('id', app!.id);
+    if (!error) setApp(a => a ? { ...a, status: 'completed' } : a);
+  }
+
+  async function reopenApplication() {
+    const { error } = await supabase.from('prs_applications')
+      .update({ status: 'draft' })
+      .eq('id', app!.id);
+    if (!error) setApp(a => a ? { ...a, status: 'draft' } : a);
+  }
+
   const missing = missingFields(data);
   const clientName = (app?.client_full_name as string | undefined) || data.full_name || t('New Application', '新申请');
+  const shareUrl = app?.token ? `${window.location.origin}/prs/${app.token}` : '';
+  const waText = language === 'zh'
+    ? `${data.full_name || ''} 您好，请通过以下链接填写您的 PRS 开户资料（14 天内有效）：${shareUrl}`
+    : `Hi ${data.full_name || ''}, please fill in your PRS account opening details here (valid 14 days): ${shareUrl}`;
 
   const STATUS_LABELS: Record<string, { en: string; zh: string; cls: string }> = {
     draft:           { en: 'Draft',           zh: '草稿',      cls: 'bg-slate-100 text-slate-600' },
@@ -147,6 +180,46 @@ export default function PrsApplicationEditor() {
         </div>
       )}
 
+      {/* Awaiting client banner */}
+      {app?.status === 'awaiting_client' && (
+        <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-700 flex items-center gap-2">
+          <span className="flex-1">{t('Link sent — status will update to "To Review" after client submits.', '链接已发出，客户提交后状态会变为「待审核」。')}</span>
+          <button onClick={() => setShareOpen(s => !s)} className="text-xs font-semibold underline shrink-0">{t('View link', '查看链接')}</button>
+        </div>
+      )}
+
+      {/* Share card */}
+      {shareOpen && shareUrl && (
+        <div className="mb-4 bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <p className="text-xs font-semibold text-slate-500 mb-2">{t('Client link (valid 14 days)', '客户链接（14 天有效）')}</p>
+          <div className="flex items-center gap-2 mb-3">
+            <input readOnly value={shareUrl}
+              className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono truncate" />
+            <button onClick={() => { navigator.clipboard.writeText(shareUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+              className="px-3 py-1.5 text-xs font-semibold bg-xin-blue text-white rounded-lg hover:bg-xin-blueLight transition-colors shrink-0">
+              {copied ? t('Copied!', '已复制！') : t('Copy', '复制')}
+            </button>
+          </div>
+          <button onClick={() => { navigator.clipboard.writeText(waText); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+            className="w-full py-1.5 text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors">
+            {t('Copy WhatsApp message', '复制 WhatsApp 话术')}
+          </button>
+          <button onClick={sendToClient}
+            className="mt-2 w-full py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors">
+            {t('Regenerate link (invalidates old link)', '重新生成链接（旧链接失效）')}
+          </button>
+        </div>
+      )}
+
+      {/* Completed banner */}
+      {app?.status === 'completed' && (
+        <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700 flex items-center gap-2">
+          <CheckCircle2 size={16} className="shrink-0" />
+          <span className="flex-1">{t('Application completed. You can still regenerate PDFs.', '申请已完成，仍可重新生成 PDF。')}</span>
+          <button onClick={reopenApplication} className="text-xs font-semibold underline shrink-0">{t('Reopen', '重新打开')}</button>
+        </div>
+      )}
+
       {/* Gen warnings */}
       {genWarnings.length > 0 && (
         <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-700">
@@ -182,6 +255,16 @@ export default function PrsApplicationEditor() {
         >
           {saving ? t('Saving…', '保存中…') : t('Save Draft', '保存草稿')}
         </button>
+        <button onClick={sendToClient} disabled={saving || generating}
+          className="px-4 py-2 text-sm font-semibold bg-white border border-xin-blue/30 text-xin-blue rounded-xl hover:bg-xin-blue/5 transition-colors disabled:opacity-50">
+          {t('Send to Client', '发给客户填写')}
+        </button>
+        {(app?.status === 'submitted' || app?.status === 'draft') && (
+          <button onClick={markCompleted} disabled={saving || generating}
+            className="px-4 py-2 text-sm font-semibold bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-xl hover:bg-emerald-100 transition-colors disabled:opacity-50">
+            {t('Mark Complete', '标记完成')}
+          </button>
+        )}
         <div className="relative">
           <button
             onClick={() => setShowDropdown(d => !d)}
