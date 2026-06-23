@@ -467,7 +467,7 @@ const WealthAwakeningPage: React.FC = () => {
           <span className="font-serif font-bold">Xin<span className="text-xin-gold">Wealth</span></span>
         </div>
         <p className="text-xs text-white/40 max-w-md mx-auto leading-relaxed">
-          本活动名额有限，先到先得，额满即止。提交申请不构成任何投资建议；最终参与资格以确认为准。
+          本活动名额有限，先到先得，额满即止。提交不代表直接成功参与；最终参与资格以确认为准。
         </p>
         <p className="text-xs text-white/30 mt-3">© {new Date().getFullYear()} XinWealth. 版权所有。</p>
       </footer>
