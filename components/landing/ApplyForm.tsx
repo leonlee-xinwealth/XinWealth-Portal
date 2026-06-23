@@ -199,8 +199,8 @@ const ApplyForm: React.FC<Props> = ({ onSuccess, disabled = false }) => {
       </div>
 
       <div>
-        <Label required>你能否配合一次约 45–60 分钟的咨询？</Label>
-        <ChipGroup options={[{ value: 'yes', label: '可以' }, { value: 'no', label: '暂时不行' }]}
+        <Label required>个人财务规划需要你的财务资料（收入、开支、资产、负债等）。你是否同意在咨询时提供给 Leon？</Label>
+        <ChipGroup options={[{ value: 'yes', label: '我同意' }, { value: 'no', label: '暂不方便' }]}
           value={canConsult} onChange={(v) => setCanConsult(v as YesNo)} disabled={disabled} />
       </div>
 

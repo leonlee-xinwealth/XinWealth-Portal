@@ -25,10 +25,13 @@ const ADVISOR = {
   // 头像（留 null 显示字母徽标）。
   photo: '/landing/leon.jpg' as string | null,
   credentials: [
-    '持牌理财规划师 · 专注高净值家庭',
-    '协助客户建立完整财富全貌',
-    '风险 · 健康 · 效率 三维诊断方法',
+    'CFP 认证财务规划师（持证人）',
+    'FAR · 国家银行 BNM 持牌财务顾问代表',
+    'CMSRL · 证券委员会 SC 持牌资本市场服务代表',
+    '执业三年 · 专注投资与资产配置',
   ],
+  // 量化成绩（单独高亮展示）
+  resultStat: { value: 'RM 300k+', label: '曾协助客户透过资产配置实现的资产增值' },
   quote: '财富自由的第一步，是先看清自己现在站在哪里。',
 };
 
@@ -100,7 +103,7 @@ const FEATURES = [
 const STEPS = [
   { icon: Send, title: '提交申请', desc: '填写下方表单，通过资格审核' },
   { icon: FileText, title: '资料梳理', desc: '协助你整理资产、负债与现金流全貌' },
-  { icon: MessageSquare, title: '一对一诊断', desc: '约 45–60 分钟深度诊断会谈' },
+  { icon: MessageSquare, title: '一对一诊断', desc: '深度诊断会谈，梳理你的财务全貌' },
   { icon: Award, title: '专属报告', desc: '获得财务健康指数与优化建议' },
 ];
 const CONDITIONS = [
@@ -389,6 +392,10 @@ const WealthAwakeningPage: React.FC = () => {
                   </li>
                 ))}
               </ul>
+              <div className="inline-flex items-center gap-3 mb-4 px-4 py-2.5 rounded-xl bg-xin-gold/10 border border-xin-gold/25">
+                <span className="font-serif text-2xl font-bold text-xin-gold whitespace-nowrap">{ADVISOR.resultStat.value}</span>
+                <span className="text-xs text-white/65 text-left leading-snug">{ADVISOR.resultStat.label}</span>
+              </div>
               <p className="text-white/60 italic text-sm">“{ADVISOR.quote}”</p>
             </div>
           </div>

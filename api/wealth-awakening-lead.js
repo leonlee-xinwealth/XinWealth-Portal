@@ -34,7 +34,7 @@ async function notifyWhatsApp(lead) {
     `资格: ${ELIGIBILITY_LABEL[lead.eligibility] || lead.eligibility} / 可投资 ${lead.investable_range}\n` +
     `最关心: ${lead.top_concern}\n` +
     `期望: ${lead.expectation}\n` +
-    `可配合咨询: ${lead.can_consult ? '是' : '否'}`;
+    `同意提供财务资料: ${lead.can_consult ? '是' : '否'}`;
   const url = `https://api.callmebot.com/whatsapp.php?phone=${encodeURIComponent(phone)}&text=${encodeURIComponent(text)}&apikey=${encodeURIComponent(apikey)}`;
   const res = await fetch(url, { method: 'GET' });
   if (!res.ok) console.error('CallMeBot notify failed:', res.status);
