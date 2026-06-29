@@ -1,53 +1,71 @@
-import { supabaseAdmin } from './_lib/supabase.js';
+import { applyCors, configError, supabaseAdmin } from './_lib/supabase.js';
 
 // =============================================================
 // Public KYC submission endpoint.
 // No auth required: anyone with the URL can submit.
-// Creates (or reuses) an auth user + profile, writes child rows
-// into incomes / expenses / assets / liabilities / investments,
-// and stores the raw payload in kyc_submissions for audit.
-// Does NOT send a recovery email — onboarding is advisor-driven.
+//
+// Writes into the current CRM schema:
+//   clients            (one row per submission; advisor-owned)
+//   assets             (cash/EPF/property/vehicle/investments)
+//   liabilities        (loans, incl. those derived from financed assets)
+//   cashflow_entries   (income = inflow, expenses = outflow)
+//
+// The full raw payload + audit fields live on the client row itself
+// (kyc_payload / kyc_status / kyc_submitted_at). There is no separate
+// kyc_submissions table and no auth-user creation — onboarding is
+// advisor-driven, so a public submission just creates a prospect.
 // =============================================================
 
-const MARITAL_STATUSES   = ['single', 'married', 'divorced', 'widowed'];
-const EMPLOYMENT_STATUSES = ['employed', 'self_employed', 'unemployed', 'retired', 'student'];
-const TAX_STATUSES       = ['resident', 'non_resident'];
+// clients.advisor_id is NOT NULL. Public KYC has no advisor context, so
+// every submission is attached to a default advisor. Override per-env if
+// the practice ever has more than one advisor.
+const DEFAULT_ADVISOR_ID =
+  (process.env.KYC_DEFAULT_ADVISOR_ID || '').trim() ||
+  '5ac7f25c-421e-4f03-8dac-ac5375626586'; // Leon Lee
 
-const INCOME_TYPE_MAP = {
+const MARITAL_STATUSES    = ['single', 'married', 'divorced', 'widowed'];
+const EMPLOYMENT_STATUSES = ['employed', 'self_employed', 'unemployed', 'retired', 'student'];
+const TAX_RESIDENCIES     = ['resident', 'non_resident'];
+
+// Income field -> cashflow_categories.code (inflow)
+const INCOME_CATEGORY_MAP = {
   salary:             'salary',
   bonus:              'bonus',
   directorFee:        'director_fee',
   commission:         'commission',
-  dividendCompany:    'dividend_company',
-  dividendInvestment: 'dividend_investment',
-  rentalIncome:       'rental'
+  dividendCompany:    'dividend',
+  dividendInvestment: 'investment_return',
+  rentalIncome:       'rental_income'
 };
 
+// Expense field -> cashflow_categories.code (outflow)
 const EXPENSE_CATEGORY_MAP = {
   household:      'household',
   transportation: 'transportation',
   dependants:     'dependants',
   personal:       'personal',
   miscellaneous:  'miscellaneous',
-  otherExpenses:  'other'
+  otherExpenses:  'other_expense'
 };
 
+// Simple single-amount asset fields -> [kycKey, asset_type, display name]
 const SIMPLE_ASSET_FIELDS = [
-  ['savingsAccount',   'savings',           'Savings/Current Account'],
-  ['fixedDeposit',     'fixed_deposit',     'Fixed Deposit'],
-  ['moneyMarketFund',  'money_market_fund', 'Money Market Fund'],
-  ['epfPersaraan',     'epf_account_1',     'EPF Account 1 (Akaun Persaraan)'],
-  ['epfSejahtera',     'epf_account_2',     'EPF Account 2 (Akaun Sejahtera)'],
-  ['epfFleksibel',     'epf_account_3',     'EPF Account 3 (Akaun Fleksibel)']
+  ['savingsAccount',  'savings',       'Savings/Current Account'],
+  ['fixedDeposit',    'fixed_deposit', 'Fixed Deposit'],
+  ['moneyMarketFund', 'money_market',  'Money Market Fund'],
+  ['epfPersaraan',    'epf_account_1', 'EPF Account 1 (Akaun Persaraan)'],
+  ['epfSejahtera',    'epf_account_2', 'EPF Account 2 (Akaun Sejahtera)'],
+  ['epfFleksibel',    'epf_account_3', 'EPF Account 3 (Akaun Fleksibel)']
 ];
 
+// List-type assets -> [kycKey, asset_type, derived liability_type | null]
 const ASSET_LIST_TYPES = [
-  // [kycKey, asset_kind, derived_loan_kind | null]
   ['properties',  'property', 'mortgage'],
   ['vehicles',    'vehicle',  'car_loan'],
   ['otherAssets', 'other',    null]
 ];
 
+// Liability list fields -> liability_type
 const LIABILITY_LIST_TYPES = [
   ['studyLoans',      'study_loan'],
   ['personalLoans',   'personal_loan'],
@@ -55,15 +73,34 @@ const LIABILITY_LIST_TYPES = [
   ['otherLoans',      'other']
 ];
 
-const INVESTMENT_CLASS_MAP = {
+// Investment field -> asset_type (decision: investments are stored as assets)
+const INVESTMENT_ASSET_TYPE_MAP = {
   etf:              'etf',
   stocks:           'stock',
   bonds:            'bond',
   unitTrusts:       'unit_trust',
   fixedDeposits:    'fixed_deposit',
-  forex:            'forex',
+  forex:            'other',
   moneyMarket:      'money_market',
   otherInvestments: 'other'
+};
+
+// asset_type -> liquidity_level (assets.liquidity is NOT NULL, default 'medium')
+const LIQUIDITY_BY_TYPE = {
+  savings:       'high',
+  money_market:  'high',
+  etf:           'high',
+  stock:         'high',
+  unit_trust:    'high',
+  bond:          'medium',
+  fixed_deposit: 'medium',
+  epf_account_1: 'low',
+  epf_account_2: 'low',
+  epf_account_3: 'low',
+  property:      'low',
+  vehicle:       'low',
+  business:      'low',
+  other:         'medium'
 };
 
 // ---------- helpers ----------
@@ -88,6 +125,9 @@ const normalizeEnum = (value, allowed) => {
   return v && allowed.includes(v) ? v : null;
 };
 
+const liquidityFor = (assetType) => LIQUIDITY_BY_TYPE[assetType] || 'medium';
+
+// First day of the reporting month (YYYY-MM-01) for cashflow_entries.period_month
 const periodMonthFromKyc = (basic) => {
   const rawMonth = basic.globalMonth != null && basic.globalMonth !== ''
     ? basic.globalMonth
@@ -108,59 +148,23 @@ const toIsoDate = (val) => {
   return Number.isFinite(d.getTime()) ? d.toISOString().slice(0, 10) : null;
 };
 
-// Look up an existing auth user by email; create one if missing.
-// Returns { userId, isNewUser }.
-async function findOrCreateAuthUser(email) {
-  // Prefer the profiles table (cheap, indexed)
-  const { data: existingProfile } = await supabaseAdmin
-    .from('profiles')
-    .select('id')
-    .eq('email', email)
-    .maybeSingle();
-
-  if (existingProfile?.id) {
-    return { userId: existingProfile.id, isNewUser: false };
-  }
-
-  // No profile yet — try to create the auth user.
-  const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    email_confirm: true
-  });
-
-  if (!createErr && created?.user?.id) {
-    return { userId: created.user.id, isNewUser: true };
-  }
-
-  // Auth user may already exist without a profile — find it.
-  const msg = createErr?.message || '';
-  if (msg.toLowerCase().includes('already') || msg.toLowerCase().includes('registered')) {
-    const { data: list } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
-    const existing = list?.users?.find(u => (u.email || '').toLowerCase() === email);
-    if (existing?.id) return { userId: existing.id, isNewUser: false };
-  }
-
-  throw new Error(`Failed to create auth user: ${msg || 'unknown error'}`);
-}
+const buildFullName = (basic) => {
+  const parts = [];
+  if (basic.givenName)  parts.push(String(basic.givenName).trim());
+  if (basic.familyName) parts.push(String(basic.familyName).trim());
+  const joined = parts.join(' ').trim();
+  return joined || null;
+};
 
 // ---------- handler ----------
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
+  applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-
-  if (!supabaseAdmin) {
-    return res.status(500).json({
-      error: 'Server Config Error: Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables.'
-    });
-  }
+  if (!supabaseAdmin) return configError(res);
 
   try {
     const payload = req.body || {};
@@ -170,17 +174,20 @@ export default async function handler(req, res) {
     if (!email) return res.status(400).json({ error: 'Email is required' });
     if (!basic.pdpaAccepted) return res.status(400).json({ error: 'PDPA acceptance is required' });
 
+    const fullName = buildFullName(basic);
+    if (!fullName) return res.status(400).json({ error: 'Name is required' });
+
     // Hard-block duplicate onboarding. /kyc is for first-time entry only;
-    // anyone whose email already has a profile must contact their advisor.
-    const { data: existingProfile, error: profileLookupErr } = await supabaseAdmin
-      .from('profiles')
+    // anyone whose email already exists must contact their advisor.
+    const { data: existingClient, error: lookupErr } = await supabaseAdmin
+      .from('clients')
       .select('id')
-      .eq('email', email)
+      .ilike('email', email)
       .maybeSingle();
-    if (profileLookupErr) {
-      throw new Error(`Failed to check existing profile: ${profileLookupErr.message}`);
+    if (lookupErr) {
+      throw new Error(`Failed to check existing client: ${lookupErr.message}`);
     }
-    if (existingProfile) {
+    if (existingClient) {
       return res.status(409).json({
         error: 'This email has already been registered. Please contact your financial advisor to update your information.',
         code: 'DUPLICATE_EMAIL'
@@ -189,138 +196,94 @@ export default async function handler(req, res) {
 
     const periodMonth = periodMonthFromKyc(basic);
 
-    // 1. Find or create auth user
-    const { userId, isNewUser } = await findOrCreateAuthUser(email);
-
-    // 2. Upsert profile (one row per auth user)
+    // 1. Create the client (prospect) and capture its id
     const retirementAgeRaw = parseInt(basic.retirementAge, 10);
     const retirementAge = Number.isFinite(retirementAgeRaw) && retirementAgeRaw >= 40 && retirementAgeRaw <= 100
       ? retirementAgeRaw
       : 55;
 
-    const profileData = {
-      id:                userId,
-      role:              'client',
-      email,
-      family_name:       basic.familyName || null,
-      given_name:        basic.givenName || null,
+    const clientData = {
+      advisor_id:        DEFAULT_ADVISOR_ID,
+      full_name:         fullName,
       salutation:        basic.salutation || null,
+      email,
       date_of_birth:     toIsoDate(basic.dateOfBirth),
       nationality:       basic.nationality || null,
       residency:         basic.residency || null,
       marital_status:    normalizeEnum(basic.maritalStatus, MARITAL_STATUSES),
       employment_status: normalizeEnum(basic.employmentStatus, EMPLOYMENT_STATUSES),
-      tax_status:        normalizeEnum(basic.taxStatus, TAX_STATUSES),
+      tax_residency:     normalizeEnum(basic.taxStatus, TAX_RESIDENCIES),
       occupation:        basic.occupation || null,
       retirement_age:    retirementAge,
-      pdpa_accepted_at:  basic.pdpaAccepted ? new Date().toISOString() : null
+      status:            'prospect',
+      // CHECK chk_prospect_has_stage: a prospect must carry a pipeline stage
+      pipeline_stage:    'new_lead',
+      pdpa_accepted_at:  basic.pdpaAccepted ? new Date().toISOString() : null,
+      kyc_payload:       payload,
+      kyc_status:        'submitted',
+      kyc_submitted_at:  new Date().toISOString()
     };
 
-    const { error: profileErr } = await supabaseAdmin
-      .from('profiles')
-      .upsert(profileData, { onConflict: 'id' });
-    if (profileErr) throw new Error(`Failed to upsert profile: ${profileErr.message}`);
-
-    // 3. Determine version for kyc_submissions
-    const { data: existingSubs } = await supabaseAdmin
-      .from('kyc_submissions')
-      .select('version')
-      .eq('profile_id', userId)
-      .order('version', { ascending: false })
-      .limit(1);
-    const nextVersion = (existingSubs?.[0]?.version || 0) + 1;
-
-    // 4. Insert raw kyc_submissions audit row
-    const { error: kycErr } = await supabaseAdmin
-      .from('kyc_submissions')
-      .insert({
-        profile_id:  userId,
-        version:     nextVersion,
-        status:      'submitted',
-        raw_payload: payload
-      });
-    if (kycErr) throw new Error(`Failed to record kyc submission: ${kycErr.message}`);
-
-    // 5. Build child-table rows
-    // Incomes (single-amount per type; only insert if > 0)
-    const incomeRows = [];
-    for (const [kycKey, enumVal] of Object.entries(INCOME_TYPE_MAP)) {
-      const amt = parseAmount(income?.[kycKey]);
-      if (amt > 0) {
-        incomeRows.push({
-          profile_id:   userId,
-          income_type:  enumVal,
-          amount:       amt,
-          currency:     'MYR',
-          period_month: periodMonth,
-          is_recurring: kycKey !== 'bonus',
-          source_note:  null
+    const { data: insertedClient, error: clientErr } = await supabaseAdmin
+      .from('clients')
+      .insert(clientData)
+      .select('id')
+      .single();
+    if (clientErr) {
+      // Unique violation (race on email/nric) -> treat as duplicate
+      if (clientErr.code === '23505') {
+        return res.status(409).json({
+          error: 'This email has already been registered. Please contact your financial advisor to update your information.',
+          code: 'DUPLICATE_EMAIL'
         });
       }
+      throw new Error(`Failed to create client: ${clientErr.message}`);
     }
+    const clientId = insertedClient.id;
 
-    // Expenses (arrays of items)
-    const expenseRows = [];
-    for (const [kycKey, catEnum] of Object.entries(EXPENSE_CATEGORY_MAP)) {
-      const items = expenses?.[kycKey] || [];
-      for (const it of items) {
-        const amt = parseAmount(it.amount);
-        if (amt <= 0) continue;
-        expenseRows.push({
-          profile_id:   userId,
-          category:     catEnum,
-          amount:       amt,
-          currency:     'MYR',
-          period_month: periodMonth,
-          is_fixed:     true,
-          description:  it.type || it.description || null
-        });
-      }
-    }
-
-    // Assets — simple fields first
+    // 2. Build asset rows (simple fields, then list types, then investments)
     const assetRows = [];
-    for (const [key, kind, name] of SIMPLE_ASSET_FIELDS) {
+
+    for (const [key, assetType, name] of SIMPLE_ASSET_FIELDS) {
       const amt = parseAmount(assets?.[key]);
       if (amt > 0) {
         assetRows.push({
-          profile_id: userId,
-          kind,
+          client_id:     clientId,
+          asset_type:    assetType,
           name,
-          value:      amt,
-          currency:   'MYR',
-          metadata:   {}
+          current_value: amt,
+          currency:      'MYR',
+          liquidity:     liquidityFor(assetType),
+          metadata:      {}
         });
       }
     }
 
-    // Assets — list types (properties / vehicles / other), tracking loan-linked items
-    // so we can later create matching liability rows pointing at the inserted asset id.
-    const linkedLoanMeta = []; // { rowIndex, loanKind, ... }
-    for (const [key, kind, derivedLoanKind] of ASSET_LIST_TYPES) {
+    // List assets — track loan-linked items so we can create matching liabilities
+    const linkedLoanMeta = []; // { rowIndex, liabilityType, ... }
+    for (const [key, assetType, derivedLiabilityType] of ASSET_LIST_TYPES) {
       const items = assets?.[key] || [];
       for (const it of items) {
         const amt = parseAmount(it.amount);
         if (amt <= 0 && !it.description) continue;
-        const row = {
-          profile_id:  userId,
-          kind,
-          name:        it.description || `${kind} item`,
-          value:       amt,
-          currency:    'MYR',
-          acquired_at: null,
+        const rowIndex = assetRows.length;
+        assetRows.push({
+          client_id:     clientId,
+          asset_type:    assetType,
+          name:          it.description || `${assetType} item`,
+          current_value: amt,
+          currency:      'MYR',
+          liquidity:     liquidityFor(assetType),
           metadata: {
             purchasePrice: it.purchasePrice ?? null,
             tenure:        it.tenure ?? null,
             interestRate:  it.interestRate ?? null
           }
-        };
-        const rowIndex = assetRows.length;
-        assetRows.push(row);
-        if (it.isUnderLoan && derivedLoanKind) {
+        });
+        if (it.isUnderLoan && derivedLiabilityType) {
           linkedLoanMeta.push({
             rowIndex,
-            loanKind:           derivedLoanKind,
+            liabilityType:      derivedLiabilityType,
             outstandingBalance: it.outstandingBalance,
             originalLoanAmount: it.originalLoanAmount,
             monthlyInstallment: it.monthlyInstallment,
@@ -331,7 +294,26 @@ export default async function handler(req, res) {
       }
     }
 
-    // Insert assets and capture their generated ids in the same order
+    // Investments -> assets
+    for (const [key, assetType] of Object.entries(INVESTMENT_ASSET_TYPE_MAP)) {
+      const items = investments?.[key] || [];
+      for (const it of items) {
+        const amt = parseAmount(it.amount);
+        if (amt <= 0 && !it.description) continue;
+        assetRows.push({
+          client_id:     clientId,
+          asset_type:    assetType,
+          name:          it.description || `${assetType} holding`,
+          current_value: amt,
+          cost_value:    amt > 0 ? amt : null,
+          currency:      'MYR',
+          liquidity:     liquidityFor(assetType),
+          metadata:      {}
+        });
+      }
+    }
+
+    // Insert assets, capturing generated ids in insertion order
     let insertedAssets = [];
     if (assetRows.length > 0) {
       const { data, error } = await supabaseAdmin
@@ -342,91 +324,95 @@ export default async function handler(req, res) {
       insertedAssets = data || [];
     }
 
-    // Liabilities — explicit list types (study/personal/renovation/other)
+    // 3. Build liability rows (explicit lists, then asset-derived loans)
     const liabilityRows = [];
-    for (const [key, kind] of LIABILITY_LIST_TYPES) {
+    for (const [key, liabilityType] of LIABILITY_LIST_TYPES) {
       const items = liabilities?.[key] || [];
       for (const it of items) {
         const balance   = parseAmount(it.outstandingBalance ?? it.amount);
         const principal = parseAmount(it.originalLoanAmount);
         if (balance <= 0 && principal <= 0 && !it.description) continue;
         liabilityRows.push({
-          profile_id:      userId,
-          kind,
-          name:            it.description || `${kind} item`,
-          principal:       principal > 0 ? principal : null,
-          balance,
-          interest_rate:   parseRate(it.interestRate),
-          monthly_payment: parseAmount(it.monthlyInstallment) || null,
-          start_date:      null,
-          end_date:        null,
-          linked_asset_id: null
+          client_id:           clientId,
+          liability_type:      liabilityType,
+          name:                it.description || `${liabilityType} item`,
+          original_principal:  principal > 0 ? principal : null,
+          outstanding_balance: balance,
+          interest_rate:       parseRate(it.interestRate),
+          monthly_payment:     parseAmount(it.monthlyInstallment) || null,
+          linked_asset_id:     null
         });
       }
     }
-
-    // Liabilities — derived from assets that have loans (mortgage / car_loan)
     for (const meta of linkedLoanMeta) {
       const balance   = parseAmount(meta.outstandingBalance);
       const principal = parseAmount(meta.originalLoanAmount);
       if (balance <= 0 && principal <= 0) continue;
-      const linkedId = insertedAssets[meta.rowIndex]?.id || null;
       liabilityRows.push({
-        profile_id:      userId,
-        kind:            meta.loanKind,
-        name:            meta.displayName ? `${meta.displayName} (loan)` : `${meta.loanKind} item`,
-        principal:       principal > 0 ? principal : null,
-        balance,
-        interest_rate:   parseRate(meta.interestRate),
-        monthly_payment: parseAmount(meta.monthlyInstallment) || null,
-        start_date:      null,
-        end_date:        null,
-        linked_asset_id: linkedId
+        client_id:           clientId,
+        liability_type:      meta.liabilityType,
+        name:                meta.displayName ? `${meta.displayName} (loan)` : `${meta.liabilityType} item`,
+        original_principal:  principal > 0 ? principal : null,
+        outstanding_balance: balance,
+        interest_rate:       parseRate(meta.interestRate),
+        monthly_payment:     parseAmount(meta.monthlyInstallment) || null,
+        linked_asset_id:     insertedAssets[meta.rowIndex]?.id || null
       });
     }
 
-    // Investments
-    const investmentRows = [];
-    for (const [key, classEnum] of Object.entries(INVESTMENT_CLASS_MAP)) {
-      const items = investments?.[key] || [];
-      for (const it of items) {
-        const amt = parseAmount(it.amount);
-        if (amt <= 0 && !it.description) continue;
-        investmentRows.push({
-          profile_id:    userId,
-          asset_class:   classEnum,
-          name:          it.description || `${classEnum} holding`,
-          cost_basis:    amt > 0 ? amt : null,
-          current_value: amt > 0 ? amt : null,
-          currency:      'MYR',
-          metadata:      {}
+    // 4. Build cashflow rows (income = inflow, expenses = outflow)
+    const cashflowRows = [];
+
+    for (const [kycKey, category] of Object.entries(INCOME_CATEGORY_MAP)) {
+      const amt = parseAmount(income?.[kycKey]);
+      if (amt > 0) {
+        cashflowRows.push({
+          client_id:    clientId,
+          direction:    'inflow',
+          category,
+          amount:       amt,
+          currency:     'MYR',
+          period_month: periodMonth,
+          is_recurring: kycKey !== 'bonus',
+          frequency:    'monthly',
+          source_note:  null
         });
       }
     }
 
-    // 6. Insert child rows (incomes / expenses / liabilities / investments)
-    if (incomeRows.length > 0) {
-      const { error } = await supabaseAdmin.from('incomes').insert(incomeRows);
-      if (error) throw new Error(`Failed to insert incomes: ${error.message}`);
+    for (const [kycKey, category] of Object.entries(EXPENSE_CATEGORY_MAP)) {
+      const items = expenses?.[kycKey] || [];
+      for (const it of items) {
+        const amt = parseAmount(it.amount);
+        if (amt <= 0) continue;
+        cashflowRows.push({
+          client_id:    clientId,
+          direction:    'outflow',
+          category,
+          amount:       amt,
+          currency:     'MYR',
+          period_month: periodMonth,
+          is_recurring: true,
+          frequency:    'monthly',
+          source_note:  it.type || it.description || null
+        });
+      }
     }
-    if (expenseRows.length > 0) {
-      const { error } = await supabaseAdmin.from('expenses').insert(expenseRows);
-      if (error) throw new Error(`Failed to insert expenses: ${error.message}`);
-    }
+
+    // 5. Insert child rows
     if (liabilityRows.length > 0) {
       const { error } = await supabaseAdmin.from('liabilities').insert(liabilityRows);
       if (error) throw new Error(`Failed to insert liabilities: ${error.message}`);
     }
-    if (investmentRows.length > 0) {
-      const { error } = await supabaseAdmin.from('investments').insert(investmentRows);
-      if (error) throw new Error(`Failed to insert investments: ${error.message}`);
+    if (cashflowRows.length > 0) {
+      const { error } = await supabaseAdmin.from('cashflow_entries').insert(cashflowRows);
+      if (error) throw new Error(`Failed to insert cashflow entries: ${error.message}`);
     }
 
     return res.status(200).json({
       success:      true,
-      submissionId: userId,
-      version:      nextVersion,
-      isNewUser
+      submissionId: clientId,
+      clientId
     });
 
   } catch (error) {
