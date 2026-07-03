@@ -6,6 +6,7 @@ import AdvisorApp from './components/advisor/AdvisorApp';
 const PortalLayout = lazy(() => import('./components/PortalLayout'));
 const KYCLayout = lazy(() => import('./components/kyc/KYCLayout'));
 const PrsPublicPage = lazy(() => import('./components/prs/PrsPublicPage'));
+const SignPublicPage = lazy(() => import('./components/sign/SignPublicPage'));
 
 const Spinner = () => (
   <div className="flex h-screen items-center justify-center bg-xin-bg">
@@ -27,6 +28,9 @@ const App: React.FC = () => {
 
             {/* PRS public client form (token link) */}
             <Route path="/prs/:token" element={<PrsPublicPage />} />
+
+            {/* PDF e-signature public signing page (one-time token link) */}
+            <Route path="/sign/:token" element={<SignPublicPage />} />
 
             {/* Client Portal */}
             <Route path="/*" element={<PortalLayout />} />

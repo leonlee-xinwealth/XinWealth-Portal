@@ -158,13 +158,53 @@ const buildFullName = (basic) => {
 
 // ---------- handler ----------
 
+// GET /api/kyc?email= — lightweight pre-check called by the KYC form before
+// submitting (absorbed from the former /api/check-email to stay within the
+// Vercel Hobby 12-function limit). Same trust boundary as the POST itself:
+// no auth, and we only reveal a yes/no — never any profile data.
+async function handleEmailCheck(req, res) {
+  const raw = req.query?.email;
+  const email = String(raw || '').trim().toLowerCase();
+
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Valid email is required' });
+  }
+
+  // Same duplicate rule as the POST hard-block below: an email that already
+  // exists in clients cannot onboard again. (The old /api/check-email queried
+  // a nonexistent 'profiles' table and always 500'd.)
+  const { data, error } = await supabaseAdmin
+    .from('clients')
+    .select('id')
+    .ilike('email', email)
+    .maybeSingle();
+
+  if (error) {
+    console.error('kyc email pre-check lookup error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+
+  if (data) {
+    return res.status(200).json({ available: false, reason: 'DUPLICATE_EMAIL' });
+  }
+  return res.status(200).json({ available: true });
+}
+
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
+  if (!supabaseAdmin) return configError(res);
+  if (req.method === 'GET') {
+    try {
+      return await handleEmailCheck(req, res);
+    } catch (err) {
+      console.error('kyc email pre-check error:', err);
+      return res.status(500).json({ error: err.message || 'Internal server error' });
+    }
+  }
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  if (!supabaseAdmin) return configError(res);
 
   try {
     const payload = req.body || {};

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { lazy, useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import AdvisorLogin from './AdvisorLogin';
@@ -16,6 +16,8 @@ import Broadcast from './pages/Broadcast';
 import MarketValues from './pages/MarketValues';
 import PrsApplicationList from './pages/PrsApplicationList';
 import PrsApplicationEditor from './pages/PrsApplicationEditor';
+// Lazy so pdfjs-dist stays out of the main bundle (Suspense boundary in App.tsx).
+const SignatureRequests = lazy(() => import('./pages/SignatureRequests'));
 
 const AdvisorApp: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -61,6 +63,7 @@ const AdvisorApp: React.FC = () => {
         <Route path="cases/:id" element={<CaseDetail />} />
         <Route path="prs" element={<PrsApplicationList />} />
         <Route path="prs/:id" element={<PrsApplicationEditor />} />
+        <Route path="signatures" element={<SignatureRequests />} />
         <Route path="insurance-comparison" element={<InsuranceComparison />} />
         <Route path="broadcast" element={<Broadcast />} />
         <Route path="market-values" element={<MarketValues />} />

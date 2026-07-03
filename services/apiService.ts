@@ -245,7 +245,7 @@ export const checkEmailAvailable = async (
   const trimmed = (email || '').trim().toLowerCase();
   if (!trimmed) return { available: false, reason: 'INVALID_EMAIL' };
 
-  const response = await fetch(`/api/check-email?email=${encodeURIComponent(trimmed)}`);
+  const response = await fetch(`/api/kyc?email=${encodeURIComponent(trimmed)}`);
   const data = await response.json();
   if (!response.ok) {
     throw new Error(data.error || 'Failed to check email');
