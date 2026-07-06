@@ -23,9 +23,28 @@ const DEFAULT_ADVISOR_ID =
   (process.env.KYC_DEFAULT_ADVISOR_ID || '').trim() ||
   '5ac7f25c-421e-4f03-8dac-ac5375626586'; // Leon Lee
 
-const MARITAL_STATUSES    = ['single', 'married', 'divorced', 'widowed'];
-const EMPLOYMENT_STATUSES = ['employed', 'self_employed', 'unemployed', 'retired', 'student'];
-const TAX_RESIDENCIES     = ['resident', 'non_resident'];
+// Maps use the exact button values BasicInfoStep.tsx sends (not regex-normalized —
+// hyphens like "Self-Employed" / "Tax-Resident" don't survive naive normalization).
+// Values with no DB-enum equivalent (e.g. "Separated", "Not Taxable") map to null;
+// the original answer is still preserved verbatim in clients.kyc_payload.
+const MARITAL_STATUS_MAP = {
+  'Single':    'single',
+  'Married':   'married',
+  'Divorced':  'divorced',
+  'Separated': null,
+  'Widowed':   'widowed'
+};
+const EMPLOYMENT_STATUS_MAP = {
+  'Employed':      'employed',
+  'Self-Employed': 'self_employed',
+  'Unemployed':    'unemployed',
+  'Retired':       'retired'
+};
+const TAX_STATUS_MAP = {
+  'Tax-Resident': 'resident',
+  'Non Resident': 'non_resident',
+  'Not Taxable':  null
+};
 
 // Income field -> cashflow_categories.code (inflow)
 const INCOME_CATEGORY_MAP = {
@@ -119,11 +138,7 @@ const parseRate = (val) => {
   return Number.isFinite(n) ? n : null;
 };
 
-const normalizeEnum = (value, allowed) => {
-  if (value == null) return null;
-  const v = String(value).trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z_]/g, '');
-  return v && allowed.includes(v) ? v : null;
-};
+const mapEnum = (value, map) => (value != null && map.hasOwnProperty(value)) ? map[value] : null;
 
 const liquidityFor = (assetType) => LIQUIDITY_BY_TYPE[assetType] || 'medium';
 
@@ -250,9 +265,9 @@ export default async function handler(req, res) {
       date_of_birth:     toIsoDate(basic.dateOfBirth),
       nationality:       basic.nationality || null,
       residency:         basic.residency || null,
-      marital_status:    normalizeEnum(basic.maritalStatus, MARITAL_STATUSES),
-      employment_status: normalizeEnum(basic.employmentStatus, EMPLOYMENT_STATUSES),
-      tax_residency:     normalizeEnum(basic.taxStatus, TAX_RESIDENCIES),
+      marital_status:    mapEnum(basic.maritalStatus, MARITAL_STATUS_MAP),
+      employment_status: mapEnum(basic.employmentStatus, EMPLOYMENT_STATUS_MAP),
+      tax_residency:     mapEnum(basic.taxStatus, TAX_STATUS_MAP),
       occupation:        basic.occupation || null,
       retirement_age:    retirementAge,
       status:            'prospect',
