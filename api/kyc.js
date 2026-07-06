@@ -92,13 +92,16 @@ const LIABILITY_LIST_TYPES = [
   ['otherLoans',      'other']
 ];
 
-// Investment field -> asset_type (decision: investments are stored as assets)
+// Investment field -> asset_type (decision: investments are stored as assets).
+// NOTE: despite its name, "fixedDeposits" is relabeled in the UI as "Properties
+// (for investment purpose only)" (see LanguageContext.tsx investments.fixedDeposits)
+// — real fixed deposits are already captured under Net Worth's SIMPLE_ASSET_FIELDS.
 const INVESTMENT_ASSET_TYPE_MAP = {
   etf:              'etf',
   stocks:           'stock',
   bonds:            'bond',
   unitTrusts:       'unit_trust',
-  fixedDeposits:    'fixed_deposit',
+  fixedDeposits:    'property',
   forex:            'other',
   moneyMarket:      'money_market',
   otherInvestments: 'other'
