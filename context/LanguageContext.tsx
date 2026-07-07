@@ -152,7 +152,9 @@ const translations: Record<Language, Record<string, string>> = {
     'common.collapse': 'Collapse',
     'common.selectAll': 'Select all that applies',
     'common.purchasePrice': 'Purchase Price / Principal',
-    'common.originalLoanAmount': 'Original Loan Amount'
+    'common.originalLoanAmount': 'Original Loan Amount',
+    'common.type': 'Type',
+    'common.amount': 'Amount'
   },
   zh: {
     'nav.welcome': '欢迎',
@@ -297,7 +299,9 @@ const translations: Record<Language, Record<string, string>> = {
     'common.collapse': '收起',
     'common.selectAll': '请选择所有适用项',
     'common.purchasePrice': '买入价 / 本金 (Purchase Price)',
-    'common.originalLoanAmount': '原始贷款额度 (Original Loan Amount)'
+    'common.originalLoanAmount': '原始贷款额度 (Original Loan Amount)',
+    'common.type': '类型',
+    'common.amount': '金额'
   }
 };
 

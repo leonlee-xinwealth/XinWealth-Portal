@@ -12,6 +12,18 @@ interface ReviewSummaryStepProps {
 
 const parseAmount = (val: string) => parseInt(val.replace(/,/g, '') || '0', 10);
 
+// KYCInvestmentsData keys -> their translation key (mirrors InvestmentsStep.tsx's category labels)
+const INVESTMENT_LABEL_KEYS: Record<string, string> = {
+    etf: 'investments.etf',
+    bonds: 'investments.bonds',
+    stocks: 'investments.stocks',
+    unitTrusts: 'investments.unitTrusts',
+    fixedDeposits: 'investments.fixedDeposits',
+    forex: 'investments.forex',
+    moneyMarket: 'investments.money',
+    otherInvestments: 'investments.others'
+};
+
 const calculateAnnualIncome = (income: any) => {
     if (!income) return 0;
     let total = 0;
@@ -346,9 +358,9 @@ const ReviewSummaryStep: React.FC<ReviewSummaryStepProps> = ({
                             totalValue={formatCurrency(totalInvestments)} 
                         />
                         <div className="space-y-1 mt-4">
-                            {Object.entries(formData.investments || {}).map(([key, items]: [string, any]) => 
+                            {Object.entries(formData.investments || {}).map(([key, items]: [string, any]) =>
                                 items.map((item: any) => (
-                                    <ItemRow key={item.id} label={`${key.toUpperCase()}: ${item.description}`} value={formatCurrency(item.amount)} />
+                                    <ItemRow key={item.id} label={`${t(INVESTMENT_LABEL_KEYS[key] || key)}: ${item.description}`} value={formatCurrency(item.amount)} />
                                 ))
                             )}
                         </div>
