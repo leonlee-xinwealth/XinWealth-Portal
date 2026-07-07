@@ -6,6 +6,7 @@ import { ChevronLeft, FileText, Plus, X } from 'lucide-react';
 import { initialPrsFormData } from '../../../types/prs';
 import { fromClient } from '../prs/prsSync';
 import ProfileTab from '../tabs/ProfileTab';
+import ReviewTab from '../tabs/ReviewTab';
 import CashflowTab from '../tabs/CashflowTab';
 import NetworthTab from '../tabs/NetworthTab';
 import InsuranceTab from '../tabs/InsuranceTab';
@@ -15,7 +16,7 @@ import PortfolioTab from '../tabs/PortfolioTab';
 import HealthScoreCard from '../components/HealthScoreCard';
 import { getCaseTemplate, CASE_TYPE_LABELS } from '../cases/caseTemplates';
 
-type Tab = 'activity' | 'profile' | 'cashflow' | 'networth' | 'insurance' | 'portfolio' | 'formkit';
+type Tab = 'activity' | 'profile' | 'review' | 'cashflow' | 'networth' | 'insurance' | 'portfolio' | 'formkit';
 
 interface Policy {
   id: string;
@@ -171,6 +172,7 @@ export default function ClientDetail() {
   const tabs: { key: Tab; en: string; zh: string; icon: string; badge?: number }[] = [
     { key: 'activity', en: 'Activity', zh: '活动', icon: '📝', badge: pendingCount },
     { key: 'profile', en: 'Profile', zh: '资料', icon: '👤' },
+    { key: 'review', en: 'Review', zh: '核对', icon: '🔍' },
     { key: 'cashflow', en: 'Cash Flow', zh: '收支', icon: '💰' },
     { key: 'networth', en: 'Net Worth', zh: '净资产', icon: '📈' },
     { key: 'insurance', en: 'Insurance', zh: '保险', icon: '🛡️' },
@@ -273,6 +275,7 @@ export default function ClientDetail() {
       {/* Content */}
       {tab === 'activity' && <ActivityTab clientId={client.id} />}
       {tab === 'profile' && <ProfileTab client={client} onSave={loadClient} />}
+      {tab === 'review' && <ReviewTab client={client} clientId={client.id} onNavigateTab={setTab} />}
       {tab === 'cashflow' && <CashflowTab clientId={client.id} />}
       {tab === 'networth' && <NetworthTab clientId={client.id} />}
       {tab === 'insurance' && <InsuranceTab clientId={client.id} />}

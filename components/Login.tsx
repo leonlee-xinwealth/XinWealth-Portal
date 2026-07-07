@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { authenticateUser } from '../services/apiService';
 import { ArrowRight, Lock, Mail, Loader2 } from 'lucide-react';
 
@@ -106,6 +107,9 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             <p className="text-sm text-slate-400 font-light">
               Existing clients only. Contact your financial advisor to obtain an account.
             </p>
+            <Link to="/advisor/login" className="inline-block text-sm text-xin-blue font-semibold hover:text-xin-gold transition-colors">
+              Financial advisor? Sign in here →
+            </Link>
         </div>
       </div>
       

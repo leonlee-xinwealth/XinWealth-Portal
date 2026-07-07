@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
 import { Mail, Lock, Loader2 } from 'lucide-react';
 
@@ -72,6 +73,12 @@ const AdvisorLogin: React.FC<Props> = () => {
             {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Sign In'}
           </button>
         </form>
+
+        <div className="mt-6 text-center">
+          <Link to="/" className="text-sm text-slate-400 hover:text-xin-gold transition-colors">
+            ← Back to Client Portal
+          </Link>
+        </div>
       </div>
     </div>
   );

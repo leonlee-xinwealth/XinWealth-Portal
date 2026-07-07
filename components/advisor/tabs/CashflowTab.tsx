@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Pencil } from 'lucide-react';
 
 const FREQ: [string,string][] = [['monthly','Monthly'],['annual','Annual'],['quarterly','Quarterly'],['semi_annual','Semi-annual'],['one_off','One-off']];
 
@@ -15,6 +15,12 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   const [form, setForm] = useState({ category:'', amount:'', frequency:'monthly', is_recurring:true, source_note:'' });
   const [saving, setSaving] = useState(false);
   const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
+
+  const [editingId, setEditingId] = useState<string|null>(null);
+  const [editForm, setEditForm] = useState<any>({});
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [ok, setOk] = useState(false);
+  const setEdit = (k: string, v: any) => setEditForm((p: any) => ({ ...p, [k]: v }));
 
   async function load() {
     const [{ data: e }, { data: c }] = await Promise.all([
@@ -36,6 +42,37 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
     await supabase.from('cashflow_entries').delete().eq('id', id); load();
   }
 
+  function startEdit(entry: any) {
+    setEditingId(entry.id);
+    setEditForm({
+      category: entry.category,
+      amount: String(entry.amount),
+      frequency: entry.frequency,
+      is_recurring: entry.is_recurring,
+      source_note: entry.source_note || '',
+    });
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditForm({});
+  }
+  async function saveEdit(entry: any) {
+    if (!editForm.category || !editForm.amount) return;
+    setSavingEdit(true);
+    await supabase.from('cashflow_entries').update({
+      category: editForm.category,
+      amount: parseFloat(editForm.amount),
+      frequency: editForm.frequency,
+      is_recurring: editForm.is_recurring,
+      source_note: editForm.source_note || null,
+    }).eq('id', entry.id);
+    setSavingEdit(false);
+    setEditingId(null);
+    setOk(true);
+    setTimeout(() => setOk(false), 3000);
+    load();
+  }
+
   const inflows = entries.filter(e => e.direction === 'inflow');
   const outflows = entries.filter(e => e.direction === 'outflow');
   const monthly = (e: any) => { const m: any = {monthly:1,quarterly:1/3,semi_annual:1/6,annual:1/12,one_off:0}; return e.amount * (m[e.frequency]??1); };
@@ -50,6 +87,7 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
 
   return (
     <div>
+      {ok && <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-700 text-sm mb-4">✓ {t('Saved successfully.','保存成功。')}</div>}
       <div className="grid grid-cols-3 gap-4 mb-6">
         {[{label:t('Monthly Income','月收入'),val:totalIn,c:'text-emerald-600',bg:'bg-emerald-50'},{label:t('Monthly Expenses','月支出'),val:totalOut,c:'text-red-500',bg:'bg-red-50'},{label:t('Net Cash Flow','净现金流'),val:net,c:net>=0?'text-xin-blue':'text-red-500',bg:net>=0?'bg-blue-50':'bg-red-50'}].map(s => (
           <div key={s.label} className={`${s.bg} rounded-2xl p-4`}>
@@ -59,8 +97,10 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
         ))}
       </div>
       <div className="grid grid-cols-2 gap-4">
-        <EntryTable title={t('Income','收入')} color="text-emerald-600" borderColor="border-emerald-200" entries={inflows} catLabel={catLabel} monthly={monthly} onAdd={() => setModal('inflow')} onDelete={handleDelete} addLabel={t('Add Income','添加收入')} />
-        <EntryTable title={t('Expenses','支出')} color="text-red-500" borderColor="border-red-200" entries={outflows} catLabel={catLabel} monthly={monthly} onAdd={() => setModal('outflow')} onDelete={handleDelete} addLabel={t('Add Expense','添加支出')} />
+        <EntryTable title={t('Income','收入')} color="text-emerald-600" borderColor="border-emerald-200" entries={inflows} cats={inflowCats} catLabel={catLabel} monthly={monthly} onAdd={() => setModal('inflow')} onDelete={handleDelete} addLabel={t('Add Income','添加收入')}
+          editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language} />
+        <EntryTable title={t('Expenses','支出')} color="text-red-500" borderColor="border-red-200" entries={outflows} cats={outflowCats} catLabel={catLabel} monthly={monthly} onAdd={() => setModal('outflow')} onDelete={handleDelete} addLabel={t('Add Expense','添加支出')}
+          editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language} />
       </div>
       {modal && (
         <Modal title={modal==='inflow'?t('Add Income','添加收入'):t('Add Expense','添加支出')} onClose={() => setModal(null)}>
@@ -88,7 +128,7 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   );
 }
 
-function EntryTable({ title, color, borderColor, entries, catLabel, monthly, onAdd, onDelete, addLabel }: any) {
+function EntryTable({ title, color, borderColor, entries, cats, catLabel, monthly, onAdd, onDelete, addLabel, editingId, editForm, setEdit, onEdit, onCancelEdit, onSaveEdit, savingEdit, t, language }: any) {
   const total = entries.reduce((s: number, e: any) => s + monthly(e), 0);
   return (
     <div className={`bg-white rounded-2xl border ${borderColor} overflow-hidden shadow-sm`}>
@@ -99,16 +139,39 @@ function EntryTable({ title, color, borderColor, entries, catLabel, monthly, onA
       {entries.length === 0 ? <div className="p-8 text-center text-slate-300 text-sm">—</div> : (
         <>
           {entries.map((e: any) => (
-            <div key={e.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-50 last:border-0">
-              <div>
-                <div className="text-sm font-medium text-xin-blue">{catLabel(e.category)}</div>
-                <div className="text-xs text-slate-400">RM {fmt(e.amount)} · {e.frequency}{e.source_note?` · ${e.source_note}`:''}</div>
+            editingId === e.id ? (
+              <div key={e.id} className="px-5 py-3 border-b border-slate-50 last:border-0 bg-slate-50/60">
+                <Fr label={t('Category','类别')}>
+                  <select value={editForm.category} onChange={ev => setEdit('category', ev.target.value)} className={inp}>
+                    {cats.map((c: any) => <option key={c.code} value={c.code}>{language==='zh'&&c.label_zh?c.label_zh:c.label}</option>)}
+                  </select>
+                </Fr>
+                <Fr label={t('Amount (MYR)','金额 (MYR)')}><input type="number" value={editForm.amount} onChange={ev => setEdit('amount', ev.target.value)} className={inp} placeholder="0.00" /></Fr>
+                <Fr label={t('Frequency','频率')}>
+                  <select value={editForm.frequency} onChange={ev => setEdit('frequency', ev.target.value)} className={inp}>
+                    {FREQ.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </Fr>
+                <Fr label={t('Note','备注')}><input value={editForm.source_note} onChange={ev => setEdit('source_note', ev.target.value)} className={inp} /></Fr>
+                <div className="flex items-center gap-2 mb-3"><input type="checkbox" checked={editForm.is_recurring} onChange={ev => setEdit('is_recurring', ev.target.checked)} /><label className="text-sm text-slate-600">{t('Recurring','定期')}</label></div>
+                <div className="flex gap-2">
+                  <button onClick={() => onSaveEdit(e)} disabled={savingEdit} className="px-4 py-2 bg-xin-blue text-white font-semibold rounded-lg text-sm disabled:opacity-50">{savingEdit?'...':t('Save','保存')}</button>
+                  <button onClick={onCancelEdit} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm">{t('Cancel','取消')}</button>
+                </div>
               </div>
-              <div className="flex items-center gap-3">
-                <span className={`text-sm font-semibold ${color}`}>{fmt(monthly(e))}/mo</span>
-                <button onClick={() => onDelete(e.id)} className="text-slate-300 hover:text-red-400 transition-colors"><X size={14} /></button>
+            ) : (
+              <div key={e.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-50 last:border-0">
+                <div>
+                  <div className="text-sm font-medium text-xin-blue">{catLabel(e.category)}</div>
+                  <div className="text-xs text-slate-400">RM {fmt(e.amount)} · {e.frequency}{e.source_note?` · ${e.source_note}`:''}</div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm font-semibold ${color}`}>{fmt(monthly(e))}/mo</span>
+                  <button onClick={() => onEdit(e)} className="text-slate-300 hover:text-xin-blue transition-colors"><Pencil size={14} /></button>
+                  <button onClick={() => onDelete(e.id)} className="text-slate-300 hover:text-red-400 transition-colors"><X size={14} /></button>
+                </div>
               </div>
-            </div>
+            )
           ))}
           <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-t border-slate-100">
             <span className="text-xs font-semibold text-slate-500">Total / month</span>
