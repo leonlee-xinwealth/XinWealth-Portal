@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck, Target, Briefcase, Megaphone, BarChart2, FileText, FileSignature } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck, Target, Briefcase, Megaphone, BarChart2, FileText, FileSignature, Workflow } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 
 const AdvisorLayout: React.FC = () => {
@@ -39,6 +39,25 @@ const AdvisorLayout: React.FC = () => {
   async function handleLogout() {
     await supabase.auth.signOut();
     navigate('/advisor/login');
+  }
+
+  async function openAutomation() {
+    // Open the tab synchronously so popup blockers allow it, then point it at the SSO URL
+    const win = window.open('', '_blank');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('no session');
+      const res = await fetch('/api/n8n-sso', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+      const json = await res.json();
+      if (!res.ok || !json.url) throw new Error(json.error || 'unavailable');
+      if (win) win.location.href = json.url;
+    } catch (e) {
+      if (win) win.close();
+      alert(language === 'zh' ? '自动化平台暂时无法访问' : 'Automation platform is currently unavailable');
+    }
   }
 
   const navItems = [
@@ -87,6 +106,13 @@ const AdvisorLayout: React.FC = () => {
             )}
           </NavLink>
         ))}
+        <button
+          onClick={() => { setSidebarOpen(false); openAutomation(); }}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all text-white/60 hover:text-white hover:bg-white/10"
+        >
+          <Workflow size={18} />
+          <span className="flex-1 text-left">{language === 'zh' ? '自动化平台' : 'Automation'}</span>
+        </button>
       </nav>
 
       {/* Bottom */}
