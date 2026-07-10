@@ -75,6 +75,29 @@
 3. DuitNow QR 图片、付费咨询的定价与介绍文案
 4. 报告页免责声明文案（分析仅供教育参考，不构成具体产品建议）
 
+## 隐私与 Token 策略（2026-07-10 补充，已实现）
+
+免费层 Gemini 的数据会被 Google 用于产品改进，且保单动辄几十页、含大量 PII。统一原则：**原始文件永不出本地**。
+
+```
+客户上传（PDF/照片）→ 全部存本地 Supabase 私有桶（到此为止）
+  → 本地文字提取：PDF 文字层用 n8n Extract From File；照片用 Tesseract OCR 边车（compose 内网）
+  → 本地关键页筛选：15 行窗口按关键词打分（Sum Assured/保额/Premium…），只保留相关段落
+  → 本地正则脱敏：姓名/IC/电话/邮箱/地址/保单号 → «占位符»，映射表只存本地库
+  → Gemini 只收到化名后的关键段文本；报告渲染时本地还原真名
+```
+
+- OCR 读不出（模糊照片/扫描 PDF）→ 标 `needs_human`，审核页内嵌原图（本地代理 `/webhook/pr-file`）供顾问人工补充，绝不降级直传图片
+- 收入以档位收集（不存精确数字）
+- 实测：单客户 3 份保单全流程约 2,000 tokens；隐私审计（姓名/NRIC/电话/邮箱/保单号五项）零泄漏
+
+## 实现偏差记录（2026-07-10）
+
+- **分析引擎为可插拔子工作流 `PR-分析引擎`**（为 Leon 未来的保单分析智能体预留插槽）：契约=输入 `{policies[], profile}`（已脱敏）→ 输出 `{policy_summaries, gaps, recommendations, overall_comment, engine, usage_total}`。保单摘要由代码从抽取 JSON 确定性生成（防 LLM 数字幻觉/循环退化），Gemini 只做缺口评估与建议
+- 表单地址为 n8n UUID 路径（v2.6 formTrigger 不支持自定义路径），网关提供短链接 **https://n8n.xinwealth.com/apply** 302 跳转
+- 收款确认后不发客户邮件（Gmail OAuth 配置成本高，YAGNI）：Telegram 回执提醒 Leon 手动 WhatsApp 客户
+- 预约手动进行（Leon 决策），不接日历系统
+
 ## 不做的事（YAGNI）
 
 - 不做在线支付网关（V1 手动确认足够）
