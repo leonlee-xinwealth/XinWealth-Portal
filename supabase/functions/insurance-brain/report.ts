@@ -6,7 +6,9 @@ import type { CnaResult } from "./cna.ts";
 import type { CfpFinancials } from "./mapping.ts";
 import { annualPremiumTotal } from "./mapping.ts";
 
-const GEMINI_MODEL = "gemini-flash-latest";
+// flash-lite has separate (and roomier) free-tier quota than flash — the
+// funnel engine's extraction step already relies on it staying available.
+const GEMINI_MODEL = "gemini-flash-lite-latest";
 const GEMINI_URL =
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
