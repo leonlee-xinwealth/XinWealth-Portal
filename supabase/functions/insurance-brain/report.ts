@@ -59,14 +59,26 @@ function buildPrompt(cna: CnaResult, financials: CfpFinancials): string {
     )
     : null;
   const premiumTotal = annualPremiumTotal(financials.policies);
+  // Only non-identifying fields reach the LLM: no name/NRIC/email/phone/DOB,
+  // and liabilities.name (free-text, advisor-entered — may contain a real
+  // person's name, e.g. "Ahmad's car loan") is dropped, keeping only type
+  // and amount.
   const clientContext = {
     age,
     occupation: financials.client.occupation,
     dependents: financials.client.number_of_dependants,
     retirement_age: financials.client.retirement_age,
     annual_premium_total: premiumTotal,
-    policies: financials.policies,
-    liabilities: financials.liabilities,
+    policies: financials.policies.map((p) => ({
+      policy_type: p.policy_type,
+      sum_assured: p.sum_assured,
+      premium: p.premium,
+      premium_frequency: p.premium_frequency,
+    })),
+    liabilities: financials.liabilities.map((l) => ({
+      liability_type: l.liability_type,
+      outstanding_balance: l.outstanding_balance,
+    })),
   };
   return [
     "你是马来西亚持牌理财顾问的分析助手。这是一次 comprehensive financial planning 的保险深度分析，",
