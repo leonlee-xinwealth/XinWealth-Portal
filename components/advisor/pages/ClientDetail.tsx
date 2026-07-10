@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { ChevronLeft, FileText, Plus, X } from 'lucide-react';
+import { BrainCircuit, ChevronLeft, FileText, Plus, X } from 'lucide-react';
 import { initialPrsFormData } from '../../../types/prs';
 import { fromClient } from '../prs/prsSync';
 import ProfileTab from '../tabs/ProfileTab';
@@ -52,6 +52,8 @@ export default function ClientDetail() {
   const [creatingCase, setCreatingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
   const [startingPrs, setStartingPrs] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisMsg, setAnalysisMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   async function loadClient() {
     const { data } = await supabase.from('clients').select('*').eq('id', id).single();
@@ -110,6 +112,21 @@ export default function ClientDetail() {
     }).select('id').single();
     setStartingPrs(false);
     if (!error && data) navigate(`/advisor/prs/${(data as any).id}`);
+  }
+
+  async function runInsuranceAnalysis() {
+    if (!client || analyzing) return;
+    setAnalyzing(true);
+    setAnalysisMsg(null);
+    const { error } = await supabase.functions.invoke('insurance-brain', {
+      body: { mode: 'cfp', client_id: client.id },
+    });
+    setAnalyzing(false);
+    if (error) {
+      setAnalysisMsg({ ok: false, text: t(`Analysis failed: ${error.message}`, `分析失败：${error.message}`) });
+    } else {
+      setAnalysisMsg({ ok: true, text: t('Draft is being generated — check Telegram for the review link.', '分析草稿已生成，请留意 Telegram 审核通知。') });
+    }
   }
 
   async function openNewCaseModal() {
@@ -233,6 +250,14 @@ export default function ClientDetail() {
           </div>
         </div>
         <button
+          onClick={runInsuranceAnalysis}
+          disabled={analyzing}
+          className="flex items-center gap-1.5 bg-white border border-xin-gold/40 text-xin-blue text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-gold/10 transition-colors shrink-0 disabled:opacity-50"
+        >
+          <BrainCircuit size={15} />
+          {analyzing ? t('Analyzing...', '分析中...') : t('Insurance Analysis', '保险分析')}
+        </button>
+        <button
           onClick={startPrsApplication}
           disabled={startingPrs}
           className="flex items-center gap-1.5 bg-white border border-xin-blue/20 text-xin-blue text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-blue/5 transition-colors shrink-0 disabled:opacity-50"
@@ -248,6 +273,12 @@ export default function ClientDetail() {
           {t('New Case', '新建案件')}
         </button>
       </div>
+
+      {analysisMsg && (
+        <div className={`mb-4 px-4 py-2.5 rounded-xl text-sm font-medium ${analysisMsg.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+          {analysisMsg.text}
+        </div>
+      )}
 
       <HealthScoreCard clientId={client.id} />
 
