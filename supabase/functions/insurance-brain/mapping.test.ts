@@ -68,6 +68,7 @@ const cfpFixture = {
     number_of_dependants: 1,
     occupation: null,
     retirement_age: 60,
+    marital_status: "single",
   },
   inflows: [
     { amount: 8000, frequency: "monthly", category: "salary" },

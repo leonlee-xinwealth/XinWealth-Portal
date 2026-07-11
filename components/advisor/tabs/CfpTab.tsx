@@ -295,6 +295,11 @@ function InsuranceSectionCard({
     arr[i] = { ...arr[i], [k]: v };
     setDraft({ ...c, recommendations: arr });
   };
+  const setScen = (i: number, k: string, v: string) => {
+    const arr = [...(c.scenarios || [])];
+    arr[i] = { ...arr[i], [k]: v };
+    setDraft({ ...c, scenarios: arr });
+  };
 
   return (
     <div className="bg-white rounded-2xl shadow-sm p-5 space-y-6">
@@ -428,27 +433,71 @@ function InsuranceSectionCard({
         </div>
       </div>
 
-      {/* Gap analysis + death scenario */}
-      <div className="grid md:grid-cols-2 gap-3">
-        <div>
-          <h4 className="text-sm font-bold text-xin-blue border-l-4 border-xin-gold pl-2 mb-2">{t('Gap Analysis', '缺口分析')}</h4>
-          <textarea
-            value={c.gap_analysis ?? ''}
-            onChange={e => setDraft({ ...c, gap_analysis: e.target.value })}
-            disabled={readOnly}
-            rows={5}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-xin-blue disabled:bg-slate-50 disabled:text-slate-500"
-          />
-        </div>
-        <div>
-          <h4 className="text-sm font-bold text-xin-blue border-l-4 border-xin-gold pl-2 mb-2">{t('Death Scenario Note', '身故情景说明')}</h4>
-          <textarea
-            value={c.death_scenario_note ?? ''}
-            onChange={e => setDraft({ ...c, death_scenario_note: e.target.value })}
-            disabled={readOnly}
-            rows={5}
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-xin-blue disabled:bg-slate-50 disabled:text-slate-500"
-          />
+      {/* Gap analysis */}
+      <div>
+        <h4 className="text-sm font-bold text-xin-blue border-l-4 border-xin-gold pl-2 mb-2">{t('Gap Analysis', '缺口分析')}</h4>
+        <textarea
+          value={c.gap_analysis ?? ''}
+          onChange={e => setDraft({ ...c, gap_analysis: e.target.value })}
+          disabled={readOnly}
+          rows={4}
+          className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-xin-blue disabled:bg-slate-50 disabled:text-slate-500"
+        />
+      </div>
+
+      {/* Real-life scenarios */}
+      <div>
+        <h4 className="text-sm font-bold text-xin-blue border-l-4 border-xin-gold pl-2 mb-2">
+          {t('Real-Life Scenarios', '真实生活场景')} <span className="text-xs font-normal text-slate-400">({t('what-if impact', '如果发生的实际影响')})</span>
+        </h4>
+        <div className="space-y-3">
+          {(c.scenarios || []).map((s: any, i: number) => (
+            <div key={i} className="border border-slate-100 rounded-xl p-3 bg-slate-50/40">
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  value={s.title}
+                  onChange={e => setScen(i, 'title', e.target.value)}
+                  disabled={readOnly}
+                  placeholder={t('Scenario title', '场景标题')}
+                  className="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-xin-blue focus:outline-none focus:border-xin-blue disabled:bg-slate-50 disabled:text-slate-500"
+                />
+                {!readOnly && (
+                  <button
+                    onClick={() => setDraft({ ...c, scenarios: c.scenarios.filter((_: any, j: number) => j !== i) })}
+                    className="text-slate-300 hover:text-red-500"
+                    title={t('Remove', '删除')}
+                  >✕</button>
+                )}
+              </div>
+              {([
+                ['trigger', t('Trigger', '触发事件')],
+                ['life_impact', t('Life Impact', '对生活的冲击')],
+                ['protection_response', t('How Protection Helps', '保障如何化解')],
+              ] as [string, string][]).map(([k, label]) => (
+                <div key={k} className="mb-1.5">
+                  <label className="text-[11px] text-slate-500 block">{label}</label>
+                  <textarea
+                    value={s[k] ?? ''}
+                    onChange={e => setScen(i, k, e.target.value)}
+                    disabled={readOnly}
+                    rows={2}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-xin-blue disabled:bg-slate-50 disabled:text-slate-500"
+                  />
+                </div>
+              ))}
+            </div>
+          ))}
+          {!(c.scenarios || []).length && (
+            <p className="text-sm text-slate-400">{t('No scenarios — regenerate to produce them.', '暂无场景——重新生成即可产出。')}</p>
+          )}
+          {!readOnly && (
+            <button
+              onClick={() => setDraft({ ...c, scenarios: [...(c.scenarios || []), { title: '', trigger: '', life_impact: '', protection_response: '' }] })}
+              className="text-sm text-xin-blue font-semibold hover:underline"
+            >
+              + {t('Add scenario', '添加场景')}
+            </button>
+          )}
         </div>
       </div>
 

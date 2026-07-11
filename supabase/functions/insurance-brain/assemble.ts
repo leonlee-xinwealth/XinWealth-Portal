@@ -19,7 +19,15 @@ export interface SectionNarrative {
   }>;
   gap_analysis: string;
   recommendations: Array<{ title: string; detail: string; priority: number }>;
-  death_scenario_note: string;
+  // Real-life "what if" scenarios grounded in the client's actual assets,
+  // liabilities and family — trigger event → concrete life impact → how
+  // adequate protection resolves it (citing CNA figures).
+  scenarios: Array<{
+    title: string;
+    trigger: string;
+    life_impact: string;
+    protection_response: string;
+  }>;
 }
 
 export interface PolicyOverviewRow {
@@ -71,6 +79,6 @@ export function buildSectionContent(
     coverage_review: narrative.coverage_review,
     gap_analysis: narrative.gap_analysis,
     recommendations: narrative.recommendations,
-    death_scenario_note: narrative.death_scenario_note,
+    scenarios: narrative.scenarios,
   };
 }

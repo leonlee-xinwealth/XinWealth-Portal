@@ -98,6 +98,7 @@ export interface CfpFinancials {
     number_of_dependants: number;
     occupation: string | null;
     retirement_age: number | null;
+    marital_status: string | null;
   };
   inflows: Array<{ amount: number; frequency: string; category: string }>;
   liabilities: Array<{

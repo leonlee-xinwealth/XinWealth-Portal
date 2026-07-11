@@ -13,6 +13,7 @@ const financials: CfpFinancials = {
     number_of_dependants: 2,
     occupation: "Engineer",
     retirement_age: 60,
+    marital_status: "married",
   },
   inflows: [{ amount: 10000, frequency: "monthly", category: "salary" }],
   liabilities: [
@@ -64,7 +65,14 @@ const narrative: SectionNarrative = {
   recommendations: [
     { title: "Add term life", detail: "Cover the gap.", priority: 1 },
   ],
-  death_scenario_note: "Existing cover plus liquid assets fall short.",
+  scenarios: [
+    {
+      title: "Premature Death",
+      trigger: "The client passes away unexpectedly.",
+      life_impact: "The mortgaged family home faces a forced sale.",
+      protection_response: "An extra RM2,653,000 of life cover clears the loan.",
+    },
+  ],
 };
 
 Deno.test("buildSectionContent fills policy_overview from DB rows (code, not LLM)", () => {
@@ -99,5 +107,7 @@ Deno.test("buildSectionContent embeds CNA verbatim and narrative fields", () => 
   assertEquals(content.coverage_review.length, 1);
   assertEquals(content.recommendations[0].priority, 1);
   assert(content.gap_analysis.length > 0);
-  assert(content.death_scenario_note.length > 0);
+  assertEquals(content.scenarios.length, 1);
+  assertEquals(content.scenarios[0].title, "Premature Death");
+  assert(content.scenarios[0].life_impact.includes("family home"));
 });

@@ -24,6 +24,7 @@ const financials: CfpFinancials = {
     number_of_dependants: 2,
     occupation: "Engineer",
     retirement_age: 60,
+    marital_status: "married",
   },
   inflows: [{ amount: 10000, frequency: "monthly", category: "salary" }],
   liabilities: [
@@ -34,7 +35,7 @@ const financials: CfpFinancials = {
       monthly_payment: 2000,
     },
   ],
-  assets: [{ asset_type: "savings", current_value: 60000 }],
+  assets: [{ asset_type: "property", current_value: 630000 }],
   policies: [
     {
       policy_type: "life",
@@ -58,11 +59,22 @@ Deno.test("buildSectionPrompt never leaks PII sentinels to the LLM", () => {
   }
 });
 
-Deno.test("buildSectionPrompt includes derived age and CNA figures", () => {
+Deno.test("buildSectionPrompt includes derived age, asset composition and CNA figures", () => {
   const cna = computeCna(buildCfpCnaInput(financials));
   const prompt = buildSectionPrompt(cna, financials);
   assert(prompt.includes('"age":'), "derived age missing");
   assert(prompt.includes(String(cna.needs.total_life)), "CNA total_life missing");
   assert(prompt.includes("Insurance Planning"), "section framing missing");
   assert(prompt.includes("the client"), "anonymous reference missing");
+  // Asset composition (type + value, no names) must reach the LLM so it can
+  // ground scenarios in the real thing at stake.
+  assert(prompt.includes("property"), "asset composition missing");
+  assert(prompt.includes('"marital_status"'), "marital status missing");
+});
+
+Deno.test("buildSectionPrompt instructs real-life scenario framing", () => {
+  const cna = computeCna(buildCfpCnaInput(financials));
+  const prompt = buildSectionPrompt(cna, financials);
+  assert(prompt.includes("scenarios"), "scenarios task missing");
+  assert(prompt.includes("family home"), "life-impact framing missing");
 });

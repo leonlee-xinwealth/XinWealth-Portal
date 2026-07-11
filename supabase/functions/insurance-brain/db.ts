@@ -13,7 +13,7 @@ export async function fetchClientFinancials(
   const { data: client, error } = await db
     .from("clients")
     .select(
-      "id, full_name, email, phone, date_of_birth, number_of_dependants, occupation, retirement_age",
+      "id, full_name, email, phone, date_of_birth, number_of_dependants, occupation, retirement_age, marital_status",
     )
     .eq("id", clientId)
     .single();
