@@ -1,18 +1,16 @@
 // Insurance Brain (保险佬) — paraplanner agent #1, analysis core.
-// mode:'prospect'  → deterministic CNA for the n8n policy-review funnel engine.
-// mode:'cfp'       → full deep-dive for an existing client: DB data → CNA →
-//                    Gemini report draft → policy_review_requests → n8n notify.
+// mode:'prospect'     → deterministic CNA for the n8n policy-review funnel engine.
+// mode:'cfp_section'  → drafts the Insurance Planning section of a CFP report:
+//                       DB data → CNA → Gemini narrative → report_sections.
+//                       In-portal only; no Telegram/n8n involvement.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { computeCna } from "./cna.ts";
-import {
-  annualPremiumTotal,
-  buildCfpCnaInput,
-  buildProspectCnaInput,
-} from "./mapping.ts";
+import { buildCfpCnaInput, buildProspectCnaInput } from "./mapping.ts";
 import { fetchClientFinancials } from "./db.ts";
-import { generateReport, placeholderReport } from "./report.ts";
+import { generateSectionNarrative } from "./section.ts";
+import { buildSectionContent } from "./assemble.ts";
 import { type AgentConfig, loadConfig } from "./config.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -96,10 +94,10 @@ serve(async (req) => {
       return jsonOk({ cna });
     }
 
-    if (body.mode === "cfp") {
-      const clientId = body.client_id;
-      if (!clientId) return jsonError("client_id required", 400);
-      return await runCfp(serviceClient, clientId, advisorId, cfg);
+    if (body.mode === "cfp_section") {
+      const reportId = body.report_id;
+      if (!reportId) return jsonError("report_id required", 400);
+      return await runCfpSection(serviceClient, reportId, advisorId, cfg);
     }
 
     return jsonError("Unknown mode", 400);
@@ -108,124 +106,75 @@ serve(async (req) => {
   }
 });
 
-async function runCfp(
+async function runCfpSection(
   // deno-lint-ignore no-explicit-any
   db: any,
-  clientId: string,
+  reportId: string,
   advisorId: string | null,
   cfg: AgentConfig,
 ) {
-  // Advisor-JWT callers may only analyse their own clients.
-  const { data: clientRow } = await db
-    .from("clients")
-    .select("id, advisor_id, full_name, email, phone")
-    .eq("id", clientId)
+  const { data: report } = await db
+    .from("financial_reports")
+    .select("id, client_id, advisor_id")
+    .eq("id", reportId)
     .single();
-  if (!clientRow) return jsonError("Client not found", 404);
-  if (advisorId && clientRow.advisor_id !== advisorId) {
+  if (!report) return jsonError("Report not found", 404);
+  // Advisor-JWT callers may only work on their own clients' reports.
+  if (advisorId && report.advisor_id !== advisorId) {
     return jsonError("Forbidden", 403);
   }
 
-  const reportToken = crypto.randomUUID();
-  const reviewToken = crypto.randomUUID();
-  const { data: request, error: insertErr } = await db
-    .from("policy_review_requests")
-    .insert({
-      token: reportToken,
-      review_token: reviewToken,
-      name: clientRow.full_name,
-      email: clientRow.email,
-      whatsapp: clientRow.phone,
-      source: "cfp",
-      agent: "insurance_brain",
-      client_id: clientId,
-      status: "processing",
-    })
+  // The function is the sole writer of the section row's lifecycle.
+  const { data: section, error: upsertErr } = await db
+    .from("report_sections")
+    .upsert(
+      {
+        report_id: report.id,
+        section_type: "insurance_planning",
+        agent: "insurance_brain",
+        status: "generating",
+        error: null,
+      },
+      { onConflict: "report_id,section_type" },
+    )
     .select("id")
     .single();
-  if (insertErr || !request) {
-    return jsonError(`Insert failed: ${insertErr?.message}`, 500);
+  if (upsertErr || !section) {
+    return jsonError(`Section upsert failed: ${upsertErr?.message}`, 500);
   }
 
   try {
-    const financials = await fetchClientFinancials(db, clientId);
+    const financials = await fetchClientFinancials(db, report.client_id);
     if (!financials) throw new Error("Client financial data unavailable");
 
     const cna = computeCna(buildCfpCnaInput(financials));
-
-    let report;
-    try {
-      report = await generateReport(cna, financials, cfg.GEMINI_API_KEY);
-    } catch (_e) {
-      report = placeholderReport(); // keep the lead alive; advisor edits manually
-    }
-
-    const policySummaries = financials.policies.map((p, i) => ({
-      policy_id: `db-${i}`,
-      insurer: p.provider ?? "unknown",
-      policy_type: p.policy_type,
-      plan_name: "unknown",
-      sum_assured: p.sum_assured != null ? String(p.sum_assured) : "unknown",
-      annual_premium: p.premium != null
-        ? String(
-          annualPremiumTotal([p]),
-        )
-        : "unknown",
-      payment_term: "unknown",
-      highlights: [],
-      confidence: "high", // structured DB data, not OCR
-    }));
-
-    const draft = {
-      engine: "insurance-brain-v1",
-      source: "cfp",
-      policy_summaries: policySummaries,
-      gaps: report.gaps,
-      recommendations: report.recommendations,
-      overall_comment: report.overall_comment,
+    const narrative = await generateSectionNarrative(
       cna,
-      needs_human_ids: [],
-    };
+      financials,
+      cfg.GEMINI_API_KEY,
+    );
+    const content = buildSectionContent(financials, cna, narrative);
 
-    await db
-      .from("policy_review_requests")
-      .update({ draft_json: draft, status: "draft_ready", error: null })
-      .eq("id", request.id);
+    const { data: updated, error: updateErr } = await db
+      .from("report_sections")
+      .update({
+        content,
+        status: "draft",
+        generated_at: new Date().toISOString(),
+        error: null,
+      })
+      .eq("id", section.id)
+      .select("*")
+      .single();
+    if (updateErr) throw new Error(updateErr.message);
 
-    await notifyN8n(cfg, {
-      request_id: request.id,
-      review_token: reviewToken,
-      name: clientRow.full_name,
-      source: "cfp",
-      life_gap: cna.gaps.find((g) => g.key === "life")?.gap ?? null,
-      ci_gap: cna.gaps.find((g) => g.key === "ci")?.gap ?? null,
-      insufficient: cna.insufficient,
-    });
-
-    return jsonOk({ request_id: request.id, review_token: reviewToken });
+    return jsonOk({ section: updated });
   } catch (e) {
     const message = (e as Error)?.message ?? "Unknown error";
     await db
-      .from("policy_review_requests")
+      .from("report_sections")
       .update({ status: "failed", error: message })
-      .eq("id", request.id);
+      .eq("id", section.id);
     return jsonError(message, 500);
-  }
-}
-
-async function notifyN8n(cfg: AgentConfig, payload: Record<string, unknown>) {
-  if (!cfg.N8N_NOTIFY_WEBHOOK_URL) return;
-  try {
-    await fetch(cfg.N8N_NOTIFY_WEBHOOK_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-agent-secret": cfg.AGENT_SHARED_SECRET,
-      },
-      body: JSON.stringify(payload),
-    });
-  } catch (_e) {
-    // Telegram notification failure must not fail the analysis itself;
-    // the n8n error workflow covers alerting.
   }
 }

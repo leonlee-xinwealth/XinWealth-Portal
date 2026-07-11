@@ -12,11 +12,12 @@ import NetworthTab from '../tabs/NetworthTab';
 import InsuranceTab from '../tabs/InsuranceTab';
 import ActivityTab from '../tabs/ActivityTab';
 import FormKitTab from '../tabs/FormKitTab';
+import CfpTab from '../tabs/CfpTab';
 import PortfolioTab from '../tabs/PortfolioTab';
 import HealthScoreCard from '../components/HealthScoreCard';
 import { getCaseTemplate, CASE_TYPE_LABELS } from '../cases/caseTemplates';
 
-type Tab = 'activity' | 'profile' | 'review' | 'cashflow' | 'networth' | 'insurance' | 'portfolio' | 'formkit';
+type Tab = 'activity' | 'profile' | 'review' | 'cashflow' | 'networth' | 'insurance' | 'portfolio' | 'cfp' | 'formkit';
 
 interface Policy {
   id: string;
@@ -52,8 +53,6 @@ export default function ClientDetail() {
   const [creatingCase, setCreatingCase] = useState(false);
   const [caseError, setCaseError] = useState('');
   const [startingPrs, setStartingPrs] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysisMsg, setAnalysisMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   async function loadClient() {
     const { data } = await supabase.from('clients').select('*').eq('id', id).single();
@@ -112,21 +111,6 @@ export default function ClientDetail() {
     }).select('id').single();
     setStartingPrs(false);
     if (!error && data) navigate(`/advisor/prs/${(data as any).id}`);
-  }
-
-  async function runInsuranceAnalysis() {
-    if (!client || analyzing) return;
-    setAnalyzing(true);
-    setAnalysisMsg(null);
-    const { error } = await supabase.functions.invoke('insurance-brain', {
-      body: { mode: 'cfp', client_id: client.id },
-    });
-    setAnalyzing(false);
-    if (error) {
-      setAnalysisMsg({ ok: false, text: t(`Analysis failed: ${error.message}`, `分析失败：${error.message}`) });
-    } else {
-      setAnalysisMsg({ ok: true, text: t('Draft is being generated — check Telegram for the review link.', '分析草稿已生成，请留意 Telegram 审核通知。') });
-    }
   }
 
   async function openNewCaseModal() {
@@ -194,6 +178,7 @@ export default function ClientDetail() {
     { key: 'networth', en: 'Net Worth', zh: '净资产', icon: '📈' },
     { key: 'insurance', en: 'Insurance', zh: '保险', icon: '🛡️' },
     { key: 'portfolio', en: 'Portfolio', zh: '投资组合', icon: '📊' },
+    { key: 'cfp', en: 'CFP Report', zh: 'CFP 报告', icon: '🧭' },
     { key: 'formkit', en: 'Form Kit', zh: '表格资料', icon: '📋' },
   ];
 
@@ -250,12 +235,11 @@ export default function ClientDetail() {
           </div>
         </div>
         <button
-          onClick={runInsuranceAnalysis}
-          disabled={analyzing}
-          className="flex items-center gap-1.5 bg-white border border-xin-gold/40 text-xin-blue text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-gold/10 transition-colors shrink-0 disabled:opacity-50"
+          onClick={() => setTab('cfp')}
+          className="flex items-center gap-1.5 bg-white border border-xin-gold/40 text-xin-blue text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-gold/10 transition-colors shrink-0"
         >
           <BrainCircuit size={15} />
-          {analyzing ? t('Analyzing...', '分析中...') : t('Insurance Analysis', '保险分析')}
+          {t('CFP Report', 'CFP 报告')}
         </button>
         <button
           onClick={startPrsApplication}
@@ -273,12 +257,6 @@ export default function ClientDetail() {
           {t('New Case', '新建案件')}
         </button>
       </div>
-
-      {analysisMsg && (
-        <div className={`mb-4 px-4 py-2.5 rounded-xl text-sm font-medium ${analysisMsg.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
-          {analysisMsg.text}
-        </div>
-      )}
 
       <HealthScoreCard clientId={client.id} />
 
@@ -311,6 +289,7 @@ export default function ClientDetail() {
       {tab === 'networth' && <NetworthTab clientId={client.id} />}
       {tab === 'insurance' && <InsuranceTab clientId={client.id} />}
       {tab === 'portfolio' && <PortfolioTab clientId={client.id} />}
+      {tab === 'cfp' && <CfpTab clientId={client.id} advisorId={client.advisor_id} />}
       {tab === 'formkit' && <FormKitTab client={client} />}
 
       {/* New Case Modal */}

@@ -113,6 +113,13 @@ export interface CfpFinancials {
     sum_assured: number | null;
     premium: number | null;
     premium_frequency: string | null;
+    // Extended fields for the CFP section's policy_overview table. They are
+    // filled into the section JSON by code AFTER the LLM call — never into
+    // prompts (enforced by section.test.ts PII sentinels).
+    policy_number?: string | null;
+    cash_value?: number | null;
+    start_date?: string | null;
+    end_date?: string | null;
   }>;
 }
 

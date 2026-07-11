@@ -38,7 +38,9 @@ export async function fetchClientFinancials(
         .eq("client_id", clientId),
       db
         .from("insurance_policies")
-        .select("policy_type, provider, sum_assured, premium, premium_frequency")
+        .select(
+          "policy_type, provider, sum_assured, premium, premium_frequency, policy_number, cash_value, start_date, end_date",
+        )
         .eq("client_id", clientId),
     ]);
 
