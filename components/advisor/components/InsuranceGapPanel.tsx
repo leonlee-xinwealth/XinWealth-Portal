@@ -35,7 +35,7 @@ export default function InsuranceGapPanel({ clientId }: { clientId: string }) {
     try {
       const [{ data: cashflow, error: cErr }, { data: policies, error: pErr }] = await Promise.all([
         supabase.from('cashflow_entries').select('amount, frequency, direction').eq('client_id', clientId),
-        supabase.from('insurance_policies').select('sum_assured, policy_type, end_date').eq('client_id', clientId),
+        supabase.from('insurance_policies').select('sum_assured, policy_type, end_date, policy_riders(category, sum_assured, room_board_daily, annual_limit)').eq('client_id', clientId),
       ]);
       if (cErr || pErr) throw (cErr || pErr);
 
@@ -46,19 +46,53 @@ export default function InsuranceGapPanel({ clientId }: { clientId: string }) {
       setAnnualIncome(incomeAnnual);
 
       const activePolicies = (policies || []).filter((p: any) => !p.end_date || p.end_date >= today);
-      const sumAssuredByTypes = (types: string[]) => activePolicies
-        .filter((p: any) => types.includes(String(p.policy_type || '').toLowerCase()))
-        .reduce((s: number, p: any) => s + safeNumber(p.sum_assured), 0);
+      const allRiders = activePolicies.flatMap((p: any) => p.policy_riders || []);
+      const riderSumByCategories = (cats: string[]) => allRiders
+        .filter((r: any) => cats.includes(String(r.category || '').toLowerCase()))
+        .reduce((s: number, r: any) => s + safeNumber(r.sum_assured), 0);
 
-      const actualLife = sumAssuredByTypes(['life', 'investment_linked']);
-      const actualCI = sumAssuredByTypes(['critical_illness']);
-      const hasMedical = activePolicies.some((p: any) => String(p.policy_type || '').toLowerCase() === 'medical');
+      // Life = base plan death/TPD sum assured + any additional 'life' riders.
+      const actualLife = activePolicies
+        .filter((p: any) => ['life', 'investment_linked'].includes(String(p.policy_type || '').toLowerCase()))
+        .reduce((s: number, p: any) => s + safeNumber(p.sum_assured), 0)
+        + riderSumByCategories(['life']);
+
+      // Critical illness now comes from CI/cancer riders, with a fallback for any
+      // legacy row that still has the flat policy_type='critical_illness'.
+      const actualCI = riderSumByCategories(['critical_illness', 'cancer'])
+        + activePolicies
+          .filter((p: any) => String(p.policy_type || '').toLowerCase() === 'critical_illness')
+          .reduce((s: number, p: any) => s + safeNumber(p.sum_assured), 0);
+
+      const actualAccident = riderSumByCategories(['accident']);
+
+      const medicalRiders = allRiders.filter((r: any) => String(r.category || '').toLowerCase() === 'medical');
+      const hasMedical = medicalRiders.length > 0
+        || activePolicies.some((p: any) => String(p.policy_type || '').toLowerCase() === 'medical');
+      let medicalActual = hasMedical ? t('Yes', '有') : t('None', '无');
+      if (medicalRiders.length) {
+        const maxAnnual = Math.max(0, ...medicalRiders.map((r: any) => safeNumber(r.annual_limit)));
+        const maxRB = Math.max(0, ...medicalRiders.map((r: any) => safeNumber(r.room_board_daily)));
+        const bits: string[] = [];
+        if (maxRB > 0) bits.push(`RM${fmtRM(maxRB)}/day`);
+        if (maxAnnual > 0) bits.push(`RM${fmtRM(maxAnnual)} annual`);
+        if (bits.length) medicalActual = `${t('Yes', '有')} (${bits.join(' · ')})`;
+      }
+
+      const accidentRow: Row = {
+        label: t('Accident', '意外保障'),
+        recommended: '—',
+        actual: actualAccident > 0 ? `RM ${fmtRM(actualAccident)}` : 'RM 0',
+        gap: '—',
+        tone: 'na',
+      };
 
       if (!incomeAnnual) {
         setRows([
           { label: t('Life Insurance', '人寿保险'), recommended: '—', actual: actualLife > 0 ? `RM ${fmtRM(actualLife)}` : 'RM 0', gap: '—', tone: 'na' },
           { label: t('Critical Illness', '重大疾病'), recommended: '—', actual: actualCI > 0 ? `RM ${fmtRM(actualCI)}` : 'RM 0', gap: '—', tone: 'na' },
-          { label: t('Medical Card', '医疗卡'), recommended: t('Required', '需要'), actual: hasMedical ? t('Yes', '有') : t('None', '无'), gap: hasMedical ? t('OK', '正常') : t('Missing', '缺失'), tone: hasMedical ? 'good' : 'bad' },
+          { label: t('Medical Card', '医疗卡'), recommended: t('Required', '需要'), actual: medicalActual, gap: hasMedical ? t('OK', '正常') : t('Missing', '缺失'), tone: hasMedical ? 'good' : 'bad' },
+          accidentRow,
         ]);
         return;
       }
@@ -89,10 +123,11 @@ export default function InsuranceGapPanel({ clientId }: { clientId: string }) {
         {
           label: t('Medical Card', '医疗卡'),
           recommended: t('Required', '需要'),
-          actual: hasMedical ? t('Yes', '有') : t('None', '无'),
+          actual: medicalActual,
           gap: hasMedical ? t('OK', '正常') : t('Missing', '缺失'),
           tone: hasMedical ? 'good' : 'bad',
-        }
+        },
+        accidentRow,
       ]);
     } catch (e: any) {
       setErr(e?.message || 'Failed to load');
@@ -162,4 +197,3 @@ export default function InsuranceGapPanel({ clientId }: { clientId: string }) {
     </div>
   );
 }
-
