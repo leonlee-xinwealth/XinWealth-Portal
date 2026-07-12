@@ -121,8 +121,22 @@ export interface CfpFinancials {
     cash_value?: number | null;
     start_date?: string | null;
     end_date?: string | null;
+    // Per-policy riders — each carries its own coverage category + amount.
+    // Non-identifying fields only (no rider/product names) so they can safely
+    // feed the LLM prompt.
+    policy_riders?: Array<{
+      category: string;
+      sum_assured: number | null;
+      room_board_daily?: number | null;
+      annual_limit?: number | null;
+      lifetime_limit?: number | null;
+    }>;
   }>;
 }
+
+// Rider categories that count toward each protection type (mirrors the advisor
+// portal's InsuranceGapPanel so the report matches what the advisor sees).
+const CI_RIDER_CATEGORIES = ["critical_illness", "cancer"];
 
 export function annualizeInflows(
   inflows: CfpFinancials["inflows"],
@@ -144,14 +158,33 @@ export function annualPremiumTotal(
   );
 }
 
-/** Build CnaInput from live DB financials. */
+/** Build CnaInput from live DB financials.
+ * Coverage now comes from the base plan (death/TPD) PLUS its riders — a plan is
+ * a base benefit with categorised riders (medical, CI, cancer, accident, …), so
+ * CI/medical live on riders, not the flat policy_type. */
 export function buildCfpCnaInput(f: CfpFinancials): CnaInput {
+  const allRiders = f.policies.flatMap((p) => p.policy_riders ?? []);
+  const riderSumByCategories = (cats: string[]) =>
+    allRiders
+      .filter((r) => cats.includes(r.category))
+      .reduce((s, r) => s + (r.sum_assured ?? 0), 0);
+
+  // Life = base death/TPD sum (life/ILP plans) + any additional 'life' riders.
   const lifeCover = f.policies
     .filter((p) => LIFE_POLICY_TYPES.includes(p.policy_type))
-    .reduce((s, p) => s + (p.sum_assured ?? 0), 0);
-  const ciCover = f.policies
-    .filter((p) => p.policy_type === "critical_illness")
-    .reduce((s, p) => s + (p.sum_assured ?? 0), 0);
+    .reduce((s, p) => s + (p.sum_assured ?? 0), 0) +
+    riderSumByCategories(["life"]);
+
+  // Critical illness = CI/cancer riders, plus any legacy row still tagged with
+  // the flat policy_type='critical_illness'.
+  const ciCover = riderSumByCategories(CI_RIDER_CATEGORIES) +
+    f.policies
+      .filter((p) => p.policy_type === "critical_illness")
+      .reduce((s, p) => s + (p.sum_assured ?? 0), 0);
+
+  const hasMedical = f.policies.some((p) => p.policy_type === "medical") ||
+    allRiders.some((r) => r.category === "medical");
+
   return {
     annual_income: annualizeInflows(f.inflows),
     liabilities_total: f.liabilities.reduce(
@@ -163,7 +196,7 @@ export function buildCfpCnaInput(f: CfpFinancials): CnaInput {
       .reduce((s, a) => s + (a.current_value ?? 0), 0),
     life_cover: lifeCover,
     ci_cover: ciCover,
-    has_medical: f.policies.some((p) => p.policy_type === "medical"),
+    has_medical: hasMedical,
     dependents: f.client.number_of_dependants ?? 0,
   };
 }

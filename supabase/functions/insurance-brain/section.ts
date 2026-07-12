@@ -107,11 +107,20 @@ export function buildSectionPrompt(
     dependents: financials.client.number_of_dependants,
     retirement_age: financials.client.retirement_age,
     annual_premium_total: annualPremiumTotal(financials.policies),
+    // policy_type is the BASE plan's benefit (usually death/TPD). Riders carry
+    // the rest of the coverage by category — non-identifying fields only (no
+    // rider/product names) so this stays within the PII discipline.
     policies: financials.policies.map((p) => ({
       policy_type: p.policy_type,
       sum_assured: p.sum_assured,
       premium: p.premium,
       premium_frequency: p.premium_frequency,
+      riders: (p.policy_riders ?? []).map((r) => ({
+        category: r.category,
+        sum_assured: r.sum_assured,
+        room_board_daily: r.room_board_daily,
+        annual_limit: r.annual_limit,
+      })),
     })),
     liabilities: financials.liabilities.map((l) => ({
       liability_type: l.liability_type,
@@ -142,9 +151,13 @@ export function buildSectionPrompt(
     '   phrase such as "Within 3 months" — the advisor will adjust), remarks.',
     "2) coverage_review — one entry per category (life, critical_illness, medical,",
     "   accident, disability_income, savings_retirement). level is one of",
-    "   adequate/fair/insufficient/none/unknown; commentary ≤ 80 words. life and",
-    "   critical_illness MUST cite the CNA need/covered/gap figures. Categories",
-    "   with no data get level unknown.",
+    "   adequate/fair/insufficient/none/unknown; commentary ≤ 80 words. Attribute",
+    "   coverage from BOTH the base policy_type AND its riders[] (each rider's",
+    "   category maps to a review category: critical_illness/cancer→critical_illness,",
+    "   medical→medical, accident→accident, income/disability→disability_income).",
+    "   A category with a matching rider or base policy is NOT none. life and",
+    "   critical_illness MUST cite the CNA need/covered/gap figures. Only categories",
+    "   with no base policy and no rider get level unknown.",
     "3) gap_analysis — one flowing paragraph. Do NOT just restate that the",
     "   client is under-protected; translate each major gap into a concrete",
     "   real-life consequence grounded in THIS client's actual situation:",

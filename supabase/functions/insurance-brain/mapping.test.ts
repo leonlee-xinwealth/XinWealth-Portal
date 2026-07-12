@@ -115,6 +115,30 @@ Deno.test("buildCfpCnaInput derives all figures from DB rows", () => {
   assertEquals(input.dependents, 1);
 });
 
+Deno.test("buildCfpCnaInput aggregates coverage from policy riders", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      {
+        // Base ILP plan whose own benefit is death/TPD but sum_assured unset;
+        // CI + medical are recorded as riders (the real-world case).
+        policy_type: "investment_linked",
+        provider: "GE",
+        sum_assured: null,
+        premium: 750,
+        premium_frequency: "monthly",
+        policy_riders: [
+          { category: "critical_illness", sum_assured: 500000 },
+          { category: "medical", sum_assured: null, room_board_daily: 200 },
+        ],
+      },
+    ],
+  });
+  assertEquals(input.life_cover, 0);
+  assertEquals(input.ci_cover, 500000);
+  assertEquals(input.has_medical, true);
+});
+
 Deno.test("annualizeInflows and annualPremiumTotal use frequency multipliers", () => {
   assertEquals(annualizeInflows(cfpFixture.inflows), 108000);
   assertEquals(annualPremiumTotal(cfpFixture.policies), 3600); // 200×12 + 1200
