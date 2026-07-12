@@ -19,8 +19,6 @@ const COVERAGE_CATEGORIES = [
   "critical_illness",
   "medical",
   "accident",
-  "disability_income",
-  "savings_retirement",
 ];
 
 const SECTION_RESPONSE_SCHEMA = {
@@ -150,11 +148,10 @@ export function buildSectionPrompt(
     '   action_plan (concrete next steps), expected_completion_date (a timeframe',
     '   phrase such as "Within 3 months" — the advisor will adjust), remarks.',
     "2) coverage_review — one entry per category (life, critical_illness, medical,",
-    "   accident, disability_income, savings_retirement). level is one of",
-    "   adequate/fair/insufficient/none/unknown; commentary ≤ 80 words. Attribute",
-    "   coverage from BOTH the base policy_type AND its riders[] (each rider's",
-    "   category maps to a review category: critical_illness/cancer→critical_illness,",
-    "   medical→medical, accident→accident, income/disability→disability_income).",
+    "   accident). level is one of adequate/fair/insufficient/none/unknown;",
+    "   commentary ≤ 80 words. Attribute coverage from BOTH the base policy_type",
+    "   AND its riders[] (each rider's category maps to a review category:",
+    "   critical_illness/cancer→critical_illness, medical→medical, accident→accident).",
     "   A category with a matching rider or base policy is NOT none. life and",
     "   critical_illness MUST cite the CNA need/covered/gap figures. Only categories",
     "   with no base policy and no rider get level unknown.",
