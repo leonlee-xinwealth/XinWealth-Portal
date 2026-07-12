@@ -18,7 +18,7 @@ const toneText: Record<string, string> = {
   na: 'text-slate-400',
 };
 
-export default function InsuranceGapPanel({ clientId }: { clientId: string }) {
+export default function InsuranceGapPanel({ clientId, refreshKey }: { clientId: string; refreshKey?: number }) {
   const { language } = useLanguage();
   const t = (en: string, zh: string) => language === 'zh' ? zh : en;
 
@@ -138,7 +138,7 @@ export default function InsuranceGapPanel({ clientId }: { clientId: string }) {
     }
   }
 
-  useEffect(() => { load(); }, [clientId]);
+  useEffect(() => { load(); }, [clientId, refreshKey]);
 
   if (loading) {
     return (

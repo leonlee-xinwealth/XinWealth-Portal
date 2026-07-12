@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Plus, X } from 'lucide-react';
+import { Plus, X, Pencil, Trash2 } from 'lucide-react';
 import InsuranceGapPanel from '../components/InsuranceGapPanel';
 
 const TYPES: [string,string][] = [['life','Life / 人寿'],['medical','Medical / 医疗'],['critical_illness','Critical Illness / 重疾'],['disability','Disability / 残障'],['investment_linked','Investment-Linked / 投资联结'],['accident','Accident / 意外'],['property','Property / 财产'],['other','Other / 其他']];
@@ -35,6 +35,9 @@ type RiderForm = {
   copay_type: string; copay_amount: string; copay_basis: string; copay_cap: string;
 };
 const emptyRider = (): RiderForm => ({ key: Math.random().toString(36).slice(2), rider_id:'', rider_name:'', category:'', sum_assured:'', premium_term_value:'', premium_term_unit:'', coverage_term_value:'', coverage_term_unit:'', tier_name:'', room_board_daily:'', annual_limit:'', lifetime_limit:'', pre_hosp_days:'', post_hosp_days:'', icu_days:'', copay_type:'', copay_amount:'', copay_basis:'', copay_cap:'' });
+const s = (v: any) => v == null ? '' : String(v);
+// Rebuild the editable rider form from a saved policy_riders row.
+const riderFromRow = (r: any): RiderForm => ({ key: Math.random().toString(36).slice(2), rider_id: s(r.rider_id), rider_name: s(r.rider_name), category: s(r.category), sum_assured: s(r.sum_assured), premium_term_value: s(r.premium_term_value), premium_term_unit: s(r.premium_term_unit), coverage_term_value: s(r.coverage_term_value), coverage_term_unit: s(r.coverage_term_unit), tier_name: s(r.tier_name), room_board_daily: s(r.room_board_daily), annual_limit: s(r.annual_limit), lifetime_limit: s(r.lifetime_limit), pre_hosp_days: s(r.pre_hosp_days), post_hosp_days: s(r.post_hosp_days), icu_days: s(r.icu_days), copay_type: s(r.copay_type), copay_amount: s(r.copay_amount), copay_basis: s(r.copay_basis), copay_cap: s(r.copay_cap) });
 
 const copayBasisShort = (b: string) => b === 'per_disability' ? 'disability' : b === 'per_year' ? 'year' : b;
 function medicalSummary(r: any): string {
@@ -67,8 +70,11 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
   const [riderTiersCache, setRiderTiersCache] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState('');
+  const [gapVersion, setGapVersion] = useState(0);
   const set = (k: string, v: string) => setForm(p => ({ ...p, [k]: v }));
 
   async function load() {
@@ -163,49 +169,86 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
     }
   }
 
-  async function handleAdd() {
+  function openAdd() {
+    setEditingId(null); setForm(EMPTY); setSaveErr(''); setShowForm(true);
+  }
+  function openEdit(p: any) {
+    setEditingId(p.id);
+    setForm({
+      policy_type: s(p.policy_type), provider: s(p.provider), plan_name: s(p.plan_name), plan_id: s(p.plan_id),
+      policy_holder: s(p.policy_holder), policy_number: s(p.policy_number), sum_assured: s(p.sum_assured),
+      cash_value: s(p.cash_value), premium: s(p.premium), premium_frequency: s(p.premium_frequency) || 'annual',
+      insured_person: s(p.insured_person), start_date: s(p.start_date), end_date: s(p.end_date),
+      premium_term_value: s(p.premium_term_value), premium_term_unit: s(p.premium_term_unit),
+      coverage_term_value: s(p.coverage_term_value), coverage_term_unit: s(p.coverage_term_unit),
+      riders: (p.policy_riders || []).map(riderFromRow),
+    });
+    setSaveErr(''); setShowForm(true);
+    // Preload tiers so the medical tier dropdown is populated when editing.
+    (p.policy_riders || []).forEach((r: any) => { if (r.rider_id && r.category === 'medical') loadTiersFor(r.rider_id); });
+  }
+  function closeForm() { setShowForm(false); setEditingId(null); setForm(EMPTY); setSaveErr(''); }
+
+  function riderPayload(r: RiderForm, i: number, policyId: string) {
+    return {
+      policy_id: policyId,
+      rider_id: r.rider_id || null,
+      rider_name: r.rider_name || null,
+      category: r.category || 'other',
+      sum_assured: r.sum_assured ? parseFloat(r.sum_assured) : null,
+      premium_term_value: r.premium_term_value ? parseFloat(r.premium_term_value) : null,
+      premium_term_unit: r.premium_term_unit || null,
+      coverage_term_value: r.coverage_term_value ? parseFloat(r.coverage_term_value) : null,
+      coverage_term_unit: r.coverage_term_unit || null,
+      tier_name: r.tier_name || null,
+      room_board_daily: r.room_board_daily ? parseFloat(r.room_board_daily) : null,
+      annual_limit: r.annual_limit ? parseFloat(r.annual_limit) : null,
+      lifetime_limit: r.lifetime_limit ? parseFloat(r.lifetime_limit) : null,
+      pre_hosp_days: r.pre_hosp_days ? parseInt(r.pre_hosp_days,10) : null,
+      post_hosp_days: r.post_hosp_days ? parseInt(r.post_hosp_days,10) : null,
+      icu_days: r.icu_days ? parseInt(r.icu_days,10) : null,
+      copay_type: r.copay_type || null,
+      copay_amount: r.copay_amount ? parseFloat(r.copay_amount) : null,
+      copay_basis: r.copay_basis || null,
+      copay_cap: r.copay_cap ? parseFloat(r.copay_cap) : null,
+      sort_order: i,
+    };
+  }
+
+  async function handleSave() {
     if (!form.provider) return;
-    setSaving(true);
+    setSaving(true); setSaveErr('');
     await ensureInsurer(form.provider);
-    const { data: inserted, error } = await supabase.from('insurance_policies').insert({ client_id: clientId, policy_type: form.policy_type||'other', provider: form.provider, plan_name: form.plan_name||null, plan_id: form.plan_id||null, policy_holder: form.policy_holder||null, policy_number: form.policy_number||null, sum_assured: form.sum_assured?parseFloat(form.sum_assured):null, cash_value: form.cash_value?parseFloat(form.cash_value):null, premium: form.premium?parseFloat(form.premium):null, premium_frequency: form.premium_frequency||null, insured_person: form.insured_person||null, start_date: form.start_date||null, end_date: form.end_date||null, premium_term_value: form.premium_term_value?parseFloat(form.premium_term_value):null, premium_term_unit: form.premium_term_unit||null, coverage_term_value: form.coverage_term_value?parseFloat(form.coverage_term_value):null, coverage_term_unit: form.coverage_term_unit||null }).select('id').single();
-    if (!error && inserted) {
-      const riderRows = form.riders.filter(r => r.rider_name).map((r, i) => ({
-        policy_id: inserted.id,
-        rider_id: r.rider_id || null,
-        rider_name: r.rider_name,
-        category: r.category || 'other',
-        sum_assured: r.sum_assured ? parseFloat(r.sum_assured) : null,
-        premium_term_value: r.premium_term_value ? parseFloat(r.premium_term_value) : null,
-        premium_term_unit: r.premium_term_unit || null,
-        coverage_term_value: r.coverage_term_value ? parseFloat(r.coverage_term_value) : null,
-        coverage_term_unit: r.coverage_term_unit || null,
-        tier_name: r.tier_name || null,
-        room_board_daily: r.room_board_daily ? parseFloat(r.room_board_daily) : null,
-        annual_limit: r.annual_limit ? parseFloat(r.annual_limit) : null,
-        lifetime_limit: r.lifetime_limit ? parseFloat(r.lifetime_limit) : null,
-        pre_hosp_days: r.pre_hosp_days ? parseInt(r.pre_hosp_days,10) : null,
-        post_hosp_days: r.post_hosp_days ? parseInt(r.post_hosp_days,10) : null,
-        icu_days: r.icu_days ? parseInt(r.icu_days,10) : null,
-        copay_type: r.copay_type || null,
-        copay_amount: r.copay_amount ? parseFloat(r.copay_amount) : null,
-        copay_basis: r.copay_basis || null,
-        copay_cap: r.copay_cap ? parseFloat(r.copay_cap) : null,
-        sort_order: i,
-      }));
-      if (riderRows.length) await supabase.from('policy_riders').insert(riderRows);
+    const payload = { policy_type: form.policy_type||'other', provider: form.provider, plan_name: form.plan_name||null, plan_id: form.plan_id||null, policy_holder: form.policy_holder||null, policy_number: form.policy_number||null, sum_assured: form.sum_assured?parseFloat(form.sum_assured):null, cash_value: form.cash_value?parseFloat(form.cash_value):null, premium: form.premium?parseFloat(form.premium):null, premium_frequency: form.premium_frequency||null, insured_person: form.insured_person||null, start_date: form.start_date||null, end_date: form.end_date||null, premium_term_value: form.premium_term_value?parseFloat(form.premium_term_value):null, premium_term_unit: form.premium_term_unit||null, coverage_term_value: form.coverage_term_value?parseFloat(form.coverage_term_value):null, coverage_term_unit: form.coverage_term_unit||null };
+    // Keep any rider that carries content, even without a name (advisor may only know
+    // "it's CI, 500k"). rider_name is optional; blank displays as its category label.
+    const filled = form.riders.filter(r => r.rider_name || r.category || r.sum_assured);
+
+    let policyId = editingId;
+    if (editingId) {
+      const { error } = await supabase.from('insurance_policies').update(payload).eq('id', editingId);
+      if (error) { setSaving(false); setSaveErr(error.message); return; }
+      await supabase.from('policy_riders').delete().eq('policy_id', editingId);
+    } else {
+      const { data: inserted, error } = await supabase.from('insurance_policies').insert({ client_id: clientId, ...payload }).select('id').single();
+      if (error || !inserted) { setSaving(false); setSaveErr(error?.message || 'Failed to save policy'); return; }
+      policyId = inserted.id;
     }
-    setSaving(false); setShowForm(false); setForm(EMPTY); load();
+    if (policyId && filled.length) {
+      const { error: rErr } = await supabase.from('policy_riders').insert(filled.map((r, i) => riderPayload(r, i, policyId!)));
+      if (rErr) { setSaving(false); setSaveErr(rErr.message); return; }
+    }
+    setSaving(false); setGapVersion(v => v + 1); closeForm(); load();
   }
   async function handleDelete(id: string) {
     if (!confirm(t('Delete this policy?','确定删除？'))) return;
-    await supabase.from('insurance_policies').delete().eq('id', id); load();
+    await supabase.from('insurance_policies').delete().eq('id', id); setGapVersion(v => v + 1); load();
   }
   async function handleDeleteRider(id: string) {
-    await supabase.from('policy_riders').delete().eq('id', id); load();
+    await supabase.from('policy_riders').delete().eq('id', id); setGapVersion(v => v + 1); load();
   }
 
-  const totalSA = policies.reduce((s,p) => s+(p.sum_assured||0), 0);
-  const totalAP = policies.reduce((s,p) => { if (!p.premium) return s; const m: any={monthly:12,quarterly:4,semi_annual:2,annual:1,single_premium:0}; return s+p.premium*(m[p.premium_frequency||'annual']??1); }, 0);
+  const totalAP = policies.reduce((acc,p) => { if (!p.premium) return acc; const m: any={monthly:12,quarterly:4,semi_annual:2,annual:1,single_premium:0}; return acc+p.premium*(m[p.premium_frequency||'annual']??1); }, 0);
   const typeLabel = (type: string) => TYPES.find(([v]) => v===type)?.[1]||type;
   const freqLabel = (f: string) => FREQ.find(([v]) => v===f)?.[1]||f;
 
@@ -213,17 +256,16 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
 
   return (
     <div>
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-2 gap-4 mb-6">
         <SumCard label={t('Policies','保单数量')} value={String(policies.length)} color="text-purple-600" bg="bg-purple-50" />
-        <SumCard label={t('Total Sum Assured','总保额')} value={`RM ${fmt(totalSA)}`} color="text-xin-blue" bg="bg-blue-50" />
         <SumCard label={t('Annual Premium','年保费')} value={`RM ${fmt(totalAP)}`} color="text-amber-600" bg="bg-amber-50" />
       </div>
 
-      <InsuranceGapPanel clientId={clientId} />
+      <InsuranceGapPanel clientId={clientId} refreshKey={gapVersion} />
 
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold text-xin-blue">{t('Insurance Policies','保险保单')}</h3>
-        <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors">
+        <button onClick={openAdd} className="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 bg-purple-600 text-white rounded-xl hover:bg-purple-700 transition-colors">
           <Plus size={14} />{t('Add Policy','添加保单')}
         </button>
       </div>
@@ -236,7 +278,10 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           {policies.map(p => (
             <div key={p.id} className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm relative">
-              <button onClick={() => handleDelete(p.id)} className="absolute top-4 right-4 text-slate-200 hover:text-red-400 transition-colors"><X size={14} /></button>
+              <div className="absolute top-4 right-4 flex items-center gap-2">
+                <button onClick={() => openEdit(p)} className="text-slate-400 hover:text-xin-blue transition-colors" title={t('Edit','编辑')}><Pencil size={14} /></button>
+                <button onClick={() => handleDelete(p.id)} className="text-slate-400 hover:text-red-500 transition-colors" title={t('Delete','删除')}><Trash2 size={14} /></button>
+              </div>
               <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${TYPE_COLORS[p.policy_type]||TYPE_COLORS.other}`}>{typeLabel(p.policy_type)}</span>
               <div className="mt-3 mb-1 font-bold text-xin-blue text-base">{p.provider}</div>
               {p.plan_name && <div className="text-sm text-slate-600 -mt-0.5 mb-1">{p.plan_name}</div>}
@@ -258,13 +303,13 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${RIDER_CATEGORY_COLORS[r.category]||RIDER_CATEGORY_COLORS.other}`}>{riderCategoryLabel(r.category)}</span>
-                          <span className="text-xs font-semibold text-xin-blue truncate">{r.rider_name}</span>
+                          {r.rider_name && <span className="text-xs font-semibold text-xin-blue truncate">{r.rider_name}</span>}
                         </div>
                         {r.sum_assured && <div className="text-[11px] text-slate-500">RM {fmt(r.sum_assured)}</div>}
                         {r.category === 'medical' && medicalSummary(r) && <div className="text-[11px] text-slate-400">{medicalSummary(r)}</div>}
                         {termSummary(r) && <div className="text-[11px] text-slate-400">{termSummary(r)}</div>}
                       </div>
-                      <button onClick={() => handleDeleteRider(r.id)} className="text-slate-200 hover:text-red-400 shrink-0 mt-0.5"><X size={11} /></button>
+                      <button onClick={() => handleDeleteRider(r.id)} className="text-slate-300 hover:text-red-500 shrink-0 mt-0.5" title={t('Remove rider','删除附加险')}><X size={11} /></button>
                     </div>
                   ))}
                 </div>
@@ -278,8 +323,8 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-xin-blue">{t('Add Policy','添加保单')}</h3>
-              <button onClick={() => setShowForm(false)} className="text-slate-300 hover:text-slate-500"><X size={18} /></button>
+              <h3 className="font-semibold text-xin-blue">{editingId ? t('Edit Policy','编辑保单') : t('Add Policy','添加保单')}</h3>
+              <button onClick={closeForm} className="text-slate-300 hover:text-slate-500"><X size={18} /></button>
             </div>
             <Fr label={t('Base Plan Type','基础计划类型')}><Sel value={form.policy_type} onChange={v => set('policy_type',v)} opts={[['','—'],...BASE_TYPES]} /></Fr>
             <Fr label={`${t('Insurance Company','保险公司')} *`}><Combo value={form.provider} onChange={setProvider} list="insurer-list" opts={insurers.map(i => i.name)} placeholder="e.g. AIA, Prudential" /></Fr>
@@ -342,9 +387,10 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
               })}
             </div>
 
+            {saveErr && <div className="mt-3 bg-red-50 border border-red-200 rounded-xl p-3 text-red-600 text-xs">{saveErr}</div>}
             <div className="flex gap-2 mt-2">
-              <button onClick={handleAdd} disabled={saving} className="px-5 py-2.5 bg-purple-600 text-white font-semibold rounded-xl text-sm disabled:opacity-50">{saving?'...':t('Save','保存')}</button>
-              <button onClick={() => setShowForm(false)} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm">{t('Cancel','取消')}</button>
+              <button onClick={handleSave} disabled={saving} className="px-5 py-2.5 bg-purple-600 text-white font-semibold rounded-xl text-sm disabled:opacity-50">{saving?'...':t('Save','保存')}</button>
+              <button onClick={closeForm} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm">{t('Cancel','取消')}</button>
             </div>
           </div>
         </div>
