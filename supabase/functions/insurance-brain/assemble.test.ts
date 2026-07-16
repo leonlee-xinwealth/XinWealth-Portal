@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { buildSectionContent, type SectionNarrative } from "./assemble.ts";
-import { computeCna } from "./cna.ts";
-import { buildCfpCnaInput, type CfpFinancials } from "./mapping.ts";
+import { computeCna } from "../_shared/insurance/cna.ts";
+import { buildCfpCnaInput, type CfpFinancials } from "../_shared/insurance/mapping.ts";
 
 const financials: CfpFinancials = {
   client: {

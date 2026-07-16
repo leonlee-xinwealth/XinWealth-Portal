@@ -3,16 +3,11 @@
 // tier; swap generateSectionNarrative's implementation to move to Claude.
 // The LLM narrates deterministic CNA numbers — it must never compute them.
 
-import type { CnaResult } from "./cna.ts";
-import type { CfpFinancials } from "./mapping.ts";
-import { annualPremiumTotal } from "./mapping.ts";
+import type { CnaResult } from "../_shared/insurance/cna.ts";
+import type { CfpFinancials } from "../_shared/insurance/mapping.ts";
+import { annualPremiumTotal } from "../_shared/insurance/mapping.ts";
 import type { SectionNarrative } from "./assemble.ts";
-
-// flash-lite has separate (and roomier) free-tier quota than flash — the
-// funnel engine's extraction step already relies on it staying available.
-const GEMINI_MODEL = "gemini-flash-lite-latest";
-const GEMINI_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+import { callGeminiJson } from "../_shared/llm/gemini.ts";
 
 const COVERAGE_CATEGORIES = [
   "life",
@@ -199,60 +194,15 @@ export function buildSectionPrompt(
   ].join("\n");
 }
 
-async function callGemini(
-  prompt: string,
-  apiKey: string,
-): Promise<SectionNarrative> {
-  const res = await fetch(GEMINI_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
-    },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: SECTION_RESPONSE_SCHEMA,
-        temperature: 0.3,
-      },
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(
-      `Gemini HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`,
-    );
-  }
-  const j = await res.json();
-  const text = j.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error(
-      `Gemini empty response, finishReason=${
-        j.candidates?.[0]?.finishReason ?? "n/a"
-      }`,
-    );
-  }
-  return JSON.parse(text) as SectionNarrative;
-}
-
 /** Generate the section narrative; retries twice, throws on final failure. */
-export async function generateSectionNarrative(
+export function generateSectionNarrative(
   cna: CnaResult,
   financials: CfpFinancials,
   apiKey: string,
 ): Promise<SectionNarrative> {
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-  const prompt = buildSectionPrompt(cna, financials);
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      return await callGemini(prompt, apiKey);
-    } catch (e) {
-      lastErr = e;
-      if (attempt < 2) {
-        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
-      }
-    }
-  }
-  throw lastErr;
+  return callGeminiJson<SectionNarrative>(
+    buildSectionPrompt(cna, financials),
+    SECTION_RESPONSE_SCHEMA,
+    apiKey,
+  );
 }

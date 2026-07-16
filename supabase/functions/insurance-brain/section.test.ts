@@ -1,7 +1,7 @@
 import { assert } from "jsr:@std/assert@1";
 import { buildSectionPrompt } from "./section.ts";
-import { computeCna } from "./cna.ts";
-import { buildCfpCnaInput, type CfpFinancials } from "./mapping.ts";
+import { computeCna } from "../_shared/insurance/cna.ts";
+import { buildCfpCnaInput, type CfpFinancials } from "../_shared/insurance/mapping.ts";
 
 // Sentinel values: if ANY of these appear in the LLM prompt, PII is leaking.
 const SENTINELS = [

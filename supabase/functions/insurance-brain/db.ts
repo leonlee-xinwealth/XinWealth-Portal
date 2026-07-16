@@ -1,7 +1,7 @@
 // CFP-mode data access: pulls a client's full financial picture with the
 // service-role client. Read-only apart from policy_review_requests writes.
 
-import type { CfpFinancials } from "./mapping.ts";
+import type { CfpFinancials } from "../_shared/insurance/mapping.ts";
 
 // deno-lint-ignore no-explicit-any
 type Db = any;

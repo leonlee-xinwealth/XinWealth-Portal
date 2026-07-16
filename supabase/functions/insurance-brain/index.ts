@@ -6,11 +6,12 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeCna } from "./cna.ts";
-import { buildCfpCnaInput, buildProspectCnaInput } from "./mapping.ts";
+import { computeCna } from "../_shared/insurance/cna.ts";
+import { buildCfpCnaInput, buildProspectCnaInput } from "../_shared/insurance/mapping.ts";
 import { fetchClientFinancials } from "./db.ts";
 import { generateSectionNarrative } from "./section.ts";
 import { buildSectionContent } from "./assemble.ts";
+import { generateClientView } from "./clientView.ts";
 import { type AgentConfig, loadConfig } from "./config.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -100,6 +101,19 @@ serve(async (req) => {
       return await runCfpSection(serviceClient, reportId, advisorId, cfg);
     }
 
+    if (body.mode === "cfp_client_view") {
+      const reportId = body.report_id;
+      if (!reportId) return jsonError("report_id required", 400);
+      const language = body.language === "zh" ? "zh" : "en";
+      return await runCfpClientView(
+        serviceClient,
+        reportId,
+        advisorId,
+        cfg,
+        language,
+      );
+    }
+
     return jsonError("Unknown mode", 400);
   } catch (e) {
     return jsonError((e as Error)?.message ?? "Internal error", 500);
@@ -176,5 +190,70 @@ async function runCfpSection(
       .update({ status: "failed", error: message })
       .eq("id", section.id);
     return jsonError(message, 500);
+  }
+}
+
+// Second pass: rewrite the already-drafted section prose into warm, layman
+// language for the client-facing PDF, merged into content.client_view. Does not
+// touch the section's status/lifecycle — it augments an existing draft/approved
+// section. Numbers are reused verbatim; the LLM only rephrases.
+async function runCfpClientView(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  reportId: string,
+  advisorId: string | null,
+  cfg: AgentConfig,
+  language: "en" | "zh",
+) {
+  const { data: report } = await db
+    .from("financial_reports")
+    .select("id, advisor_id")
+    .eq("id", reportId)
+    .single();
+  if (!report) return jsonError("Report not found", 404);
+  if (advisorId && report.advisor_id !== advisorId) {
+    return jsonError("Forbidden", 403);
+  }
+
+  const { data: section } = await db
+    .from("report_sections")
+    .select("id, content")
+    .eq("report_id", reportId)
+    .eq("section_type", "insurance_planning")
+    .single();
+  if (!section || !section.content || !section.content.cna) {
+    return jsonError("Insurance section not generated yet", 400);
+  }
+
+  try {
+    const content = section.content;
+    // InsuranceSectionContent extends SectionNarrative, so the base prose lives
+    // directly on content — reconstruct the narrative for the simplify pass.
+    const narrative = {
+      executive_summary: content.executive_summary,
+      coverage_review: content.coverage_review ?? [],
+      gap_analysis: content.gap_analysis ?? "",
+      recommendations: content.recommendations ?? [],
+      scenarios: content.scenarios ?? [],
+    };
+    const clientView = await generateClientView(
+      narrative,
+      content.cna,
+      language,
+      cfg.GEMINI_API_KEY,
+    );
+    const merged = { ...content, client_view: clientView };
+
+    const { data: updated, error: updateErr } = await db
+      .from("report_sections")
+      .update({ content: merged })
+      .eq("id", section.id)
+      .select("*")
+      .single();
+    if (updateErr) throw new Error(updateErr.message);
+
+    return jsonOk({ section: updated });
+  } catch (e) {
+    return jsonError((e as Error)?.message ?? "Unknown error", 500);
   }
 }
