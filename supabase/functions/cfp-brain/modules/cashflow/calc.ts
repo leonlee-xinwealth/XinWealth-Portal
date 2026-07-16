@@ -1,9 +1,11 @@
-// 现金流管家 — deterministic cashflow & budget calculator. Pure, no LLM.
-// Mostly reads the shared baseline (single source of truth) and adds the
-// breakdowns + emergency-fund verdict the section renders.
+// 小会计 (Little Accountant) — deterministic cashflow & budget calculator.
+// Pure, no LLM. Reads the shared baseline (single source of truth) and adds
+// breakdowns, the true-expense vs asset-transfer split, and the emergency-fund
+// verdict. Persona duty: awareness, not judgement — the numbers here let the
+// client SEE where money goes.
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
-import { CASHFLOW_ANNUALIZE } from "../../baseline.ts";
+import { CASHFLOW_ANNUALIZE, isAssetTransfer } from "../../baseline.ts";
 
 export type EmergencyFundStatus = "sufficient" | "partial" | "insufficient";
 
@@ -24,6 +26,9 @@ export interface CashflowDet {
   debt_service_ratio: number | null;
   income_breakdown: CategoryBreakdown[];
   expense_breakdown: CategoryBreakdown[];
+  /** 真支出 vs 资产转移: monthly total moved into the client's own assets
+   * (savings → investment etc.) — excluded from expenses, shown separately */
+  asset_transfers_monthly: number;
   emergency_fund: {
     need_low: number;
     need_high: number;
@@ -44,7 +49,7 @@ function breakdown(
 ): CategoryBreakdown[] {
   const byCategory = new Map<string, number>();
   for (const r of rows) {
-    if (r.direction !== direction) continue;
+    if (r.direction !== direction || isAssetTransfer(r)) continue;
     const monthly = r.amount * (CASHFLOW_ANNUALIZE[r.frequency] ?? 12) / 12;
     const key = r.category ?? "uncategorised";
     byCategory.set(key, (byCategory.get(key) ?? 0) + monthly);
@@ -87,6 +92,14 @@ export function computeCashflow(
     debt_service_ratio: b.debt_service_ratio,
     income_breakdown: breakdown(f.cashflow, "inflow", monthlyIncome),
     expense_breakdown: breakdown(f.cashflow, "outflow", monthlyExpenses),
+    asset_transfers_monthly: round(
+      f.cashflow
+        .filter((r) => r.direction === "outflow" && isAssetTransfer(r))
+        .reduce(
+          (s, r) => s + r.amount * (CASHFLOW_ANNUALIZE[r.frequency] ?? 12) / 12,
+          0,
+        ),
+    ),
     emergency_fund: {
       need_low: needLow,
       need_high: needHigh,

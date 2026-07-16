@@ -31,7 +31,9 @@ export async function fetchCfpData(
     await Promise.all([
       db
         .from("cashflow_entries")
-        .select("direction, amount, frequency, category, period_month")
+        .select(
+          "direction, amount, frequency, category, period_month, linked_asset_id, linked_liability_id",
+        )
         .eq("client_id", clientId)
         .eq("is_recurring", true)
         .order("period_month", { ascending: false }),

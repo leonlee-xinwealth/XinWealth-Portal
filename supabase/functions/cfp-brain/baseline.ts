@@ -54,9 +54,16 @@ export function ageFromDob(dob: string | null, now = new Date()): number | null 
   return Math.floor((now.getTime() - t) / (365.25 * 24 * 3600 * 1000));
 }
 
+/** 小会计口径: rows linked to the client's own asset are transfers (savings →
+ * investment etc.), not true income/expenses. Loan repayments
+ * (linked_liability_id) remain true expenses. */
+export function isAssetTransfer(r: CfpData["cashflow"][number]): boolean {
+  return r.linked_asset_id != null;
+}
+
 function annualize(rows: CfpData["cashflow"], direction: "inflow" | "outflow"): number {
   return rows
-    .filter((r) => r.direction === direction)
+    .filter((r) => r.direction === direction && !isAssetTransfer(r))
     .reduce((s, r) => s + r.amount * (CASHFLOW_ANNUALIZE[r.frequency] ?? 12), 0);
 }
 
@@ -103,6 +110,7 @@ export function computeBaseline(
   // emergency fund honest rather than optimistic.
   const monthlyEssential = annualExpenses / 12;
   notes.push("紧急预备金按全部经常性月支出为「必要支出」口径计算");
+  notes.push("与自有资产挂钩的现金流视为资产转移，不计入收入或支出（还贷除外）");
 
   const emergencyNeedLow = monthlyEssential * assumptions.emergency_months_low;
   const emergencyNeedHigh = monthlyEssential * assumptions.emergency_months_high;

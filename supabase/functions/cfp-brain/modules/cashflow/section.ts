@@ -1,4 +1,5 @@
-// 现金流管家 (cashflow_steward) — prompt, response schema, assembly.
+// 小会计 (little_accountant) — prompt, response schema, assembly.
+// Persona: cashflow monitoring + spending AWARENESS, judgement-free.
 // PII whitelist: category labels, amounts, ratios and demographics only —
 // no names, institutions or account details ever reach the LLM.
 
@@ -20,7 +21,7 @@ export interface CashflowNarrative {
 export interface CashflowSectionContent extends CashflowNarrative, CashflowDet {
   version: 1;
   section_type: "cashflow_planning";
-  agent: "cashflow_steward";
+  agent: "little_accountant";
   assumptions: string[];
 }
 
@@ -91,10 +92,14 @@ export function buildCashflowPrompt(
     "   emergency fund position with key figures), action_plan (concrete next",
     '   steps), expected_completion_date (a timeframe phrase such as "Within 3',
     '   months"), remarks.',
-    "2) budget_commentary — one flowing paragraph on the spending pattern:",
-    "   which expense categories dominate, whether the surplus is healthy for",
-    "   this life stage, and what the debt service ratio means for flexibility.",
-    "   Cite the actual category names and figures from the JSON.",
+    "2) budget_commentary — one flowing paragraph building spending AWARENESS,",
+    "   never judgement: which expense categories dominate, whether the surplus",
+    "   is healthy for this life stage, and what the debt service ratio means",
+    "   for flexibility. Cite the actual category names and figures from the",
+    "   JSON. Note that transfers into the client's own assets",
+    "   (asset_transfers_monthly) are savings, not spending — celebrate them.",
+    "   Describe patterns neutrally ('RM X went to Y') so the client can see",
+    "   where money goes; do not scold, moralise or label spending as wasteful.",
     "3) emergency_fund_plan — one paragraph on the emergency fund verdict",
     "   (status, months covered vs the 3-6 month target). If there is a",
     "   shortfall, translate it into a concrete real-life consequence (a job",
@@ -123,7 +128,7 @@ export const cashflowModule: CfpModule<
   CashflowSectionContent
 > = {
   section_type: "cashflow_planning",
-  agent: "cashflow_steward",
+  agent: "little_accountant",
   compute: (f, b) => computeCashflow(f, b),
   buildPrompt: (det, b) => ({
     prompt: buildCashflowPrompt(det, b),
@@ -132,12 +137,13 @@ export const cashflowModule: CfpModule<
   assemble: (det, narrative, _f) => ({
     version: 1,
     section_type: "cashflow_planning",
-    agent: "cashflow_steward",
+    agent: "little_accountant",
     ...det,
     ...narrative,
     assumptions: [
       "收入与支出按最近一个月的经常性现金流年化",
       "紧急预备金目标按 3–6 个月经常性支出计算",
+      "与自有资产挂钩的转账视为资产转移（储蓄），不计入真实支出",
     ],
   }),
   clientViewInput: (content) => ({
@@ -145,6 +151,7 @@ export const cashflowModule: CfpModule<
     monthly_expenses: content.monthly_expenses,
     monthly_surplus: content.monthly_surplus,
     savings_ratio: content.savings_ratio,
+    asset_transfers_monthly: content.asset_transfers_monthly,
     expense_breakdown: content.expense_breakdown,
     emergency_fund: content.emergency_fund,
     budget_commentary: content.budget_commentary,

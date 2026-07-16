@@ -32,7 +32,7 @@ export function computeAll(
   for (const sectionType of SECTION_ORDER) {
     const m = byType.get(sectionType as SectionType);
     if (!m) continue; // modules ship incrementally by phase
-    const d = m.compute(f, baseline, det);
+    const d = m.compute(f, baseline, det, inputs);
     det[m.section_type] = d;
     if (m.updateBaseline) baseline = m.updateBaseline(baseline, d);
   }

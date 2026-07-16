@@ -104,6 +104,17 @@ export const insuranceModule: CfpModule<
   }),
   assemble: (det, narrative, f) =>
     buildSectionContent(toCfpFinancials(f), det.cna, narrative),
+  // Chat whitelist: CNA + narrative prose only. policy_overview (provider,
+  // policy numbers) must NEVER enter a prompt.
+  chatContext: (content) => ({
+    cna: content.cna,
+    annual_premium_total: content.annual_premium_total,
+    executive_summary: content.executive_summary,
+    coverage_review: content.coverage_review,
+    gap_analysis: content.gap_analysis,
+    recommendations: content.recommendations,
+    scenarios: content.scenarios,
+  }),
   // Insurance keeps its richer legacy client view — the PDF exporter and the
   // portal UI both consume this exact shape.
   generateClientView: (content, language, apiKey) => {

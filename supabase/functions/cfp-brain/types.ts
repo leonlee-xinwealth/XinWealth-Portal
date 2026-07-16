@@ -48,6 +48,11 @@ export interface CashflowRow {
   amount: number;
   frequency: string;
   category: string | null;
+  /** non-null = transfer to/from the client's own asset (小会计: not a true
+   * expense/income — e.g. savings → investment account) */
+  linked_asset_id?: string | null;
+  /** non-null = loan repayment (still a true expense / debt service) */
+  linked_liability_id?: string | null;
 }
 
 export interface AssetRow {
@@ -118,6 +123,9 @@ export interface PlanningInputs {
     will_status?: "has_will" | "no_will" | "unknown";
     epf_nomination?: boolean;
     insurance_nomination?: boolean;
+    /** 资产达人: creditor-isolation advice (absolute assignment / trust) */
+    business_owner?: boolean;
+    bankruptcy_risk?: boolean;
   };
   assumption_overrides?: Partial<BaselineAssumptions>;
 }
@@ -193,8 +201,14 @@ export interface CfpModule<TDet = unknown, TNarrative = unknown, TContent = unkn
   section_type: SectionType;
   /** persona identifier written to report_sections.agent */
   agent: string;
-  /** deterministic calculation — pure, unit-tested, no LLM */
-  compute(f: CfpData, b: FinancialBaseline, prior: ModuleOutputs): TDet;
+  /** deterministic calculation — pure, unit-tested, no LLM. `inputs` carries
+   * advisor-entered planning inputs (tax reliefs, estate regime, …) */
+  compute(
+    f: CfpData,
+    b: FinancialBaseline,
+    prior: ModuleOutputs,
+    inputs: PlanningInputs,
+  ): TDet;
   /** optional baseline enrichment consumed by later modules */
   updateBaseline?(b: FinancialBaseline, det: TDet): FinancialBaseline;
   /** narrative prompt — PII whitelist only */
@@ -203,6 +217,10 @@ export interface CfpModule<TDet = unknown, TNarrative = unknown, TContent = unkn
   assemble(det: TDet, narrative: TNarrative, f: CfpData): TContent;
   /** PII-free payload for the generic layman client-view pass */
   clientViewInput?(content: TContent): unknown;
+  /** PII-free narrative payload for the advisor chat pass; defaults to
+   * clientViewInput when absent. Must never include identifying fields
+   * (policy numbers, providers, names). */
+  chatContext?(content: TContent): unknown;
   /** custom client-view generator (insurance keeps its legacy PDF shape);
    * wins over clientViewInput when both exist */
   generateClientView?(

@@ -55,3 +55,36 @@ Deno.test("without education goals the CNA falls back to the per-child constant"
     Math.round(2 * 80000 * Math.pow(1.04, 10) / 1000) * 1000,
   );
 });
+
+Deno.test("all 8 modules run in computeAll; synthesis sees upstream needs", () => {
+  const f = makeCfpData();
+  const { det } = computeAll(ORDERED_MODULES, f, {}, NOW);
+  const types = Object.keys(det);
+  for (const t of [
+    "cashflow_planning", "goals_planning", "insurance_planning",
+    "investment_planning", "retirement_planning", "tax_planning",
+    "legacy_planning", "financial_health",
+  ]) assert(types.includes(t), `missing ${t}`);
+  // deno-lint-ignore no-explicit-any
+  const syn = det.financial_health as any;
+  assertEquals(syn.missing_modules, []);
+  assert(syn.budget.lines.length === 5);
+  assert(syn.health_score != null);
+});
+
+Deno.test("planning_inputs reach the tax and legacy modules through computeAll", () => {
+  const f = makeCfpData();
+  const { det } = computeAll(ORDERED_MODULES, f, {
+    tax: { reliefs: { prs: 3000 } },
+    estate: { regime: "syariah", bankruptcy_risk: true, business_owner: true },
+  }, NOW);
+  // deno-lint-ignore no-explicit-any
+  const tax = det.tax_planning as any;
+  const prs = tax.reliefs_detail.find((r: { key: string }) => r.key === "prs");
+  assertEquals(prs.claimed, 3000);
+  assertEquals(prs.source, "advisor");
+  // deno-lint-ignore no-explicit-any
+  const legacy = det.legacy_planning as any;
+  assertEquals(legacy.distribution.faraid_flagged, true);
+  assertEquals(legacy.asset_isolation_flag, true);
+});

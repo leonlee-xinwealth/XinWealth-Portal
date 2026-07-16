@@ -6,6 +6,11 @@ import type { CfpModule, SectionType } from "../types.ts";
 import { cashflowModule } from "./cashflow/section.ts";
 import { goalsModule } from "./goals/section.ts";
 import { insuranceModule } from "./insurance/module.ts";
+import { investmentModule } from "./investment/section.ts";
+import { retirementModule } from "./retirement/section.ts";
+import { taxModule } from "./tax/section.ts";
+import { legacyModule } from "./legacy/section.ts";
+import { synthesisModule } from "./synthesis/section.ts";
 
 export const SECTION_LABELS: Record<SectionType, { en: string; zh: string }> = {
   cashflow_planning: { en: "Cashflow & Budget Planning", zh: "现金流规划与财务预算" },
@@ -23,6 +28,11 @@ export const ORDERED_MODULES: CfpModule<any, any, any>[] = [
   cashflowModule,
   goalsModule,
   insuranceModule,
+  investmentModule,
+  retirementModule,
+  taxModule,
+  legacyModule,
+  synthesisModule,
 ];
 
 export function findModule(

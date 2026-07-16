@@ -48,3 +48,26 @@ create policy advisor_manage_client_goals on public.client_goals
 create trigger client_goals_updated_at
   before update on public.client_goals
   for each row execute function public.update_financial_reports_updated_at();
+
+-- Per-section advisor ↔ agent chat. Messages are appended by the cfp-brain
+-- edge function (service role); advisors read their own clients' threads via
+-- RLS through the parent section → report ownership chain.
+create table public.cfp_chat_messages (
+  id         uuid primary key default gen_random_uuid(),
+  section_id uuid not null references public.report_sections(id) on delete cascade,
+  role       text not null check (role in ('advisor','agent')),
+  message    text not null,
+  created_at timestamptz not null default now()
+);
+
+create index cfp_chat_messages_section_idx on public.cfp_chat_messages (section_id, created_at);
+
+alter table public.cfp_chat_messages enable row level security;
+
+-- Sections inherit ownership through the parent report (financial_reports RLS
+-- filters the subquery for authenticated callers) — same pattern as
+-- advisor_manage_report_sections.
+create policy advisor_manage_cfp_chat_messages on public.cfp_chat_messages
+  for all
+  using (section_id in (select id from public.report_sections))
+  with check (section_id in (select id from public.report_sections));

@@ -5,8 +5,11 @@
 // report-design.md
 //
 // modes:
-//   generate_section {report_id, section_type}          → draft the section
+//   generate_section {report_id, section_type}           → draft the section
 //   client_view      {report_id, section_type, language} → layman rewrite
+//   chat             {report_id, section_type, message}  → ask the agent (脱敏)
+//   revise           {report_id, section_type, instruction} → rewrite narrative
+//                    per advisor instruction; deterministic numbers untouched
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -17,6 +20,13 @@ import { computeAll } from "./orchestrator.ts";
 import { markFailed, saveDraft, upsertGenerating } from "./sectionLifecycle.ts";
 import { findModule, ORDERED_MODULES, SECTION_LABELS } from "./modules/registry.ts";
 import { generateGenericClientView } from "./clientView.ts";
+import {
+  buildChatPrompt,
+  buildRevisePrompt,
+  type ChatTurn,
+  generateChatReply,
+  redactSensitive,
+} from "./chat.ts";
 import type { PlanningInputs, SectionType } from "./types.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -137,6 +147,27 @@ serve(async (req) => {
       );
     }
 
+    if (body.mode === "chat") {
+      if (typeof body.message !== "string" || !body.message.trim()) {
+        return jsonError("message required", 400);
+      }
+      return await runChat(serviceClient, report, sectionType, module, cfg, body.message);
+    }
+
+    if (body.mode === "revise") {
+      if (typeof body.instruction !== "string" || !body.instruction.trim()) {
+        return jsonError("instruction required", 400);
+      }
+      return await runRevise(
+        serviceClient,
+        report,
+        sectionType,
+        module,
+        cfg,
+        body.instruction,
+      );
+    }
+
     return jsonError("Unknown mode", 400);
   } catch (e) {
     return jsonError((e as Error)?.message ?? "Internal error", 500);
@@ -240,6 +271,141 @@ async function runClientView(
       .select("*")
       .single();
     if (updateErr) throw new Error(updateErr.message);
+
+    return jsonOk({ section: updated });
+  } catch (e) {
+    return jsonError((e as Error)?.message ?? "Unknown error", 500);
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+function narrativeContextFor(module: any, content: unknown): unknown {
+  if (module.chatContext) return module.chatContext(content);
+  if (module.clientViewInput) return module.clientViewInput(content);
+  return {};
+}
+
+// Advisor asks the section's agent about its analysis. Both sides of the
+// exchange are persisted to cfp_chat_messages. 脱敏: see chat.ts.
+async function runChat(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  report: { id: string; client_id: string; planning_inputs: PlanningInputs | null },
+  sectionType: SectionType,
+  // deno-lint-ignore no-explicit-any
+  module: any,
+  cfg: AgentConfig,
+  rawMessage: string,
+) {
+  const { data: section } = await db
+    .from("report_sections")
+    .select("id, content")
+    .eq("report_id", report.id)
+    .eq("section_type", sectionType)
+    .single();
+  if (!section) {
+    return jsonError("Generate the section first, then chat with its agent", 400);
+  }
+
+  try {
+    const data = await fetchCfpData(db, report.client_id);
+    if (!data) throw new Error("Client financial data unavailable");
+    const { baseline, det } = computeAll(
+      ORDERED_MODULES,
+      data,
+      report.planning_inputs ?? {},
+    );
+
+    const { data: historyRows } = await db
+      .from("cfp_chat_messages")
+      .select("role, message")
+      .eq("section_id", section.id)
+      .order("created_at", { ascending: false })
+      .limit(10);
+    const history = ((historyRows ?? []) as ChatTurn[]).reverse();
+
+    const message = redactSensitive(rawMessage.trim());
+    const prompt = buildChatPrompt(
+      sectionType,
+      module.agent,
+      det[sectionType],
+      baseline,
+      narrativeContextFor(module, section.content),
+      history,
+      message,
+    );
+    const reply = await generateChatReply(prompt, cfg.GEMINI_API_KEY);
+
+    const { error: insertErr } = await db.from("cfp_chat_messages").insert([
+      { section_id: section.id, role: "advisor", message },
+      { section_id: section.id, role: "agent", message: reply },
+    ]);
+    if (insertErr) throw new Error(insertErr.message);
+
+    return jsonOk({ reply });
+  } catch (e) {
+    return jsonError((e as Error)?.message ?? "Unknown error", 500);
+  }
+}
+
+// Advisor instructs the agent to rewrite its narrative. Deterministic numbers
+// are recomputed fresh and re-stamped by assemble — the instruction can only
+// move prose, never figures. Section returns to draft; stale client_view is
+// dropped (regenerate it after approving the new prose).
+async function runRevise(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  report: { id: string; client_id: string; planning_inputs: PlanningInputs | null },
+  sectionType: SectionType,
+  // deno-lint-ignore no-explicit-any
+  module: any,
+  cfg: AgentConfig,
+  rawInstruction: string,
+) {
+  const { data: section } = await db
+    .from("report_sections")
+    .select("id, content")
+    .eq("report_id", report.id)
+    .eq("section_type", sectionType)
+    .single();
+  if (!section || !section.content) {
+    return jsonError("Section not generated yet", 400);
+  }
+
+  try {
+    const data = await fetchCfpData(db, report.client_id);
+    if (!data) throw new Error("Client financial data unavailable");
+    const { baseline, det } = computeAll(
+      ORDERED_MODULES,
+      data,
+      report.planning_inputs ?? {},
+    );
+
+    const instruction = redactSensitive(rawInstruction.trim());
+    const sectionDet = det[sectionType];
+    const { prompt, schema } = module.buildPrompt(sectionDet, baseline, data);
+    const revisePrompt = buildRevisePrompt(
+      prompt,
+      narrativeContextFor(module, section.content),
+      instruction,
+    );
+    const narrative = await callGeminiJson(
+      revisePrompt,
+      schema,
+      cfg.GEMINI_API_KEY,
+    );
+    const content = module.assemble(sectionDet, narrative, data);
+
+    const updated = await saveDraft(db, section.id, content);
+
+    await db.from("cfp_chat_messages").insert([
+      { section_id: section.id, role: "advisor", message: `[修改指示] ${instruction}` },
+      {
+        section_id: section.id,
+        role: "agent",
+        message: "已按指示重写本节叙述并更新草稿（数字保持确定性计算结果不变）。",
+      },
+    ]);
 
     return jsonOk({ section: updated });
   } catch (e) {

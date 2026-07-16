@@ -133,3 +133,25 @@ Deno.test("holdings count toward total assets", () => {
   );
   assertEquals(b.total_assets, 675000);
 });
+
+Deno.test("asset transfers are excluded from income and expenses (小会计口径)", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      cashflow: [
+        { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
+        { direction: "outflow", amount: 6000, frequency: "monthly", category: "household" },
+        // transfer into own investment account — savings, not spending
+        { direction: "outflow", amount: 2000, frequency: "monthly", category: "invest", linked_asset_id: "a-1" },
+        // transfer from FD back to checking — not income
+        { direction: "inflow", amount: 5000, frequency: "monthly", category: "fd_out", linked_asset_id: "a-2" },
+        // loan repayment stays a true expense
+        { direction: "outflow", amount: 1500, frequency: "monthly", category: "mortgage", linked_liability_id: "l-1" },
+      ],
+    }),
+    {},
+    NOW,
+  );
+  assertEquals(b.annual_income, 120000);
+  assertEquals(b.annual_expenses, (6000 + 1500) * 12);
+  assert(b.baseline_notes.some((n) => n.includes("资产转移")));
+});
