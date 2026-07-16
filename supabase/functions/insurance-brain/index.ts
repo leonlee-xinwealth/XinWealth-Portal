@@ -12,7 +12,7 @@ import { fetchClientFinancials } from "./db.ts";
 import { generateSectionNarrative } from "./section.ts";
 import { buildSectionContent } from "./assemble.ts";
 import { generateClientView } from "./clientView.ts";
-import { type AgentConfig, loadConfig } from "./config.ts";
+import { type AgentConfig, loadConfig } from "../_shared/config.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

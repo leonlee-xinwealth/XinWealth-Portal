@@ -91,9 +91,11 @@ const CASHFLOW_ANNUALIZE: Record<string, number> = {
 export interface CfpFinancials {
   client: {
     id: string;
-    full_name: string;
-    email: string | null;
-    phone: string | null;
+    // Identifying fields are optional — cfp-brain never fetches them (PII
+    // stays out of the function); only the legacy insurance-brain db.ts does.
+    full_name?: string;
+    email?: string | null;
+    phone?: string | null;
     date_of_birth: string | null;
     number_of_dependants: number;
     occupation: string | null;
