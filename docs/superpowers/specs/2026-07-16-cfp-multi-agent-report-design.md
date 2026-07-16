@@ -131,20 +131,22 @@ if required > annual_surplus:
 
 LLM 只叙述这张表和 top-3 优先动作。
 
-### 3. Section 注册表
+### 3. Section 注册表（2026-07-17 人设对齐后）
 
-| section_type | persona (agent) | 处置 |
+| section_type | persona (agent) | 人设职责一句话 |
 |---|---|---|
-| `cashflow_planning` | 现金流管家 `cashflow_steward` | 新增 |
-| `insurance_planning` | 保险佬 `insurance_brain` | 保留（迭代） |
-| `investment_planning` | 投资大师 `investment_master` | 保留（资产配置并入） |
-| `retirement_planning` | 退休规划师 `retirement_planner` | 新增 |
-| `tax_planning` | 税务师 `tax_strategist` | 新增 |
-| `legacy_planning` | 传承顾问 `legacy_advisor` | 新增 |
-| `goals_planning` | 目标规划师 `goal_planner` | 新增 |
-| `financial_health` | 首席规划师 `chief_planner`（synthesis） | 新增 |
+| `cashflow_planning` | 小会计 `little_accountant` | 现金流监控与开销觉察（不带评判）；真支出 vs 资产转移；紧急预备金 |
+| `goals_planning` | 目标规划师 `goal_planner` | 教育/购房/创业目标资金测算，教育金回填保险 CNA |
+| `insurance_planning` | 保险佬 `insurance_brain` | 风险管控与保单分析，CNA 结合人生目标与负债 |
+| `investment_planning` | 投资大师 `investment_master` | 闲置资金诊断、风险配置、10-15 年财富投射 |
+| `retirement_planning` | 投资大师 `investment_master`（兼管） | 养老缺口、EPF/PRS 投影、极限压力测试（撑到 85/100）、部分提款策略 |
+| `tax_planning` | 税务专家 `tax_expert` | LHDN reliefs 合法节税；从开销记录自动抓 relief |
+| `legacy_planning` | 资产达人 `asset_expert` | 遗产流动性、分配就绪度、信托/绝对转让的债权隔离指引 |
+| `financial_health` | 首席规划师 `chief_planner` | 预算对账瀑布、健康分、财务自由四阶段（被动收入 vs 2× 月支出） |
 
 弃用 `asset_allocation`（资产配置属于投资规划的一部分，单人顾问无需两个重叠 section）。
+
+**智能体对话**：每个板块支持顾问 ↔ 智能体聊天（`mode:'chat'`）与指示改稿（`mode:'revise'`，只重写叙述、数字锁定），聊天记录存 `cfp_chat_messages`；脱敏三重防线（确定性上下文无 PII、模块级 chatContext 白名单、服务端 NRIC/账号正则遮蔽）。
 
 ### 4. 各模块确定性 calculator 规格
 
@@ -199,6 +201,14 @@ CfpTab 现有 765 行手写一个 card；8 个 section 不能线性膨胀。改�
 3. 新表 `client_goals` + RLS。
 
 baseline 存 `financial_reports.baseline` 列而非 report_sections 行：它是编排共享输入，不是面向客户的 section。
+
+## 下一轮 Roadmap（已确认顺延）
+
+- 每月第一个工作日主动监控 + red flag 汇报：cfp-brain `mode:'monitor'`（复用 computeAll、对比上期 baseline）+ n8n 定时工作流 + Telegram；red flag 规则清单届时另行设计。
+- 保险佬「三家保司报价比较」（复用库内 insurers/plans/plan_tiers/riders 表）与全天候保险问答。
+- 税务专家 M form 生成、企业主薪酬结构专项。
+- 资产达人资产分配导图 (illustration) 与规划前后 Before/After 对比报告。
+- 小会计月度存款目标监督（依赖主动监控链路）。
 
 ## 风险与合规
 
