@@ -143,3 +143,15 @@ Deno.test("annualizeInflows and annualPremiumTotal use frequency multipliers", (
   assertEquals(annualizeInflows(cfpFixture.inflows), 108000);
   assertEquals(annualPremiumTotal(cfpFixture.policies), 3600); // 200×12 + 1200
 });
+
+Deno.test("buildCfpCnaInput baseline overrides: after-emergency liquid assets + real education need", () => {
+  const input = buildCfpCnaInput(cfpFixture, {
+    liquid_assets: 14000,
+    education_need: 148024,
+  });
+  assertEquals(input.liquid_assets, 14000);
+  assertEquals(input.education_need_override, 148024);
+  // No overrides → original behaviour (raw liquid sum, no override field).
+  const plain = buildCfpCnaInput(cfpFixture);
+  assertEquals("education_need_override" in plain, false);
+});

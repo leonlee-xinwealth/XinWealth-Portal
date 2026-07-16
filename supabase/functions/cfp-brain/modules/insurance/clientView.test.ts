@@ -1,7 +1,7 @@
 import { assert } from "jsr:@std/assert@1";
 import { buildClientViewPrompt } from "./clientView.ts";
-import { computeCna } from "../_shared/insurance/cna.ts";
-import { buildCfpCnaInput, type CfpFinancials } from "../_shared/insurance/mapping.ts";
+import { computeCna } from "../../../_shared/insurance/cna.ts";
+import { buildCfpCnaInput, type CfpFinancials } from "../../../_shared/insurance/mapping.ts";
 import type { SectionNarrative } from "./assemble.ts";
 
 // The simplify pass copies the whitelisted narrative PROSE verbatim, so a

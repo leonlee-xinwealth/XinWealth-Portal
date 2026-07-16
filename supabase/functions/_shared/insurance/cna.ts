@@ -21,6 +21,9 @@ export interface CnaInput {
   ci_cover: number;
   has_medical: boolean;
   dependents: number;
+  /** real education-goal future cost (from client_goals via the CFP baseline);
+   * replaces the per-child constant estimate when present */
+  education_need_override?: number;
 }
 
 export interface CnaGap {
@@ -70,10 +73,13 @@ export function incomeBandMidpoint(band: string): number {
 
 export function computeCna(input: CnaInput): CnaResult {
   const d = CNA_DEFAULTS;
+  const useEducationOverride = input.education_need_override != null;
   const assumptions: string[] = [
     `收入替代年数按 ${d.income_replacement_years} 年计算`,
-    `教育金按每名受抚养人 RM${d.education_per_child.toLocaleString()}、` +
-      `每年 ${d.education_inflation * 100}% 通胀、${d.education_years} 年期估算`,
+    useEducationOverride
+      ? "教育金需求取自客户的真实教育目标（目标规划模块推算的未来成本）"
+      : `教育金按每名受抚养人 RM${d.education_per_child.toLocaleString()}、` +
+        `每年 ${d.education_inflation * 100}% 通胀、${d.education_years} 年期估算`,
     `重疾保障需求按年收入 ${d.ci_income_multiple} 倍估算`,
     `所有金额取整到最近 RM${d.rounding.toLocaleString()}`,
   ];
@@ -92,8 +98,10 @@ export function computeCna(input: CnaInput): CnaResult {
   const liquidAssets = input.liquid_assets ?? 0;
 
   const incomeReplacement = input.annual_income * d.income_replacement_years;
-  const education = input.dependents * d.education_per_child *
-    Math.pow(1 + d.education_inflation, d.education_years);
+  const education = useEducationOverride
+    ? input.education_need_override!
+    : input.dependents * d.education_per_child *
+      Math.pow(1 + d.education_inflation, d.education_years);
   const totalLifeNeed = incomeReplacement + liabilities + education;
   const ciNeed = input.annual_income * d.ci_income_multiple;
 

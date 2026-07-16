@@ -2,8 +2,8 @@
 // Identifying fields (provider, policy_number, dates) are filled here from DB
 // rows AFTER the LLM call — they never enter prompts.
 
-import type { CnaResult } from "../_shared/insurance/cna.ts";
-import { annualPremiumTotal, type CfpFinancials } from "../_shared/insurance/mapping.ts";
+import type { CnaResult } from "../../../_shared/insurance/cna.ts";
+import { annualPremiumTotal, type CfpFinancials } from "../../../_shared/insurance/mapping.ts";
 
 export interface SectionNarrative {
   executive_summary: {

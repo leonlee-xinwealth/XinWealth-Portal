@@ -6,9 +6,9 @@
 // retry/backoff, PII discipline, and the IRON RULE that the LLM must NEVER
 // compute or alter any number — it only rephrases and quotes figures verbatim.
 
-import type { CnaResult } from "../_shared/insurance/cna.ts";
+import type { CnaResult } from "../../../_shared/insurance/cna.ts";
 import type { SectionNarrative } from "./assemble.ts";
-import { callGeminiJson } from "../_shared/llm/gemini.ts";
+import { callGeminiJson } from "../../../_shared/llm/gemini.ts";
 
 /** Final layman-facing view. `version` and `language` are stamped in code;
  * every prose field is produced by the LLM from PII-free input. */

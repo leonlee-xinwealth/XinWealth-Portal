@@ -164,6 +164,7 @@ export function computeBaseline(
     solvency_ratio: totalAssets > 0
       ? Number((netWorth / totalAssets).toFixed(4))
       : null,
+    current_year: now.getFullYear(),
     age,
     retirement_age: retirementAge,
     years_to_retirement: age != null ? Math.max(0, retirementAge - age) : null,

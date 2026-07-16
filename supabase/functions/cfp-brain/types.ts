@@ -165,6 +165,7 @@ export interface FinancialBaseline {
   savings_ratio: number | null;
   solvency_ratio: number | null;
   // demographics
+  current_year: number;
   age: number | null;
   retirement_age: number;
   years_to_retirement: number | null;

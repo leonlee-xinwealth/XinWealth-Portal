@@ -3,11 +3,11 @@
 // tier; swap generateSectionNarrative's implementation to move to Claude.
 // The LLM narrates deterministic CNA numbers — it must never compute them.
 
-import type { CnaResult } from "../_shared/insurance/cna.ts";
-import type { CfpFinancials } from "../_shared/insurance/mapping.ts";
-import { annualPremiumTotal } from "../_shared/insurance/mapping.ts";
+import type { CnaResult } from "../../../_shared/insurance/cna.ts";
+import type { CfpFinancials } from "../../../_shared/insurance/mapping.ts";
+import { annualPremiumTotal } from "../../../_shared/insurance/mapping.ts";
 import type { SectionNarrative } from "./assemble.ts";
-import { callGeminiJson } from "../_shared/llm/gemini.ts";
+import { callGeminiJson } from "../../../_shared/llm/gemini.ts";
 
 const COVERAGE_CATEGORIES = [
   "life",
@@ -16,7 +16,7 @@ const COVERAGE_CATEGORIES = [
   "accident",
 ];
 
-const SECTION_RESPONSE_SCHEMA = {
+export const SECTION_RESPONSE_SCHEMA = {
   type: "OBJECT",
   properties: {
     executive_summary: {

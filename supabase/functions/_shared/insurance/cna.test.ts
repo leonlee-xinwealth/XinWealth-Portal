@@ -122,3 +122,26 @@ Deno.test("CNA_DEFAULTS are echoed into assumptions", () => {
     ),
   );
 });
+
+Deno.test("computeCna education override replaces the per-child constant", () => {
+  const base = {
+    annual_income: 120000,
+    liabilities_total: 0,
+    liquid_assets: 0,
+    life_cover: 0,
+    ci_cover: 0,
+    has_medical: false,
+    dependents: 2,
+  };
+  const withOverride = computeCna({ ...base, education_need_override: 200000 });
+  assertEquals(withOverride.needs.education, 200000);
+  assertEquals(
+    withOverride.assumptions.some((a) => a.includes("真实教育目标")),
+    true,
+  );
+  const withoutOverride = computeCna(base);
+  assertEquals(
+    withoutOverride.needs.education,
+    Math.round(2 * 80000 * Math.pow(1.04, 10) / 1000) * 1000,
+  );
+});

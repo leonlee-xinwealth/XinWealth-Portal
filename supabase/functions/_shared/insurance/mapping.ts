@@ -160,11 +160,24 @@ export function annualPremiumTotal(
   );
 }
 
+/** Baseline-driven overrides from the CFP multi-agent orchestrator:
+ * liquid_assets = liquid assets AFTER the emergency-fund reservation (stops
+ * the same ringgit backing both the emergency fund and the life gap), and
+ * education_need = the real education-goal future cost. Prospect mode and
+ * legacy callers pass nothing and keep the original behaviour. */
+export interface CnaBaselineOverrides {
+  liquid_assets?: number;
+  education_need?: number;
+}
+
 /** Build CnaInput from live DB financials.
  * Coverage now comes from the base plan (death/TPD) PLUS its riders — a plan is
  * a base benefit with categorised riders (medical, CI, cancer, accident, …), so
  * CI/medical live on riders, not the flat policy_type. */
-export function buildCfpCnaInput(f: CfpFinancials): CnaInput {
+export function buildCfpCnaInput(
+  f: CfpFinancials,
+  overrides: CnaBaselineOverrides = {},
+): CnaInput {
   const allRiders = f.policies.flatMap((p) => p.policy_riders ?? []);
   const riderSumByCategories = (cats: string[]) =>
     allRiders
@@ -193,12 +206,15 @@ export function buildCfpCnaInput(f: CfpFinancials): CnaInput {
       (s, l) => s + (l.outstanding_balance ?? 0),
       0,
     ),
-    liquid_assets: f.assets
+    liquid_assets: overrides.liquid_assets ?? f.assets
       .filter((a) => LIQUID_ASSET_TYPES.includes(a.asset_type))
       .reduce((s, a) => s + (a.current_value ?? 0), 0),
     life_cover: lifeCover,
     ci_cover: ciCover,
     has_medical: hasMedical,
     dependents: f.client.number_of_dependants ?? 0,
+    ...(overrides.education_need != null
+      ? { education_need_override: overrides.education_need }
+      : {}),
   };
 }

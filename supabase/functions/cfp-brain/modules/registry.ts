@@ -1,7 +1,11 @@
 // Module registry — the single place a new CFP section plugs in. Modules ship
 // incrementally by phase; computeAll and index.ts tolerate missing entries.
+// Execution order is governed by SECTION_ORDER in types.ts, not by this array.
 
 import type { CfpModule, SectionType } from "../types.ts";
+import { cashflowModule } from "./cashflow/section.ts";
+import { goalsModule } from "./goals/section.ts";
+import { insuranceModule } from "./insurance/module.ts";
 
 export const SECTION_LABELS: Record<SectionType, { en: string; zh: string }> = {
   cashflow_planning: { en: "Cashflow & Budget Planning", zh: "现金流规划与财务预算" },
@@ -15,14 +19,11 @@ export const SECTION_LABELS: Record<SectionType, { en: string; zh: string }> = {
 };
 
 // deno-lint-ignore no-explicit-any
-export const ORDERED_MODULES: CfpModule<any, any, any>[] = [];
-
-export function registerModule(
-  // deno-lint-ignore no-explicit-any
-  module: CfpModule<any, any, any>,
-): void {
-  ORDERED_MODULES.push(module);
-}
+export const ORDERED_MODULES: CfpModule<any, any, any>[] = [
+  cashflowModule,
+  goalsModule,
+  insuranceModule,
+];
 
 export function findModule(
   sectionType: string,
