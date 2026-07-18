@@ -36,5 +36,17 @@ export function computeAll(
     det[m.section_type] = d;
     if (m.updateBaseline) baseline = m.updateBaseline(baseline, d);
   }
+
+  // Feed 首席规划师's deterministic budget waterfall back into the baseline so
+  // every section's narrative prompt is drafted against the SAME allocation —
+  // no more "insurance asks for RM500 while retirement asks for the same
+  // RM500" when the surplus can't fund both.
+  const synthesis = det.financial_health as
+    | { budget?: FinancialBaseline["budget_summary"] }
+    | undefined;
+  if (synthesis?.budget) {
+    baseline = { ...baseline, budget_summary: synthesis.budget };
+  }
+
   return { baseline, det };
 }

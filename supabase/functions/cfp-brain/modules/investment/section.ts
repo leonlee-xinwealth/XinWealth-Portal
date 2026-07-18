@@ -3,6 +3,7 @@
 // names, institutions or instrument names ever reach the LLM.
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
+import { budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
 import { computeInvestment, type InvestmentDet } from "./calc.ts";
 
 export interface InvestmentNarrative {
@@ -74,6 +75,7 @@ export function buildInvestmentPrompt(
     marital_status: b.marital_status,
     dependents: b.dependents,
     investment: det,
+    budget_context: sectionBudgetContext(b, "wealth"),
   };
   return [
     "You are the analysis assistant of a licensed financial advisor in Malaysia,",
@@ -117,6 +119,12 @@ export function buildInvestmentPrompt(
     "If risk_band_defaulted is true, mention plainly that no risk profile was",
     "on file so a balanced default was used, and recommend completing a risk",
     "assessment.",
+    "",
+    ...budgetInstructionLines("wealth-building"),
+    "- New money to deploy is ONLY the wealth line's allocated_annual (the",
+    "  surplus left AFTER protection, emergency fund, retirement and goals are",
+    "  funded by the same budget) — never redirect those earlier allocations",
+    "  into investments.",
     "",
     "Tone: professional, plain English, written so a layperson feels the",
     "real-world stakes. This is a draft the advisor will edit.",

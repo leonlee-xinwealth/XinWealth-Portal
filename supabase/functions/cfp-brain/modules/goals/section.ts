@@ -4,6 +4,7 @@
 // back into the content by code AFTER the LLM call.
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
+import { budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
 import { computeGoals, type GoalsDet } from "./calc.ts";
 
 export interface GoalsNarrative {
@@ -107,6 +108,7 @@ export function buildGoalsPrompt(det: GoalsDet, b: FinancialBaseline): string {
       on_track: g.on_track,
     })),
     total_required_monthly: det.total_required_monthly,
+    budget_context: sectionBudgetContext(b, "goals"),
   };
   return [
     "You are the analysis assistant of a licensed financial advisor in Malaysia,",
@@ -139,6 +141,7 @@ export function buildGoalsPrompt(det: GoalsDet, b: FinancialBaseline): string {
     "If no_goals is true: write a short overview explaining no life goals are on",
     "record yet and recommend a goal-discovery conversation; goal_commentaries",
     "must be an empty array.",
+    ...budgetInstructionLines("goal-funding"),
     "",
     "Tone: professional, plain English, human. Draft for the advisor to edit.",
     "",

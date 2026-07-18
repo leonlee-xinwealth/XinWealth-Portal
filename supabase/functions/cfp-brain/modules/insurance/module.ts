@@ -15,6 +15,7 @@ import {
   type CfpFinancials,
 } from "../../../_shared/insurance/mapping.ts";
 import { buildSectionPrompt, SECTION_RESPONSE_SCHEMA } from "./section.ts";
+import { sectionBudgetContext } from "../../budgetContext.ts";
 import {
   buildSectionContent,
   type InsuranceSectionContent,
@@ -98,8 +99,12 @@ export const insuranceModule: CfpModule<
     ...b,
     annual_premium_current: det.annual_premium_total,
   }),
-  buildPrompt: (det, _b, f) => ({
-    prompt: buildSectionPrompt(det.cna, toCfpFinancials(f)),
+  buildPrompt: (det, b, f) => ({
+    prompt: buildSectionPrompt(
+      det.cna,
+      toCfpFinancials(f),
+      sectionBudgetContext(b, "protection"),
+    ),
     schema: SECTION_RESPONSE_SCHEMA,
   }),
   assemble: (det, narrative, f) =>

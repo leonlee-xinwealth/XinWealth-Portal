@@ -8,6 +8,10 @@ import type { CfpFinancials } from "../../../_shared/insurance/mapping.ts";
 import { annualPremiumTotal } from "../../../_shared/insurance/mapping.ts";
 import type { SectionNarrative } from "./assemble.ts";
 import { callGeminiJson } from "../../../_shared/llm/gemini.ts";
+import {
+  budgetInstructionLines,
+  type SectionBudgetContext,
+} from "../../budgetContext.ts";
 
 const COVERAGE_CATEGORIES = [
   "life",
@@ -86,6 +90,7 @@ export const SECTION_RESPONSE_SCHEMA = {
 export function buildSectionPrompt(
   cna: CnaResult,
   financials: CfpFinancials,
+  budgetContext: SectionBudgetContext | null = null,
 ): string {
   const age = financials.client.date_of_birth
     ? Math.floor(
@@ -183,11 +188,16 @@ export function buildSectionPrompt(
     "   Ground every scenario in the client context and CNA numbers; never invent",
     "   assets or amounts that are not in the data.",
     "",
+    ...budgetInstructionLines("protection top-up"),
+    "- Protection sits FIRST in the priority order: downside risk is secured",
+    "  before any upside planning, so lead your recommendations with the",
+    "  allocated protection budget as the plan's first call on surplus.",
+    "",
     "Tone: professional and objective, but written so a layperson feels the",
     "real-world stakes. Plain English. This is a draft the advisor will edit.",
     "",
     "Client context JSON:",
-    JSON.stringify(clientContext),
+    JSON.stringify({ ...clientContext, budget_context: budgetContext }),
     "",
     "CNA JSON (sole source of numbers):",
     JSON.stringify(cna),

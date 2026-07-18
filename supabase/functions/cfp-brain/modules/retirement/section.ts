@@ -3,6 +3,7 @@
 // institutions or account numbers ever reach the LLM.
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
+import { budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
 import { computeRetirement, type RetirementDet } from "./calc.ts";
 
 export interface RetirementNarrative {
@@ -76,6 +77,7 @@ export function buildRetirementPrompt(
     dependents: b.dependents,
     monthly_surplus: Math.round(b.annual_surplus / 12),
     retirement: det,
+    budget_context: sectionBudgetContext(b, "retirement"),
   };
   return [
     "You are the analysis assistant of a licensed financial advisor in Malaysia,",
@@ -125,6 +127,8 @@ export function buildRetirementPrompt(
     "so the years-to-retirement horizon cannot be computed, and that this is the",
     "priority before any projection is meaningful; gap_analysis and funding_plan",
     "should not invent a horizon or capital figure in that case.",
+    "",
+    ...budgetInstructionLines("retirement top-up"),
     "",
     "Tone: professional, plain English, written so a layperson feels the",
     "real-world stakes. This is a draft the advisor will edit.",

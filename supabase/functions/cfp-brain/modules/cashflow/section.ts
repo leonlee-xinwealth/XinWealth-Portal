@@ -4,6 +4,7 @@
 // no names, institutions or account details ever reach the LLM.
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
+import { budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
 import { type CashflowDet, computeCashflow } from "./calc.ts";
 
 export interface CashflowNarrative {
@@ -76,6 +77,7 @@ export function buildCashflowPrompt(
     dependents: b.dependents,
     monthly_debt_service: b.monthly_debt_service,
     cashflow: det,
+    budget_context: sectionBudgetContext(b, "emergency"),
   };
   return [
     "You are the analysis assistant of a licensed financial advisor in Malaysia,",
@@ -113,6 +115,7 @@ export function buildCashflowPrompt(
     "",
     "If cashflow.insufficient_data is true, say plainly that recurring income",
     "records are missing and the priority is completing the data.",
+    ...budgetInstructionLines("emergency-fund build-up"),
     "",
     "Tone: professional, plain English, written so a layperson feels the",
     "real-world stakes. This is a draft the advisor will edit.",

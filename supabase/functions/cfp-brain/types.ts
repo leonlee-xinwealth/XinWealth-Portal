@@ -184,6 +184,23 @@ export interface FinancialBaseline {
   // filled back by earlier modules for later ones
   goal_education_need?: number;
   annual_premium_current?: number;
+  /** 首席规划师's deterministic budget waterfall (保障→紧急→退休→目标→增值),
+   * written back by computeAll AFTER all modules run so every section's
+   * NARRATIVE is drafted against the same allocation — interlinked, never
+   * isolated. Absent only while the synthesis module is unregistered. */
+  budget_summary?: {
+    annual_surplus: number;
+    required_total: number;
+    over_budget: boolean;
+    lines: Array<{
+      key: string;
+      label_zh: string;
+      label_en: string;
+      required_annual: number;
+      allocated_annual: number;
+      deferred_annual: number;
+    }>;
+  };
   baseline_notes: string[];
 }
 
