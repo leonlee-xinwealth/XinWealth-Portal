@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { CfpSectionType, SECTION_META } from './sectionMeta';
 import ChatPanel from './ChatPanel';
-import type { T } from './primitives';
+import { TwoStepButton, type T } from './primitives';
 
 // Generic shell for every CFP section card: lifecycle states, generate /
 // client-view / save / approve actions, renderer dispatch. Per-section layout
@@ -280,13 +280,13 @@ export default function SectionCard({
                 >
                   ✓ {t('Approve Section', '定稿本节')}
                 </button>
-                <button
-                  onClick={() => { if (confirm(t('Regenerate will overwrite the current draft. Continue?', '重新生成会覆盖当前草稿，继续？'))) generate(); }}
+                <TwoStepButton
+                  label={<>↻ {t('Regenerate', '重新生成')}</>}
+                  confirmLabel={<>↻ {t('Overwrite current draft?', '确认覆盖当前草稿？')}</>}
+                  onConfirm={generate}
                   disabled={invoking}
                   className="ml-auto text-sm text-slate-400 hover:text-xin-blue font-semibold transition-colors disabled:opacity-50"
-                >
-                  ↻ {t('Regenerate', '重新生成')}
-                </button>
+                />
               </>
             )}
             {section.generated_at && (

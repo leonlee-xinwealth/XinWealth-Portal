@@ -3,7 +3,7 @@ import { supabase } from '../../../../lib/supabaseClient';
 import type { RendererProps } from '../SectionCard';
 import {
   AssumptionsList, ExecutiveSummaryGrid, fmtRM, GenericClientViewEditor,
-  NarrativeBlock, RecommendationList, SectionHeading,
+  NarrativeBlock, RecommendationList, SectionHeading, TwoStepButton,
 } from '../primitives';
 
 // Goals section renderer + the client_goals CRUD table that feeds it.
@@ -63,7 +63,6 @@ export function GoalsCrud({
   }
 
   async function remove(id: string) {
-    if (!confirm(t('Delete this goal?', '删除该目标？'))) return;
     const { error } = await supabase.from('client_goals').delete().eq('id', id);
     if (error) setErr(error.message);
     else { await load(); onChanged?.(); }
@@ -128,7 +127,13 @@ export function GoalsCrud({
                       </td>
                     ))}
                     <td className="py-1 text-right">
-                      <button onClick={() => remove(g.id)} className="text-slate-300 hover:text-red-500" title={t('Delete', '删除')}>✕</button>
+                      <TwoStepButton
+                        label="✕"
+                        confirmLabel={t('Delete?', '确认删除？')}
+                        onConfirm={() => remove(g.id)}
+                        className="text-slate-300 hover:text-red-500 text-xs"
+                        title={t('Delete', '删除')}
+                      />
                     </td>
                   </tr>
                 ))}

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
-import type { T } from './primitives';
+import { TwoStepButton, type T } from './primitives';
 
 // Advisor ↔ agent chat for one section: ask the persona why it planned things
 // this way, or instruct it to revise the draft narrative. The edge function
@@ -50,10 +50,6 @@ export default function ChatPanel({
   async function send(mode: 'chat' | 'revise') {
     const text = input.trim();
     if (!text || busy) return;
-    if (mode === 'revise' && !confirm(t(
-      'The agent will rewrite this section\'s narrative per your instruction (numbers stay locked). Continue?',
-      '智能体将按你的指示重写本节叙述（数字保持锁定）。继续？',
-    ))) return;
     setBusy(mode);
     setErr(null);
     // optimistic append
@@ -146,14 +142,14 @@ export default function ChatPanel({
                 {t('Send', '发送')}
               </button>
               {canRevise && (
-                <button
-                  onClick={() => send('revise')}
+                <TwoStepButton
+                  label={<>✍️ {t('Revise draft with this', '按此修改草稿')}</>}
+                  confirmLabel={<>✍️ {t('Overwrite narrative?', '确认重写叙述？')}</>}
+                  onConfirm={() => send('revise')}
                   disabled={!!busy || !input.trim()}
                   className="bg-white border border-xin-blue/30 text-xin-blue text-xs font-semibold px-4 py-1.5 rounded-lg hover:bg-xin-blue/5 transition-colors disabled:opacity-50"
-                  title={t('The agent rewrites the narrative per this instruction', '智能体按此指示重写叙述')}
-                >
-                  ✍️ {t('Revise draft with this', '按此修改草稿')}
-                </button>
+                  title={t('The agent rewrites the narrative per this instruction (numbers stay locked)', '智能体按此指示重写叙述（数字保持锁定）')}
+                />
               )}
               <span className="text-[11px] text-slate-400 ml-auto">
                 {t('Do not enter names or ID numbers.', '请勿输入姓名/证件号等个人信息。')}

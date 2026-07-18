@@ -202,6 +202,39 @@ export function GapBar({
   );
 }
 
+/** Two-step destructive-action button: first click arms it (label swaps to a
+ * confirm prompt for 4s), second click fires. Replaces native confirm(),
+ * which blocks the tab and browser automation. */
+export function TwoStepButton({
+  label, confirmLabel, onConfirm, className, disabled, title,
+}: {
+  label: React.ReactNode;
+  confirmLabel: React.ReactNode;
+  onConfirm: () => void;
+  className?: string;
+  disabled?: boolean;
+  title?: string;
+}) {
+  const [armed, setArmed] = React.useState(false);
+  React.useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return (
+    <button
+      onClick={() => {
+        if (armed) { setArmed(false); onConfirm(); } else setArmed(true);
+      }}
+      disabled={disabled}
+      title={title}
+      className={`${className ?? ''} ${armed ? 'text-red-600 font-bold' : ''}`}
+    >
+      {armed ? confirmLabel : label}
+    </button>
+  );
+}
+
 export function AssumptionsList({ items }: { items: string[] | undefined }) {
   if (!items?.length) return null;
   return <p className="text-[11px] text-slate-400 mt-2">{items.join(' · ')}</p>;
