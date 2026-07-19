@@ -57,5 +57,8 @@ export function budgetInstructionLines(sectionNoun: string): string[] {
     "- NEVER recommend spending beyond the allocated amount, and never claim",
     "  budget that the allocation assigns to another section.",
     "- If budget_context is null, omit any budget commentary.",
+    "- Write in natural, client-facing prose. NEVER echo a JSON field name or",
+    "  code identifier (e.g. over_budget, asset_transfers_monthly, deferred_",
+    "  annual) — always describe the concept in plain words.",
   ];
 }

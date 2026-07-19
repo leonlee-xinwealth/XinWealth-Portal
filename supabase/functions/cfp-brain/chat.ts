@@ -80,6 +80,8 @@ export function buildChatPrompt(
     "",
     "Reply in the language the advisor used (Chinese or English), concise and",
     "concrete — 1-3 short paragraphs, citing the relevant figures verbatim.",
+    "Write natural prose — NEVER echo a JSON field name or code identifier from",
+    "the context (e.g. over_budget, asset_transfers_monthly); use plain words.",
     "",
     "Deterministic analysis (sole source of numbers):",
     JSON.stringify(det),
