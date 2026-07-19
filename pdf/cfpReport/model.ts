@@ -24,7 +24,11 @@ export type CfpLabelKey =
   | "findings" | "recommendations" | "actionPlan" | "expectedCompletion" | "remarks" | "glossary" | "disclaimer" | "assumptions"
   | "overallHealthTitle" | "overallAssessment" | "priorityPlan" | "phase" | "allocated" | "deferredNote"
   | "wealthFreedomStage" | "passiveIncome" | "monthlyExpensesLabel" | "nextStageGap" | "stageOf"
-  | "backTitle" | "questions" | "contactUs" | "notGenerated";
+  | "backTitle" | "questions" | "contactUs" | "notGenerated"
+  | "otherCategory" | "onTrack" | "notOnTrack" | "hasCover" | "noCover"
+  | "survives85" | "survives100" | "depletes85" | "depletes100"
+  | "capitalNeeded" | "totalProjected" | "currentAllocation" | "scoreComponents" | "budgetWaterfall"
+  | "surplus" | "netAssets" | "netLiabilities";
 
 export const LABELS: Record<CfpReportLanguage, Record<CfpLabelKey, string>> = {
   en: {
@@ -96,6 +100,23 @@ export const LABELS: Record<CfpReportLanguage, Record<CfpLabelKey, string>> = {
     questions: "Questions? Contact us.",
     contactUs: "Contact us",
     notGenerated: "Not yet generated",
+    otherCategory: "Other",
+    onTrack: "On Track",
+    notOnTrack: "Needs Attention",
+    hasCover: "Covered",
+    noCover: "Not Covered",
+    survives85: "Lasts to 85",
+    survives100: "Lasts to 100",
+    depletes85: "Depletes before 85",
+    depletes100: "Depletes before 100",
+    capitalNeeded: "Capital Needed",
+    totalProjected: "Total Projected",
+    currentAllocation: "Current Allocation",
+    scoreComponents: "Score Components",
+    budgetWaterfall: "Budget Allocation",
+    surplus: "Surplus",
+    netAssets: "Total Assets",
+    netLiabilities: "Total Liabilities",
   },
   zh: {
     reportTitle: "财务报告",
@@ -166,6 +187,23 @@ export const LABELS: Record<CfpReportLanguage, Record<CfpLabelKey, string>> = {
     questions: "有任何问题？欢迎与我们联系。",
     contactUs: "联系我们",
     notGenerated: "尚未生成",
+    otherCategory: "其他",
+    onTrack: "已达标",
+    notOnTrack: "需关注",
+    hasCover: "已投保",
+    noCover: "未投保",
+    survives85: "可持续至85岁",
+    survives100: "可持续至100岁",
+    depletes85: "85岁前耗尽",
+    depletes100: "100岁前耗尽",
+    capitalNeeded: "所需资本",
+    totalProjected: "预计累积",
+    currentAllocation: "当前配置",
+    scoreComponents: "评分构成",
+    budgetWaterfall: "预算分配",
+    surplus: "盈余",
+    netAssets: "资产合计",
+    netLiabilities: "负债合计",
   },
 };
 
@@ -266,3 +304,48 @@ export function verdictEmergencyMonths(v: number | null | undefined): RatioBand 
 export function verdictSolvency(v: number | null | undefined): RatioBand {
   return v == null ? "none" : v >= 0.5 ? "good" : "bad";
 }
+
+// -------------------------------------------------------- breakdown folding
+export interface FoldedCategory {
+  category: string;
+  monthly_amount: number;
+}
+
+/** Top-N categories by amount, remainder folded into one "Other" row — keeps
+ * HBar lists on the Cash Flow page readable regardless of how many raw
+ * expense/income categories the client has on file. */
+export function topCategoriesWithOther(
+  rows: Array<{ category: string; monthly_amount: number }> | null | undefined,
+  topN: number,
+  lang: CfpReportLanguage,
+): FoldedCategory[] {
+  const sorted = [...(rows ?? [])].sort((a, b) => b.monthly_amount - a.monthly_amount);
+  if (sorted.length <= topN) return sorted;
+  const head = sorted.slice(0, topN);
+  const restTotal = sorted.slice(topN).reduce((s, r) => s + r.monthly_amount, 0);
+  return [...head, { category: LABELS[lang].otherCategory, monthly_amount: restTotal }];
+}
+
+// ------------------------------------------------------- investment allocation
+export const ALLOCATION_BUCKET_LABEL: Record<CfpReportLanguage, Record<string, string>> = {
+  en: { equity: "Equity", bond: "Bond", cash: "Cash", alternatives: "Alternatives" },
+  zh: { equity: "股票", bond: "债券", cash: "现金", alternatives: "另类资产" },
+};
+
+// --------------------------------------------------- health score components
+export const SCORE_COMPONENT_LABEL: Record<CfpReportLanguage, Record<string, string>> = {
+  en: {
+    emergency: "Emergency Fund",
+    savings: "Savings Ratio",
+    debt: "Debt Service",
+    protection: "Protection Coverage",
+    retirement: "Retirement Funding",
+  },
+  zh: {
+    emergency: "紧急预备金",
+    savings: "储蓄率",
+    debt: "偿债压力",
+    protection: "保障覆盖度",
+    retirement: "退休资金覆盖度",
+  },
+};
