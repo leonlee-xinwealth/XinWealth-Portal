@@ -199,7 +199,7 @@ export default function CfpReportPdf({ data }: { data: CfpReportData }) {
         {DISCLAIMER_EN.map((p, i) => <Text style={s.para} key={i}>{p}</Text>)}
         <Text style={s.h2}>中文</Text>
         {DISCLAIMER_ZH.map((p, i) => <Text style={s.para} key={i}>{p}</Text>)}
-        <Text style={[s.para, { color: C.muted, fontStyle: "italic" }]}>{t.disclaimerConsult}</Text>
+        <Text style={[s.para, { color: C.muted }]}>{t.disclaimerConsult}</Text>
         <Footer label={t.reportTitle} />
       </Page>
 
@@ -227,7 +227,7 @@ export default function CfpReportPdf({ data }: { data: CfpReportData }) {
                 <Text style={[s.td, { width: "18%" }]}>{row.remarks}</Text>
               </>
             ) : (
-              <Text style={[s.td, { width: "82%", color: C.faint, fontStyle: "italic" }]}>
+              <Text style={[s.td, { width: "82%", color: C.faint }]}>
                 {lang === "zh" ? "未纳入本期 / Not included this period" : "Not included this period / 未纳入本期"}
               </Text>
             )}
