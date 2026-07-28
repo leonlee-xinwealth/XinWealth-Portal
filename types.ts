@@ -262,7 +262,11 @@ export interface KYCData {
   
   // PDPA
   pdpaAccepted: boolean;
-  
+
+  // Advisor attribution — set from the /kyc?ref=<code> link so the submission
+  // is routed to the correct advisor. Optional; API falls back to a default.
+  advisorRef?: string;
+
   // Next steps
   income: KYCIncomeData;
   assets: KYCAssetsData;

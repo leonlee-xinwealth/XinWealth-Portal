@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useSyncExternalStore } from 'r
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Plus } from 'lucide-react';
+import { Plus, Link2, Check } from 'lucide-react';
 import KanbanBoard from '../pipeline/KanbanBoard';
 import KanbanMobile from '../pipeline/KanbanMobile';
 import LeadDetailPanel from '../pipeline/LeadDetailPanel';
@@ -18,6 +18,8 @@ export default function Pipeline() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [advisorId, setAdvisorId] = useState<string | null>(null);
+  const [referralCode, setReferralCode] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [showLost, setShowLost] = useState(false);
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [pendingLost, setPendingLost] = useState<{ leadId: string } | null>(null);
@@ -27,9 +29,10 @@ export default function Pipeline() {
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { data: adv } = await supabase.from('advisors').select('id').eq('user_id', user.id).single();
+    const { data: adv } = await supabase.from('advisors').select('id, referral_code').eq('user_id', user.id).single();
     if (!adv) return;
     setAdvisorId(adv.id);
+    setReferralCode(adv.referral_code ?? null);
 
     const { data } = await supabase
       .from('clients')
@@ -93,6 +96,19 @@ export default function Pipeline() {
     () => false
   );
 
+  async function copyKycLink() {
+    const link = referralCode
+      ? `${window.location.origin}/kyc?ref=${referralCode}`
+      : `${window.location.origin}/kyc`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt(t('Copy this KYC link:', '复制此 KYC 链接：'), link);
+    }
+  }
+
   if (loading) return <Loader />;
 
   return (
@@ -118,6 +134,14 @@ export default function Pipeline() {
             </div>
             {t('Show Lost', '显示流失')}
           </label>
+          {/* Copy personal KYC link for clients to self-fill */}
+          <button
+            onClick={copyKycLink}
+            className="flex items-center gap-1.5 bg-white border border-slate-200 text-slate-600 text-sm font-medium px-4 py-2 rounded-xl hover:bg-slate-50 transition-colors"
+          >
+            {copied ? <Check size={15} className="text-emerald-500" /> : <Link2 size={15} />}
+            {copied ? t('Copied!', '已复制！') : t('Copy KYC Link', '复制 KYC 链接')}
+          </button>
           {/* New prospect */}
           <button
             onClick={() => navigate('/advisor/clients/new?quick=1')}

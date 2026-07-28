@@ -188,12 +188,13 @@ async function handleEmailCheck(req, res) {
     return res.status(400).json({ error: 'Valid email is required' });
   }
 
-  // Same duplicate rule as the POST hard-block below: an email that already
-  // exists in clients cannot onboard again. (The old /api/check-email queried
-  // a nonexistent 'profiles' table and always 500'd.)
+  // Mirrors the POST rule below: a first-time email, or one that belongs to a
+  // prospect whose KYC is still 'pending' (advisor pre-created them), may submit.
+  // Only an already-submitted KYC blocks re-entry. (The old /api/check-email
+  // queried a nonexistent 'profiles' table and always 500'd.)
   const { data, error } = await supabaseAdmin
     .from('clients')
-    .select('id')
+    .select('id, kyc_status')
     .ilike('email', email)
     .maybeSingle();
 
@@ -202,7 +203,7 @@ async function handleEmailCheck(req, res) {
     return res.status(500).json({ error: error.message });
   }
 
-  if (data) {
+  if (data && data.kyc_status && data.kyc_status !== 'pending') {
     return res.status(200).json({ available: false, reason: 'DUPLICATE_EMAIL' });
   }
   return res.status(200).json({ available: true });
@@ -235,17 +236,36 @@ export default async function handler(req, res) {
     const fullName = buildFullName(basic);
     if (!fullName) return res.status(400).json({ error: 'Name is required' });
 
-    // Hard-block duplicate onboarding. /kyc is for first-time entry only;
-    // anyone whose email already exists must contact their advisor.
+    // Resolve which advisor this submission belongs to, from the ?ref=<code>
+    // shared link (advisors.referral_code). Falls back to the default advisor
+    // when ref is missing or unknown, so legacy /kyc links keep working.
+    const ref = String(basic.advisorRef || req.query?.ref || '').trim().toLowerCase();
+    let advisorId = DEFAULT_ADVISOR_ID;
+    if (ref) {
+      const { data: refAdvisor } = await supabaseAdmin
+        .from('advisors')
+        .select('id')
+        .eq('referral_code', ref)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (refAdvisor) advisorId = refAdvisor.id;
+    }
+
+    // Look up any existing client with this email. /kyc enriches a prospect the
+    // advisor already created (kyc_status still 'pending'); once a KYC has been
+    // submitted, further public submissions are blocked (contact your advisor).
     const { data: existingClient, error: lookupErr } = await supabaseAdmin
       .from('clients')
-      .select('id')
+      .select('id, kyc_status')
       .ilike('email', email)
       .maybeSingle();
     if (lookupErr) {
       throw new Error(`Failed to check existing client: ${lookupErr.message}`);
     }
-    if (existingClient) {
+    const isUpdate = Boolean(
+      existingClient && (!existingClient.kyc_status || existingClient.kyc_status === 'pending')
+    );
+    if (existingClient && !isUpdate) {
       return res.status(409).json({
         error: 'This email has already been registered. Please contact your financial advisor to update your information.',
         code: 'DUPLICATE_EMAIL'
@@ -254,14 +274,16 @@ export default async function handler(req, res) {
 
     const periodMonth = periodMonthFromKyc(basic);
 
-    // 1. Create the client (prospect) and capture its id
+    // 1. Create or enrich the client (prospect) and capture its id
     const retirementAgeRaw = parseInt(basic.retirementAge, 10);
     const retirementAge = Number.isFinite(retirementAgeRaw) && retirementAgeRaw >= 40 && retirementAgeRaw <= 100
       ? retirementAgeRaw
       : 55;
 
+    // Fields written on both create and enrich. advisor_id / status /
+    // pipeline_stage are set only on create — enriching an existing prospect
+    // never reassigns it to a different advisor.
     const clientData = {
-      advisor_id:        DEFAULT_ADVISOR_ID,
       full_name:         fullName,
       salutation:        basic.salutation || null,
       email,
@@ -273,31 +295,46 @@ export default async function handler(req, res) {
       tax_residency:     mapEnum(basic.taxStatus, TAX_STATUS_MAP),
       occupation:        basic.occupation || null,
       retirement_age:    retirementAge,
-      status:            'prospect',
-      // CHECK chk_prospect_has_stage: a prospect must carry a pipeline stage
-      pipeline_stage:    'new_lead',
       pdpa_accepted_at:  basic.pdpaAccepted ? new Date().toISOString() : null,
       kyc_payload:       payload,
       kyc_status:        'submitted',
       kyc_submitted_at:  new Date().toISOString()
     };
 
-    const { data: insertedClient, error: clientErr } = await supabaseAdmin
-      .from('clients')
-      .insert(clientData)
-      .select('id')
-      .single();
-    if (clientErr) {
-      // Unique violation (race on email/nric) -> treat as duplicate
-      if (clientErr.code === '23505') {
-        return res.status(409).json({
-          error: 'This email has already been registered. Please contact your financial advisor to update your information.',
-          code: 'DUPLICATE_EMAIL'
-        });
+    let clientId;
+    if (isUpdate) {
+      const { data: updatedClient, error: updateErr } = await supabaseAdmin
+        .from('clients')
+        .update(clientData)
+        .eq('id', existingClient.id)
+        .select('id')
+        .single();
+      if (updateErr) throw new Error(`Failed to update client: ${updateErr.message}`);
+      clientId = updatedClient.id;
+    } else {
+      const { data: insertedClient, error: clientErr } = await supabaseAdmin
+        .from('clients')
+        .insert({
+          ...clientData,
+          advisor_id:     advisorId,
+          status:         'prospect',
+          // CHECK chk_prospect_has_stage: a prospect must carry a pipeline stage
+          pipeline_stage: 'new_lead'
+        })
+        .select('id')
+        .single();
+      if (clientErr) {
+        // Unique violation (race on email/nric) -> treat as duplicate
+        if (clientErr.code === '23505') {
+          return res.status(409).json({
+            error: 'This email has already been registered. Please contact your financial advisor to update your information.',
+            code: 'DUPLICATE_EMAIL'
+          });
+        }
+        throw new Error(`Failed to create client: ${clientErr.message}`);
       }
-      throw new Error(`Failed to create client: ${clientErr.message}`);
+      clientId = insertedClient.id;
     }
-    const clientId = insertedClient.id;
 
     // 2. Build asset rows (simple fields, then list types, then investments)
     const assetRows = [];

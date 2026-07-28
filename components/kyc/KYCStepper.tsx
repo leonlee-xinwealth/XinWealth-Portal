@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { KYCData, initialKYCData } from '../../types';
 import WelcomeStep from './steps/WelcomeStep';
 import PDPAStep from './steps/PDPAStep';
@@ -39,6 +40,10 @@ export const STEPS = [
 const KYCStepper: React.FC = () => {
     const { t, language } = useLanguage();
     const isZh = language === 'zh';
+    const [searchParams] = useSearchParams();
+    // Advisor referral code from the shared /kyc?ref=<code> link — routes this
+    // submission to the correct advisor (falls back to a default server-side).
+    const advisorRef = (searchParams.get('ref') || '').trim();
     const [currentStepIndex, setCurrentStepIndex] = useState(0);
     const [formData, setFormData] = useState<KYCData>(initialKYCData);
     const [showPDPAModal, setShowPDPAModal] = useState(false);
@@ -67,7 +72,7 @@ const KYCStepper: React.FC = () => {
         setStatus('submitting');
         setError(null);
         try {
-            await submitKYC(formData);
+            await submitKYC({ ...formData, advisorRef: advisorRef || undefined });
             setStatus('success');
             window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (err: any) {
