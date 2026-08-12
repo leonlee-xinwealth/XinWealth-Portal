@@ -18,6 +18,7 @@
 import React from "react";
 import { Document, Page, View, Text, StyleSheet, Font } from "@react-pdf/renderer";
 import { registerFonts } from "../insuranceReport/fonts";
+import { splitForCjkWrap } from "../cjkWrap";
 import { C, STATUS, type Band } from "../insuranceReport/theme";
 import { Meter } from "../insuranceReport/charts";
 import { CFP_SECTION_ORDER, SECTION_META, type CfpSectionType } from "../../components/advisor/cfp/sectionMeta";
@@ -48,35 +49,8 @@ registerFonts();
 // mid-token. The cost is a small "-" glyph at some CJK line-wraps — a known
 // textkit limitation (any hyphenation break point renders a hyphen) and a
 // vast improvement over text spilling across page boundaries.
-function isCjkChar(ch: string): boolean {
-  const code = ch.codePointAt(0) ?? 0;
-  return (
-    (code >= 0x4e00 && code <= 0x9fff) || // CJK Unified Ideographs
-    (code >= 0x3000 && code <= 0x303f) || // CJK punctuation
-    (code >= 0xff00 && code <= 0xffef) || // Fullwidth forms
-    (code >= 0x3400 && code <= 0x4dbf) // CJK Extension A
-  );
-}
-function splitForCjkWrap(word: string): string[] {
-  if (!word) return [word];
-  let hasCjk = false;
-  for (const ch of word) {
-    if (isCjkChar(ch)) { hasCjk = true; break; }
-  }
-  if (!hasCjk) return [word];
-  const parts: string[] = [];
-  let latinBuf = "";
-  for (const ch of word) {
-    if (isCjkChar(ch)) {
-      if (latinBuf) { parts.push(latinBuf); latinBuf = ""; }
-      parts.push(ch);
-    } else {
-      latinBuf += ch;
-    }
-  }
-  if (latinBuf) parts.push(latinBuf);
-  return parts;
-}
+// The implementation now lives in pdf/cjkWrap.ts so the suitability report
+// shares one copy (and one unit test) rather than duplicating the logic.
 Font.registerHyphenationCallback(splitForCjkWrap);
 
 const s = StyleSheet.create({

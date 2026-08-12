@@ -1,0 +1,436 @@
+// api/suitability.ts
+// Investor Suitability Assessment: the advisor creates an assessment and sends
+// the prospect a one-time token link (/suitability/:token) before their first
+// in-person meeting. The prospect answers 15 questions; the server scores them,
+// stores an append-only result, renders a PDF and pushes it to the advisor's
+// Telegram for review.
+//
+// Routing (single function to stay within the Vercel Hobby 12-function limit —
+// same approach as api/sign.js):
+//   POST { action:'create', prospectName?, prospectEmail?, clientId?, locale? }  advisor auth
+//   POST { action:'submit', token, answers, locale? }                            public token
+//   POST { action:'cancel', id }                                                 advisor auth
+//   POST { action:'redeliver', id }                                              advisor auth
+//   GET  ?token=                                                                 public token
+//   GET  ?action=download&id=                                                    advisor auth
+//
+// This file is TypeScript so it can import the scoring engine (lib/suitability)
+// and the TSX PDF document directly — a plain .js function cannot import .ts or
+// .tsx at all, which would force the engine to be duplicated in JavaScript.
+import { randomUUID } from "node:crypto";
+// @ts-ignore -- untyped JS module; the repo has no generated Supabase types.
+import { applyCors, configError, getAuthUser, supabaseAdmin } from "./_lib/supabase.js";
+// @ts-ignore -- untyped JS module, shared with the plain-.js functions.
+import { defaultChatId, sendDocument } from "./_lib/telegram.js";
+import { scoreSuitability, validateAnswers } from "../lib/suitability/scoring";
+import { renderSuitabilityPdf } from "../pdf/suitabilityReport/renderNode";
+import type { SuitabilityReportData } from "../pdf/suitabilityReport/model";
+import type { SuitabilityResult } from "../lib/suitability/types";
+
+const TOKEN_TTL_MS = 30 * 24 * 3600 * 1000; // pre-meeting link, generous window
+const UUID_RE = /^[0-9a-f-]{36}$/i;
+const BUCKET = "suitability";
+
+type Locale = "en" | "zh";
+const asLocale = (v: unknown): Locale => (v === "zh" ? "zh" : "en");
+
+// ---------- auth / lookup helpers (mirrors api/sign.js:24-45) ----------
+
+async function getAdvisor(req: any) {
+  const { user, error } = await getAuthUser(req);
+  if (error || !user) return { status: 401, error: `Unauthorized: ${error || "Invalid token"}` };
+  const { data: advisor, error: advErr } = await supabaseAdmin
+    .from("advisors")
+    .select("id, display_name, telegram_chat_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (advErr) return { status: 500, error: advErr.message };
+  if (!advisor) return { status: 403, error: "Not an advisor account" };
+  return { advisor };
+}
+
+async function findValidAssessment(token: unknown) {
+  if (typeof token !== "string" || !UUID_RE.test(token)) return { error: 404 as const };
+  const { data: row } = await supabaseAdmin
+    .from("suitability_assessments")
+    .select("*")
+    .eq("token", token)
+    .maybeSingle();
+  if (!row) return { error: 404 as const };
+  if (row.status !== "awaiting_client") return { error: 410 as const };
+  if (row.token_expires_at && new Date(row.token_expires_at) < new Date()) {
+    return { error: 410 as const };
+  }
+  return { row };
+}
+
+const tokenError = (res: any, error: 404 | 410) =>
+  res.status(error).json({ error: error === 404 ? "INVALID_TOKEN" : "LINK_EXPIRED" });
+
+/** Maps a scored result onto the suitability_results column set. */
+function toResultRow(assessmentId: string, advisorId: string, r: SuitabilityResult, answers: unknown) {
+  return {
+    assessment_id: assessmentId,
+    advisor_id: advisorId,
+    rule_version: r.ruleVersion,
+    final_profile: r.profile,
+    final_band: r.finalBand,
+    horizon_ceiling_band: r.horizon.ceilingBand,
+    capacity_score: r.capacity.score,
+    capacity_band: r.capacity.band,
+    tolerance_score: r.tolerance.score,
+    tolerance_band: r.tolerance.band,
+    experience_years_band: r.experience.yearsBand,
+    product_level: r.experience.productLevel,
+    behaviour_confidence: r.behaviourConfidence,
+    expectation_gap: r.expectationGap,
+    target_return_pct: r.targetReturnPct,
+    red_flags: r.redFlags,
+    requires_advisor_review: r.requiresAdvisorReview,
+    config_snapshot: r.configSnapshot,
+    answers_snapshot: answers,
+    delivery_status: "pending",
+  };
+}
+
+// ---------- PDF render + delivery ----------
+
+const fmtDate = (iso: string) => new Date(iso).toISOString().slice(0, 10);
+
+function toReportData(
+  assessment: any,
+  resultRow: any,
+  advisorName: string,
+  locale: Locale,
+): SuitabilityReportData {
+  return {
+    prospectName: assessment.prospect_name,
+    advisorName,
+    submittedAt: fmtDate(assessment.submitted_at ?? new Date().toISOString()),
+    generatedDate: fmtDate(new Date().toISOString()),
+    language: locale,
+    ruleVersion: resultRow.rule_version,
+    finalProfile: resultRow.final_profile,
+    finalBand: resultRow.final_band,
+    horizonCeilingBand: resultRow.horizon_ceiling_band,
+    capacityScore: resultRow.capacity_score,
+    capacityBand: resultRow.capacity_band,
+    toleranceScore: resultRow.tolerance_score,
+    toleranceBand: resultRow.tolerance_band,
+    experienceYearsBand: resultRow.experience_years_band,
+    productLevel: resultRow.product_level,
+    behaviourConfidence: resultRow.behaviour_confidence,
+    expectationGap: resultRow.expectation_gap,
+    targetReturnPct: resultRow.target_return_pct === null ? null : Number(resultRow.target_return_pct),
+    redFlags: resultRow.red_flags ?? [],
+    requiresAdvisorReview: resultRow.requires_advisor_review,
+    configSnapshot: resultRow.config_snapshot,
+    answers: resultRow.answers_snapshot ?? {},
+  };
+}
+
+function buildCaption(assessment: any, resultRow: any, cs: any, locale: Locale) {
+  const name = assessment.prospect_name || (locale === "zh" ? "（未命名）" : "(Unnamed prospect)");
+  const profile = locale === "zh" ? cs?.profileNameZh : cs?.profileNameEn;
+  const flags = (resultRow.red_flags ?? []).map((f: any) => f.code).join(", ");
+  const lines =
+    locale === "zh"
+      ? [
+          `投资适当性评估已完成`,
+          `客户：${name}`,
+          `类型：${profile}`,
+          resultRow.requires_advisor_review ? `⚠ 需要人工审阅` : `无需额外审阅`,
+          flags ? `风险提示：${flags}` : null,
+        ]
+      : [
+          `Suitability assessment completed`,
+          `Prospect: ${name}`,
+          `Profile: ${profile}`,
+          resultRow.requires_advisor_review ? `⚠ Requires your review` : `No review flags`,
+          flags ? `Red flags: ${flags}` : null,
+        ];
+  return lines.filter(Boolean).join("\n");
+}
+
+/**
+ * Renders the PDF, stores it, and pushes it to the advisor's Telegram.
+ *
+ * NEVER throws and never affects the caller's HTTP response — a prospect must
+ * not see an error because Telegram was down or the font failed to bundle. The
+ * outcome is recorded on the result row so the advisor can hit Resend.
+ */
+async function deliverReport(assessmentId: string, resultId: string): Promise<boolean> {
+  try {
+    const { data: assessment } = await supabaseAdmin
+      .from("suitability_assessments")
+      .select("*, advisors(display_name, telegram_chat_id)")
+      .eq("id", assessmentId)
+      .single();
+    const { data: resultRow } = await supabaseAdmin
+      .from("suitability_results")
+      .select("*")
+      .eq("id", resultId)
+      .single();
+    if (!assessment || !resultRow) throw new Error("Assessment or result not found");
+
+    const locale = asLocale(assessment.locale);
+    const advisorName = assessment.advisors?.display_name ?? "XinWealth";
+
+    const pdf = await renderSuitabilityPdf(toReportData(assessment, resultRow, advisorName, locale));
+
+    const pdfPath = `reports/${resultId}.pdf`;
+    const { error: upErr } = await supabaseAdmin.storage
+      .from(BUCKET)
+      .upload(pdfPath, pdf, { contentType: "application/pdf", upsert: true });
+    if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
+
+    await supabaseAdmin
+      .from("suitability_results")
+      .update({ pdf_path: pdfPath, pdf_generated_at: new Date().toISOString() })
+      .eq("id", resultId);
+
+    const chatId = (assessment.advisors?.telegram_chat_id || "").trim() || defaultChatId();
+    const safeName = (assessment.prospect_name || "prospect")
+      .replace(/[^\p{L}\p{N}]+/gu, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40);
+    const sent = await sendDocument(
+      chatId,
+      pdf,
+      `suitability-${safeName || "prospect"}.pdf`,
+      buildCaption(assessment, resultRow, resultRow.config_snapshot, locale),
+    );
+
+    await supabaseAdmin
+      .from("suitability_results")
+      .update(
+        sent.ok
+          ? { delivery_status: "sent", delivery_error: null }
+          : { delivery_status: "failed", delivery_error: String(sent.error).slice(0, 500) },
+      )
+      .eq("id", resultId);
+
+    if (!sent.ok) console.error("suitability: telegram delivery failed:", sent.error);
+    return sent.ok;
+  } catch (e: any) {
+    console.error("suitability: report delivery failed:", e?.message || e);
+    await supabaseAdmin
+      .from("suitability_results")
+      .update({
+        delivery_status: "failed",
+        delivery_error: String(e?.message || e).slice(0, 500),
+      })
+      .eq("id", resultId);
+    return false;
+  }
+}
+
+// ---------- actions ----------
+
+async function handleCreate(req: any, res: any) {
+  const auth = await getAdvisor(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const body = req.body || {};
+  const clientId = body.clientId ? String(body.clientId) : null;
+  if (clientId && !UUID_RE.test(clientId)) {
+    return res.status(400).json({ error: "INVALID_CLIENT_ID" });
+  }
+
+  const token = randomUUID();
+  const { data, error } = await supabaseAdmin
+    .from("suitability_assessments")
+    .insert({
+      advisor_id: auth.advisor.id,
+      client_id: clientId,
+      prospect_name: body.prospectName ? String(body.prospectName).trim().slice(0, 120) : null,
+      prospect_email: body.prospectEmail ? String(body.prospectEmail).trim().slice(0, 200) : null,
+      locale: asLocale(body.locale),
+      status: "awaiting_client",
+      token,
+      token_expires_at: new Date(Date.now() + TOKEN_TTL_MS).toISOString(),
+    })
+    .select("id, token, token_expires_at")
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+
+  return res.status(200).json(data);
+}
+
+async function handleGetByToken(req: any, res: any) {
+  const { row, error } = await findValidAssessment(req.query.token);
+  if (error) return tokenError(res, error);
+  // Deliberately minimal: the questions themselves ship in the client bundle,
+  // and nothing about the advisor or any scoring is exposed pre-submission.
+  return res.status(200).json({
+    locale: row.locale,
+    prospectName: row.prospect_name,
+  });
+}
+
+async function handleSubmit(req: any, res: any) {
+  const { row, error } = await findValidAssessment(req.body?.token);
+  if (error) return tokenError(res, error);
+
+  const validation = validateAnswers(req.body?.answers);
+  if (!validation.ok) {
+    return res.status(400).json({
+      error: "INVALID_ANSWERS",
+      questionId: validation.questionId,
+      reason: validation.reason,
+    });
+  }
+  const answers = validation.answers;
+
+  // Always scored server-side. A client-submitted score is never trusted —
+  // same precedent as api/prs-application.js re-scoring the PRS ISA.
+  const result = scoreSuitability(answers);
+
+  // Single-use claim FIRST: only flips if still awaiting_client, so a concurrent
+  // double submit loses the race and gets 410 rather than producing two results.
+  const locale = asLocale(req.body?.locale ?? row.locale);
+  const { data: claimed, error: clErr } = await supabaseAdmin
+    .from("suitability_assessments")
+    .update({
+      answers,
+      locale,
+      status: "submitted",
+      submitted_at: new Date().toISOString(),
+      token: null,
+      token_expires_at: null,
+    })
+    .eq("id", row.id)
+    .eq("status", "awaiting_client")
+    .select("id");
+  if (clErr) return res.status(500).json({ error: clErr.message });
+  if (!claimed || claimed.length === 0) return tokenError(res, 410);
+
+  const { data: resultRow, error: insErr } = await supabaseAdmin
+    .from("suitability_results")
+    .insert(toResultRow(row.id, row.advisor_id, result, answers))
+    .select("id")
+    .single();
+  if (insErr) {
+    // The assessment is already claimed; surface it rather than silently losing
+    // the answers, since they are still stored on the assessment row.
+    console.error("suitability: failed to persist result:", insErr.message);
+    return res.status(500).json({ error: "SCORING_PERSIST_FAILED" });
+  }
+
+  // Best-effort, awaited so the serverless container is not frozen mid-render:
+  // deliverReport swallows every error and only ever records the outcome on the
+  // result row. The prospect's response below is identical either way.
+  await deliverReport(row.id, resultRow.id);
+
+  const cs = result.configSnapshot;
+  return res.status(200).json({
+    profile: result.profile,
+    name: { en: cs.profileNameEn, zh: cs.profileNameZh },
+    description: { en: cs.descriptionEn, zh: cs.descriptionZh },
+  });
+}
+
+async function handleCancel(req: any, res: any) {
+  const auth = await getAdvisor(req);
+  if (auth.error) return res.status(auth.status).json({ error: auth.error });
+
+  const id = String(req.body?.id || "");
+  if (!UUID_RE.test(id)) return res.status(404).json({ error: "NOT_FOUND" });
+
+  const { data: cancelled, error } = await supabaseAdmin
+    .from("suitability_assessments")
+    .update({ status: "cancelled", token: null, token_expires_at: null })
+    .eq("id", id)
+    .eq("advisor_id", auth.advisor.id)
+    .eq("status", "awaiting_client")
+    .select("id");
+  if (error) return res.status(500).json({ error: error.message });
+  if (!cancelled || cancelled.length === 0) return res.status(404).json({ error: "NOT_FOUND" });
+
+  return res.status(200).json({ success: true });
+}
+
+/** Advisor-owned result lookup, used by both download and redeliver. */
+async function getOwnedResult(req: any, res: any) {
+  const auth = await getAdvisor(req);
+  if (auth.error) {
+    res.status(auth.status).json({ error: auth.error });
+    return null;
+  }
+  const id = String(req.query?.id || req.body?.id || "");
+  if (!UUID_RE.test(id)) {
+    res.status(404).json({ error: "NOT_FOUND" });
+    return null;
+  }
+  const { data: row } = await supabaseAdmin
+    .from("suitability_results")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (!row || row.advisor_id !== auth.advisor.id) {
+    res.status(404).json({ error: "NOT_FOUND" });
+    return null;
+  }
+  return row;
+}
+
+async function handleDownload(req: any, res: any) {
+  const row = await getOwnedResult(req, res);
+  if (!row) return;
+
+  if (!row.pdf_path) return res.status(404).json({ error: "PDF_NOT_READY" });
+
+  const { data: signed, error } = await supabaseAdmin.storage
+    .from(BUCKET)
+    .createSignedUrl(row.pdf_path, 300, { download: `suitability-${row.final_profile}.pdf` });
+  if (error || !signed?.signedUrl) {
+    return res.status(500).json({ error: "Failed to create download link" });
+  }
+  return res.status(200).json({ url: signed.signedUrl });
+}
+
+async function handleRedeliver(req: any, res: any) {
+  const row = await getOwnedResult(req, res);
+  if (!row) return;
+
+  const ok = await deliverReport(row.assessment_id, row.id);
+  if (!ok) {
+    const { data: fresh } = await supabaseAdmin
+      .from("suitability_results")
+      .select("delivery_error")
+      .eq("id", row.id)
+      .maybeSingle();
+    return res.status(502).json({ error: fresh?.delivery_error || "DELIVERY_FAILED" });
+  }
+  return res.status(200).json({ success: true });
+}
+
+// ---------- handler ----------
+
+export default async function handler(req: any, res: any) {
+  applyCors(res);
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (!supabaseAdmin) return configError(res);
+
+  try {
+    if (req.method === "GET") {
+      if (req.query.action === "download") return await handleDownload(req, res);
+      if (req.query.token) return await handleGetByToken(req, res);
+      return res.status(400).json({ error: "Missing token or action" });
+    }
+
+    if (req.method === "POST") {
+      const action = req.body?.action;
+      if (action === "create") return await handleCreate(req, res);
+      if (action === "submit") return await handleSubmit(req, res);
+      if (action === "cancel") return await handleCancel(req, res);
+      if (action === "redeliver") return await handleRedeliver(req, res);
+      return res.status(400).json({ error: "Unknown action" });
+    }
+
+    return res.status(405).json({ error: "Method not allowed" });
+  } catch (e: any) {
+    console.error("Suitability API error:", e);
+    return res.status(500).json({ error: e?.message || "Internal server error" });
+  }
+}

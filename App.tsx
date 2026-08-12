@@ -7,6 +7,7 @@ const PortalLayout = lazy(() => import('./components/PortalLayout'));
 const KYCLayout = lazy(() => import('./components/kyc/KYCLayout'));
 const PrsPublicPage = lazy(() => import('./components/prs/PrsPublicPage'));
 const SignPublicPage = lazy(() => import('./components/sign/SignPublicPage'));
+const SuitabilityPublicPage = lazy(() => import('./components/suitability/SuitabilityPublicPage'));
 
 const Spinner = () => (
   <div className="flex h-screen items-center justify-center bg-xin-bg">
@@ -31,6 +32,9 @@ const App: React.FC = () => {
 
             {/* PDF e-signature public signing page (one-time token link) */}
             <Route path="/sign/:token" element={<SignPublicPage />} />
+
+            {/* Investor Suitability Assessment (one-time token link) */}
+            <Route path="/suitability/:token" element={<SuitabilityPublicPage />} />
 
             {/* Client Portal */}
             <Route path="/*" element={<PortalLayout />} />
