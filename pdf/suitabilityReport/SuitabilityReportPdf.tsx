@@ -5,17 +5,21 @@
 // and the shared CJK line-breaking callback so this reads as one visual family
 // with the other client PDFs.
 //
-// Font registration ORDER MATTERS: registerFonts() installs a Latin-only
-// hyphenation callback ((w) => [w]); splitForCjkWrap must be registered AFTER it
-// or Chinese paragraphs become one unbreakable word and run off the page.
+// This module is deliberately a PURE component with no font side effects. Font
+// registration is the renderer's job (see renderNode.ts), for two reasons:
+//   1. registerFonts() defaults to the browser asset URL, which fontkit cannot
+//      read on a server — it must be given an absolute path before rendering.
+//   2. Keeping it side-effect-free lets renderNode import this STATICALLY.
+//      A dynamic import shipped a broken function once: @vercel/nft traces the
+//      graph at build time and could not follow `await import("./X.js")` when
+//      only X.tsx exists on disk, so the document was never included in the
+//      bundle and every render failed with ERR_MODULE_NOT_FOUND.
+//
+// Explicit .js extensions: Vercel transpiles (does not bundle) this graph into
+// an ESM function where Node's resolver requires a real extension.
 import React from "react";
-import { Document, Page, View, Text, StyleSheet, Font } from "@react-pdf/renderer";
-// Explicit .js extensions: this document is dynamically imported by renderNode
-// inside the Vercel function, which is transpiled (not bundled) into ESM where
-// Node's resolver requires a real extension.
-import { registerFonts } from "../insuranceReport/fonts.js";
+import { Document, Page, View, Text, StyleSheet } from "@react-pdf/renderer";
 import { C, STATUS } from "../insuranceReport/theme.js";
-import { splitForCjkWrap } from "../cjkWrap.js";
 import {
   BAND_NAME,
   DISCLAIMER,
@@ -29,9 +33,6 @@ import {
   type Lang,
   type SuitabilityReportData,
 } from "./model.js";
-
-registerFonts();
-Font.registerHyphenationCallback(splitForCjkWrap);
 
 const s = StyleSheet.create({
   page: { fontFamily: "NotoSansSC", backgroundColor: C.white, paddingTop: 44, paddingBottom: 56, paddingHorizontal: 46 },

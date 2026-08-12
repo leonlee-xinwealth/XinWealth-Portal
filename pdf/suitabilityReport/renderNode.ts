@@ -8,21 +8,22 @@
 // The 10.5 MB CJK font is not importable, so it ships via vercel.json's
 // `functions.includeFiles` and is resolved from disk at runtime.
 //
-// IMPORT ORDER MATTERS (same trap as pdf/cfpReport/renderSmoke.tsx): the PDF
-// component calls registerFonts() at module scope, which defaults to the BROWSER
-// asset URL "/fonts/NotoSansSC-Regular.ttf". fontkit resolves that against the
-// filesystem root and fails with ENOENT (D:\fonts\... on Windows, /fonts/... on
-// Linux). registerFonts() guards itself with a `registered` flag, so calling it
-// FIRST with an absolute path makes the component's own call a no-op. Hence the
-// dynamic import below — a static one would run the component's registration
-// before ours.
+// This module owns ALL font setup. SuitabilityReportPdf is a pure component with
+// no module-scope side effects, which is what lets it be imported STATICALLY —
+// required because @vercel/nft traces the graph at build time and cannot follow
+// a dynamic import whose ".js" specifier has no matching file on disk. An
+// earlier dynamic-import version deployed a function that was missing the
+// document entirely and failed every render with ERR_MODULE_NOT_FOUND.
+//
+// Explicit .js extensions throughout: Vercel transpiles (does not bundle) this
+// graph into an ESM function, where Node's resolver requires a real extension.
 import path from "node:path";
 import fs from "node:fs";
 import React from "react";
-import { renderToBuffer } from "@react-pdf/renderer";
-// Explicit .js extensions throughout: Vercel transpiles (does not bundle) this
-// graph into an ESM function, where Node's resolver requires a real extension.
+import { Font, renderToBuffer } from "@react-pdf/renderer";
 import { registerFonts } from "../insuranceReport/fonts.js";
+import { splitForCjkWrap } from "../cjkWrap.js";
+import SuitabilityReportPdf from "./SuitabilityReportPdf.js";
 import type { SuitabilityReportData } from "./model.js";
 
 const FONT_REL = "public/fonts/NotoSansSC-Regular.ttf";
@@ -60,9 +61,13 @@ export async function renderSuitabilityPdf(data: SuitabilityReportData): Promise
     );
   }
 
-  // Must precede the component import — see the note above.
+  // Order is explicit rather than dependent on module-init sequence:
+  // registerFonts() installs a Latin-only hyphenation callback ((w) => [w]), so
+  // splitForCjkWrap MUST be registered after it or Chinese paragraphs become one
+  // unbreakable word and run straight off the page. Both are global, idempotent
+  // registrations resolved at render time.
   registerFonts(fontPath);
-  const { default: SuitabilityReportPdf } = await import("./SuitabilityReportPdf.js");
+  Font.registerHyphenationCallback(splitForCjkWrap);
 
   return renderToBuffer(React.createElement(SuitabilityReportPdf, { data }));
 }
