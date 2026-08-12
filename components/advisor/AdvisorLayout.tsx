@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck, Target, Briefcase, Megaphone, BarChart2, FileText, FileSignature, Workflow } from 'lucide-react';
+import { LayoutDashboard, Users, Settings, LogOut, Menu, X, ShieldCheck, Target, Briefcase, Megaphone, BarChart2, FileText, FileSignature, Workflow, ClipboardCheck } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 
 const AdvisorLayout: React.FC = () => {
@@ -10,6 +10,7 @@ const AdvisorLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [overduePipelineCount, setOverduePipelineCount] = useState(0);
   const [prsSubmittedCount, setPrsSubmittedCount] = useState(0);
+  const [suitabilitySubmittedCount, setSuitabilitySubmittedCount] = useState(0);
 
   useEffect(() => {
     async function loadBadge() {
@@ -32,6 +33,12 @@ const AdvisorLayout: React.FC = () => {
         .eq('advisor_id', adv.id)
         .eq('status', 'submitted');
       setPrsSubmittedCount(prsCount ?? 0);
+      const { count: suitCount } = await supabase
+        .from('suitability_assessments')
+        .select('id', { count: 'exact', head: true })
+        .eq('advisor_id', adv.id)
+        .eq('status', 'submitted');
+      setSuitabilitySubmittedCount(suitCount ?? 0);
     }
     loadBadge();
   }, []);
@@ -65,6 +72,7 @@ const AdvisorLayout: React.FC = () => {
     { to: '/advisor/pipeline',  icon: <Target size={18} />,          label: language === 'zh' ? '潜在客户状态板' : 'Prospect Status Board',  badge: overduePipelineCount },
     { to: '/advisor/cases',     icon: <Briefcase size={18} />,       label: language === 'zh' ? '案件' : 'Cases',          badge: 0 },
     { to: '/advisor/prs',       icon: <FileText size={18} />,        label: language === 'zh' ? '开户申请' : 'PRS Applications', badge: prsSubmittedCount },
+    { to: '/advisor/suitability', icon: <ClipboardCheck size={18} />, label: language === 'zh' ? '适当性评估' : 'Suitability', badge: suitabilitySubmittedCount },
     { to: '/advisor/signatures', icon: <FileSignature size={18} />,  label: language === 'zh' ? '电子签名' : 'E-Signatures',  badge: 0 },
     { to: '/advisor/broadcast', icon: <Megaphone size={18} />,      label: language === 'zh' ? '群发' : 'Broadcast',     badge: 0 },
     { to: '/advisor/market-values', icon: <BarChart2 size={18} />, label: language === 'zh' ? '市值管理' : 'Market Values', badge: 0 },

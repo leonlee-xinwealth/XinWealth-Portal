@@ -1,4 +1,10 @@
 {
+  "functions": {
+    "api/suitability.ts": {
+      "includeFiles": "public/fonts/NotoSansSC-Regular.ttf",
+      "maxDuration": 60
+    }
+  },
   "rewrites": [
     {
       "source": "/(.*)",

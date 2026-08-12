@@ -16,6 +16,8 @@ import Broadcast from './pages/Broadcast';
 import MarketValues from './pages/MarketValues';
 import PrsApplicationList from './pages/PrsApplicationList';
 import PrsApplicationEditor from './pages/PrsApplicationEditor';
+import SuitabilityList from './pages/SuitabilityList';
+import SuitabilityDetail from './pages/SuitabilityDetail';
 // Lazy so pdfjs-dist stays out of the main bundle (Suspense boundary in App.tsx).
 const SignatureRequests = lazy(() => import('./pages/SignatureRequests'));
 
@@ -63,6 +65,8 @@ const AdvisorApp: React.FC = () => {
         <Route path="cases/:id" element={<CaseDetail />} />
         <Route path="prs" element={<PrsApplicationList />} />
         <Route path="prs/:id" element={<PrsApplicationEditor />} />
+        <Route path="suitability" element={<SuitabilityList />} />
+        <Route path="suitability/:id" element={<SuitabilityDetail />} />
         <Route path="signatures" element={<SignatureRequests />} />
         <Route path="insurance-comparison" element={<InsuranceComparison />} />
         <Route path="broadcast" element={<Broadcast />} />
