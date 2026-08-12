@@ -30,6 +30,9 @@ const OUT = ".simbuild";
 /** Resolve a relative specifier to a real source file, mirroring TS's .js -> .ts mapping. */
 function resolveSource(fromFile, spec) {
   const base = path.posix.join(path.posix.dirname(fromFile), spec);
+  // A ".js" specifier may point at a .ts/.tsx source (TypeScript's mapping) OR
+  // at a real .js/.mjs file on disk — check the source forms first, then the
+  // literal path, so pre-built .mjs bundles resolve too.
   const candidates = base.endsWith(".js")
     ? [base.replace(/\.js$/, ".ts"), base.replace(/\.js$/, ".tsx"), base]
     : [`${base}.ts`, `${base}.tsx`, base, `${base}/index.ts`, `${base}/index.tsx`];
@@ -91,12 +94,27 @@ function walk(file) {
 walk(entry);
 
 const tsSources = [...found].filter((f) => /\.tsx?$/.test(f));
-const jsSources = [...found].filter((f) => f.endsWith(".js"));
+// Plain .js and pre-built .mjs bundles are shipped verbatim by Vercel.
+const jsSources = [...found].filter((f) => /\.(m?js)$/.test(f));
 
 console.log(`static graph from ${entry}: ${tsSources.length} TS/TSX + ${jsSources.length} JS files`);
 if (missing.length) {
   console.error("\nUNRESOLVED STATIC IMPORTS (these would break the deployed function):");
   for (const m of missing) console.error(`  ${m.from} -> ${m.spec}`);
+  process.exit(1);
+}
+// @vercel/node transpiles .ts dependencies but does NOT emit .tsx ones. A .tsx
+// file in the traced graph is therefore shipped as nothing at all, and the
+// import of its .js twin fails at runtime. Pre-bundle such subtrees instead
+// (see scripts/build-suitability-pdf.mjs).
+const tsxInGraph = [...found].filter((f) => f.endsWith(".tsx"));
+if (tsxInGraph.length) {
+  console.error(
+    "\n.TSX FILES IN THE FUNCTION GRAPH — @vercel/node does not emit these,\n" +
+      "so importing their .js twin fails at runtime with ERR_MODULE_NOT_FOUND.\n" +
+      "Pre-bundle them (scripts/build-suitability-pdf.mjs) and import the bundle:",
+  );
+  for (const f of tsxInGraph) console.error(`  ${f}`);
   process.exit(1);
 }
 if (dynamic.length) {
