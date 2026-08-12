@@ -20,8 +20,10 @@ import path from "node:path";
 import fs from "node:fs";
 import React from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { registerFonts } from "../insuranceReport/fonts";
-import type { SuitabilityReportData } from "./model";
+// Explicit .js extensions throughout: Vercel transpiles (does not bundle) this
+// graph into an ESM function, where Node's resolver requires a real extension.
+import { registerFonts } from "../insuranceReport/fonts.js";
+import type { SuitabilityReportData } from "./model.js";
 
 const FONT_REL = "public/fonts/NotoSansSC-Regular.ttf";
 
@@ -60,7 +62,7 @@ export async function renderSuitabilityPdf(data: SuitabilityReportData): Promise
 
   // Must precede the component import — see the note above.
   registerFonts(fontPath);
-  const { default: SuitabilityReportPdf } = await import("./SuitabilityReportPdf");
+  const { default: SuitabilityReportPdf } = await import("./SuitabilityReportPdf.js");
 
   return renderToBuffer(React.createElement(SuitabilityReportPdf, { data }));
 }

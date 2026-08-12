@@ -8,7 +8,9 @@
 // The numbers themselves come from the result row's frozen config_snapshot, not
 // from the live rules module, so a reprint of a 2026 assessment in 2028 shows the
 // 2026 figures.
-import { QUESTION_BY_ID, SUITABILITY_QUESTIONS, optionOf } from "../../lib/suitability/questions";
+// Explicit .js extension: reachable from api/suitability.ts, which Vercel
+// transpiles rather than bundles (Node ESM requires the extension at runtime).
+import { QUESTION_BY_ID, SUITABILITY_QUESTIONS, optionOf } from "../../lib/suitability/questions.js";
 import type {
   AllocationRanges,
   ConfigSnapshot,
@@ -16,7 +18,7 @@ import type {
   Range,
   RedFlag,
   SuitabilityAnswers,
-} from "../../lib/suitability/types";
+} from "../../lib/suitability/types.js";
 
 export type Lang = "en" | "zh";
 

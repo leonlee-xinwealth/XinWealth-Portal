@@ -18,7 +18,9 @@
 //
 // Always run server-side. The client is never trusted to compute its own
 // profile (precedent: api/prs-application.js re-scores the PRS ISA).
-import { QUESTION_BY_ID, QUESTION_IDS, optionOf } from "./questions";
+// Explicit .js extensions: this module is imported by api/suitability.ts, which
+// Vercel transpiles (not bundles) into an ESM function where Node requires them.
+import { QUESTION_BY_ID, QUESTION_IDS, optionOf } from "./questions.js";
 import {
   BAND_TO_PROFILE,
   CAPACITY_LEVEL_BY_BAND,
@@ -30,7 +32,7 @@ import {
   applyEquityCap,
   bandFromDimensionScore,
   buildConfigSnapshot,
-} from "./rules";
+} from "./rules.js";
 import type {
   Band,
   Confidence,
@@ -42,7 +44,7 @@ import type {
   SuitabilityAnswers,
   SuitabilityResult,
   ValidationResult,
-} from "./types";
+} from "./types.js";
 
 const PRODUCT_LEVEL_RANK: Record<ProductLevel, number> = {
   NONE: 0,

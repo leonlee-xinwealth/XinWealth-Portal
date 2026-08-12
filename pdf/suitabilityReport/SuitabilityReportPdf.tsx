@@ -10,9 +10,12 @@
 // or Chinese paragraphs become one unbreakable word and run off the page.
 import React from "react";
 import { Document, Page, View, Text, StyleSheet, Font } from "@react-pdf/renderer";
-import { registerFonts } from "../insuranceReport/fonts";
-import { C, STATUS } from "../insuranceReport/theme";
-import { splitForCjkWrap } from "../cjkWrap";
+// Explicit .js extensions: this document is dynamically imported by renderNode
+// inside the Vercel function, which is transpiled (not bundled) into ESM where
+// Node's resolver requires a real extension.
+import { registerFonts } from "../insuranceReport/fonts.js";
+import { C, STATUS } from "../insuranceReport/theme.js";
+import { splitForCjkWrap } from "../cjkWrap.js";
 import {
   BAND_NAME,
   DISCLAIMER,
@@ -25,7 +28,7 @@ import {
   fmtTarget,
   type Lang,
   type SuitabilityReportData,
-} from "./model";
+} from "./model.js";
 
 registerFonts();
 Font.registerHyphenationCallback(splitForCjkWrap);

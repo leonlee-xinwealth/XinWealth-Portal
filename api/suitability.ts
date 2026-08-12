@@ -22,10 +22,16 @@ import { randomUUID } from "node:crypto";
 import { applyCors, configError, getAuthUser, supabaseAdmin } from "./_lib/supabase.js";
 // @ts-ignore -- untyped JS module, shared with the plain-.js functions.
 import { defaultChatId, sendDocument } from "./_lib/telegram.js";
-import { scoreSuitability, validateAnswers } from "../lib/suitability/scoring";
-import { renderSuitabilityPdf } from "../pdf/suitabilityReport/renderNode";
-import type { SuitabilityReportData } from "../pdf/suitabilityReport/model";
-import type { SuitabilityResult } from "../lib/suitability/types";
+// NOTE: relative imports below carry explicit .js extensions on purpose.
+// @vercel/node TRANSPILES and traces these files rather than bundling them, and
+// package.json is `"type": "module"`, so Node's ESM resolver at runtime requires
+// a real extension. Extensionless specifiers resolve fine under Vite, vitest and
+// tsx but throw ERR_MODULE_NOT_FOUND inside the deployed function. The ".js"
+// suffix points at the emitted file; TypeScript maps it back to the .ts source.
+import { scoreSuitability, validateAnswers } from "../lib/suitability/scoring.js";
+import { renderSuitabilityPdf } from "../pdf/suitabilityReport/renderNode.js";
+import type { SuitabilityReportData } from "../pdf/suitabilityReport/model.js";
+import type { SuitabilityResult } from "../lib/suitability/types.js";
 
 const TOKEN_TTL_MS = 30 * 24 * 3600 * 1000; // pre-meeting link, generous window
 const UUID_RE = /^[0-9a-f-]{36}$/i;
