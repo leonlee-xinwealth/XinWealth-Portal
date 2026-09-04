@@ -50,9 +50,9 @@ Deno.test("no recurring income flags insufficient_data without throwing", () => 
 Deno.test("asset transfers surface separately, never inside expense breakdown", () => {
   const d = det({
     cashflow: [
-      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
-      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household" },
-      { direction: "outflow", amount: 2000, frequency: "monthly", category: "invest_transfer", linked_asset_id: "a-1" },
+      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 2000, frequency: "monthly", category: "invest_transfer", linked_asset_id: "a-1", period_month: "2026-06-01" },
     ],
   });
   assertEquals(d.monthly_expenses, 6000);

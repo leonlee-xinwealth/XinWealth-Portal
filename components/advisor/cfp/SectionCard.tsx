@@ -1,26 +1,25 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { CfpSectionType, SECTION_META } from './sectionMeta';
 import ChatPanel from './ChatPanel';
 import { TwoStepButton, type T } from './primitives';
+import { reviewStateOf, STATE_META, type ReviewSection } from './reviewState';
 
 // Generic shell for every CFP section card: lifecycle states, generate /
 // client-view / save / approve actions, renderer dispatch. Per-section layout
 // lives in renderers/; this shell owns everything that is identical across
 // the 8 sections (ported from the original InsuranceSectionCard).
 
-export interface Section {
+export interface Section extends ReviewSection {
   id: string;
   report_id: string;
-  section_type: string;
   agent: string;
-  status: 'generating' | 'draft' | 'approved' | 'failed';
   // deno-lint-ignore no-explicit-any
   content: any;
-  error: string | null;
   generated_at: string | null;
   approved_at: string | null;
-  updated_at: string;
+  /** advisor who signed off; set alongside approved_at */
+  approved_by?: string | null;
 }
 
 export interface RendererProps {
@@ -35,9 +34,12 @@ export interface RendererProps {
 
 export default function SectionCard({
   reportId, period, section, sectionType, renderer: Renderer, t, language, onChanged, onExportPdf,
+  advisorId,
 }: {
   reportId: string;
   period: string;
+  /** stamped onto approved_by so an approval has a name against it */
+  advisorId?: string;
   section: Section | null;
   sectionType: CfpSectionType;
   renderer: React.ComponentType<RendererProps> | null;
@@ -62,16 +64,19 @@ export default function SectionCard({
     setDraft(section?.content ? JSON.parse(JSON.stringify(section.content)) : null);
   }, [section?.id, section?.generated_at]);
 
-  const staleGenerating = useMemo(() => {
-    if (!section || section.status !== 'generating') return false;
-    return Date.now() - new Date(section.updated_at).getTime() > 3 * 60 * 1000;
-  }, [section]);
+  // Same reading of "where is this section" the progress strip, the review page
+  // and the export gate use. Four independent derivations of this is how a gate
+  // ends up disagreeing with the card it is gating.
+  const state = reviewStateOf(section);
 
-  async function generate() {
+  async function generate(force = false) {
     setInvoking(true);
     setErr(null);
     const { error } = await supabase.functions.invoke('cfp-brain', {
-      body: { mode: 'generate_section', report_id: reportId, section_type: sectionType },
+      body: {
+        mode: 'generate_section', report_id: reportId, section_type: sectionType,
+        ...(force ? { force: true } : {}),
+      },
     });
     setInvoking(false);
     if (error) setErr(error.message);
@@ -115,9 +120,17 @@ export default function SectionCard({
 
   async function setStatus(status: 'draft' | 'approved') {
     if (!section) return;
+    const approving = status === 'approved';
     // deno-lint-ignore no-explicit-any
-    const patch: any = { status, approved_at: status === 'approved' ? new Date().toISOString() : null };
-    if (status === 'approved' && draft) patch.content = draft; // approve saves edits too
+    const patch: any = {
+      status,
+      approved_at: approving ? new Date().toISOString() : null,
+      approved_by: approving ? advisorId ?? null : null,
+    };
+    // Approving means the advisor has read this against the numbers as they
+    // stand now, whatever the flag used to say.
+    if (approving) { patch.stale_reason = null; patch.stale_at = null; }
+    if (approving && draft) patch.content = draft; // approve saves edits too
     const { error } = await supabase.from('report_sections').update(patch).eq('id', section.id);
     if (error) setErr(error.message); else onChanged();
   }
@@ -131,14 +144,10 @@ export default function SectionCard({
         <span className="text-lg">{meta.emoji}</span>
         <h3 className="font-serif font-bold text-xin-blue">{t(meta.en, meta.zh)}</h3>
         <span className="text-xs text-slate-400">{meta.personaZh} · {meta.agent} · {period}</span>
-        {section?.status === 'approved' && (
-          <span className="bg-emerald-50 text-emerald-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-            ✓ {t('Approved', '已定稿')}
-          </span>
-        )}
-        {section?.status === 'draft' && (
-          <span className="bg-amber-50 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-            {t('Draft', '草稿')}
+        {section && state !== 'missing' && (
+          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${STATE_META[state].chip}`}>
+            {state === 'approved' ? '✓ ' : state === 'stale' ? '⚠️ ' : ''}
+            {t(STATE_META[state].en, STATE_META[state].zh)}
           </span>
         )}
         <span className="text-slate-300 text-xs">{collapsed ? '▸' : '▾'}</span>
@@ -146,8 +155,8 @@ export default function SectionCard({
     </div>
   );
 
-  // --- empty / failed / stale-generating → Generate button
-  if (!section || section.status === 'failed' || staleGenerating) {
+  // --- nothing to show yet → Generate button
+  if (state === 'missing' || state === 'failed') {
     return (
       <div className="bg-white rounded-2xl shadow-sm p-5 space-y-3">
         {header}
@@ -158,7 +167,7 @@ export default function SectionCard({
         )}
         {err && <div className="bg-red-50 text-red-600 text-sm px-3 py-2 rounded-lg">{err}</div>}
         <button
-          onClick={generate}
+          onClick={() => generate()}
           disabled={invoking}
           className="bg-xin-blue text-white text-sm font-semibold px-5 py-2.5 rounded-xl hover:bg-xin-blueLight transition-colors disabled:opacity-50"
         >
@@ -179,7 +188,7 @@ export default function SectionCard({
   }
 
   // --- generating (fresh)
-  if (section.status === 'generating' || invoking) {
+  if (state === 'generating' || invoking) {
     return (
       <div className="bg-white rounded-2xl shadow-sm p-5 space-y-3">
         {header}
@@ -191,15 +200,42 @@ export default function SectionCard({
     );
   }
 
+  // Unreachable: 'missing' covers a null row and returned above. TypeScript
+  // cannot see that through reviewStateOf, and asserting is worse than a guard.
+  if (!section) return null;
+
   const c = draft || section.content;
   if (!c) return null;
-  const readOnly = section.status === 'approved';
+  const readOnly = state === 'approved';
   const cv = c.client_view;
 
   return (
     <div className="bg-white rounded-2xl shadow-sm p-5 space-y-6">
       {header}
       {err && <div className="bg-red-50 text-red-600 text-sm px-3 py-2 rounded-lg">{err}</div>}
+      {/* A regeneration can fail after a good draft already exists. The server
+          keeps the section at 'draft' so the earlier work survives, which means
+          this banner is the only thing telling the advisor that what they are
+          looking at is the PREVIOUS version, not the one they just asked for. */}
+      {section.status === 'draft' && section.error && (
+        <div className="bg-amber-50 text-amber-800 text-sm px-3 py-2 rounded-lg">
+          {t(
+            'The last regeneration failed, so this is the previous draft: ',
+            '上次重新生成失败，以下仍是上一版草稿：',
+          )}
+          {section.error}
+        </div>
+      )}
+      {/* The server withdrew an approval because the numbers moved underneath
+          it. Silent demotion would look like the advisor's sign-off was lost. */}
+      {state === 'stale' && (
+        <div className="bg-amber-50 text-amber-800 text-sm px-3 py-2 rounded-lg">
+          ⚠️ {t(
+            'The figures behind this section changed after it was approved, so the approval was withdrawn. Re-read it — or regenerate — before approving again.',
+            '本节定稿后，其依据的数字发生了变化，定稿已自动撤回。请重新阅读，或重新生成后再定稿。',
+          )}
+        </div>
+      )}
 
       {!collapsed && (
         <>
@@ -259,12 +295,23 @@ export default function SectionCard({
           {/* Actions */}
           <div className="flex items-center gap-2 pt-2 border-t border-slate-100 flex-wrap">
             {readOnly ? (
-              <button
-                onClick={() => setStatus('draft')}
-                className="bg-white border border-xin-blue/30 text-xin-blue text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-blue/5 transition-colors"
-              >
-                {t('Reopen as Draft', '重新打开草稿')}
-              </button>
+              <>
+                <button
+                  onClick={() => setStatus('draft')}
+                  className="bg-white border border-xin-blue/30 text-xin-blue text-sm font-semibold px-4 py-2 rounded-xl hover:bg-xin-blue/5 transition-colors"
+                >
+                  {t('Reopen as Draft', '重新打开草稿')}
+                </button>
+                {/* The server refuses to overwrite an approval without this
+                    flag, so the confirm step here is not the only guard. */}
+                <TwoStepButton
+                  label={<>↻ {t('Regenerate', '重新生成')}</>}
+                  confirmLabel={<>↻ {t('Discard the approved version?', '确认放弃已定稿内容？')}</>}
+                  onConfirm={() => generate(true)}
+                  disabled={invoking}
+                  className="ml-auto text-sm text-slate-400 hover:text-red-600 font-semibold transition-colors disabled:opacity-50"
+                />
+              </>
             ) : (
               <>
                 <button
@@ -283,7 +330,7 @@ export default function SectionCard({
                 <TwoStepButton
                   label={<>↻ {t('Regenerate', '重新生成')}</>}
                   confirmLabel={<>↻ {t('Overwrite current draft?', '确认覆盖当前草稿？')}</>}
-                  onConfirm={generate}
+                  onConfirm={() => generate()}
                   disabled={invoking}
                   className="ml-auto text-sm text-slate-400 hover:text-xin-blue font-semibold transition-colors disabled:opacity-50"
                 />

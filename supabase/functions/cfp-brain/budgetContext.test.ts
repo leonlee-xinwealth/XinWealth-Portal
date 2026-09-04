@@ -15,8 +15,8 @@ const NOW = new Date("2026-07-16T00:00:00Z");
 function tightData(): CfpData {
   return makeCfpData({
     cashflow: [
-      { direction: "inflow", amount: 6000, frequency: "monthly", category: "salary" },
-      { direction: "outflow", amount: 5500, frequency: "monthly", category: "household" },
+      { direction: "inflow", amount: 6000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 5500, frequency: "monthly", category: "household", period_month: "2026-06-01" },
     ],
     assets: [
       { asset_type: "savings", current_value: 5000, cost_value: null, ownership_type: null },

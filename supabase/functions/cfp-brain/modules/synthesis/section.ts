@@ -5,6 +5,8 @@
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
 import { computeSynthesis, type SynthesisDet } from "./calc.ts";
+import { promptJson } from "../../promptSafety.ts";
+import { severityInstructionLines, severitySchema, type Severity } from "../../narrativeBlocks.ts";
 
 export interface SynthesisNarrative {
   executive_summary: {
@@ -12,10 +14,20 @@ export interface SynthesisNarrative {
     action_plan: string;
     expected_completion_date: string;
     remarks: string;
+    /** status dot on the report's executive-summary page; absent on sections
+     *  generated before the slot existed, which render without a dot */
+    severity?: Severity;
   };
   overall_assessment: string;
   priority_plan: string;
   recommendations: Array<{ title: string; detail: string; priority: number }>;
+  /** P13 综合财务分析与洞察. Absent on sections generated before the slot
+   *  existed — the page renders an empty state rather than a half board. */
+  swot?: {
+    strengths: string[];
+    warnings: string[];
+    opportunities: string[];
+  };
 }
 
 export interface SynthesisSectionContent extends SynthesisNarrative, SynthesisDet {
@@ -35,16 +47,27 @@ const RESPONSE_SCHEMA = {
         action_plan: { type: "STRING" },
         expected_completion_date: { type: "STRING" },
         remarks: { type: "STRING" },
+        severity: severitySchema(),
       },
       required: [
         "findings",
         "action_plan",
         "expected_completion_date",
         "remarks",
+        "severity",
       ],
     },
     overall_assessment: { type: "STRING" },
     priority_plan: { type: "STRING" },
+    swot: {
+      type: "OBJECT",
+      properties: {
+        strengths: { type: "ARRAY", items: { type: "STRING" } },
+        warnings: { type: "ARRAY", items: { type: "STRING" } },
+        opportunities: { type: "ARRAY", items: { type: "STRING" } },
+      },
+      required: ["strengths", "warnings", "opportunities"],
+    },
     recommendations: {
       type: "ARRAY",
       items: {
@@ -63,6 +86,7 @@ const RESPONSE_SCHEMA = {
     "overall_assessment",
     "priority_plan",
     "recommendations",
+    "swot",
   ],
 };
 
@@ -107,6 +131,21 @@ export function buildSynthesisPrompt(
     "4) recommendations — exactly the top 3 priority actions, {title, detail,",
     "   priority}. Each must reference a figure from the JSON. Never recommend",
     "   any specific product, plan or company.",
+    "5) swot — the report's 综合财务分析与洞察 page, three columns of exactly 3",
+    "   one-line items each. Draw them from `headlines`, which carries the",
+    "   figures the other seven sections computed — this is the only place in",
+    "   the report where the whole picture is argued at once, so each line must",
+    "   span the plan rather than restate one section:",
+    "   - strengths: what is genuinely working, each line citing the ratio or",
+    "     figure that shows it;",
+    "   - warnings: what would hurt this household first, hardest. Say the",
+    "     consequence, not just the number;",
+    "   - opportunities: what can be improved cheaply or quickly — idle cash,",
+    "     expensive revolving debt, an unwritten will.",
+    "   Every line ≤ 30 words, quoting figures verbatim. If a headline value is",
+    "   null the underlying section has not been generated; leave it out rather",
+    "   than guessing. Never pad a column to three with a weak item — write",
+    "   fewer.",
     "",
     "If missing_modules is non-empty, note that those sections have not been",
     "generated yet and their needs were treated as zero — advise generating",
@@ -121,8 +160,9 @@ export function buildSynthesisPrompt(
     "identifier (e.g. over_budget, budget_reconciliation); say \"within budget\"",
     "or \"the surplus covers every priority\" in plain words instead.",
     "",
+    ...severityInstructionLines(),
     "Synthesis JSON (sole source of numbers):",
-    JSON.stringify(context),
+    promptJson(context),
   ].join("\n");
 }
 

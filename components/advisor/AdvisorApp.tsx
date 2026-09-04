@@ -20,6 +20,9 @@ import SuitabilityList from './pages/SuitabilityList';
 import SuitabilityDetail from './pages/SuitabilityDetail';
 // Lazy so pdfjs-dist stays out of the main bundle (Suspense boundary in App.tsx).
 const SignatureRequests = lazy(() => import('./pages/SignatureRequests'));
+// Lazy too: the review page pulls in all eight CFP renderers, which nobody
+// browsing the client list needs.
+const CfpReviewPage = lazy(() => import('./pages/CfpReviewPage'));
 
 const AdvisorApp: React.FC = () => {
   const [session, setSession] = useState<any>(null);
@@ -60,6 +63,9 @@ const AdvisorApp: React.FC = () => {
         <Route path="clients" element={<ClientList />} />
         <Route path="clients/new" element={<NewClient />} />
         <Route path="clients/:id" element={<ClientDetail />} />
+        {/* 逐板块审核 — deliberately its own full-screen route rather than a
+            panel inside the CFP tab; see CfpReviewPage.tsx. */}
+        <Route path="clients/:id/cfp/:reportId/review" element={<CfpReviewPage />} />
         <Route path="pipeline" element={<Pipeline />} />
         <Route path="cases" element={<CaseList />} />
         <Route path="cases/:id" element={<CaseDetail />} />

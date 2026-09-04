@@ -1,6 +1,24 @@
 {
   "version": 1,
   "skills": {
+    "elegant-reports": {
+      "source": "jdrhyne/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/elegant-reports/SKILL.md",
+      "computedHash": "d9d8179fbf6a66d89cf5f9b7705af04bfafb5fe87398053020df4730502408fc"
+    },
+    "huashu-design": {
+      "source": "alchaincyf/huashu-design",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "362f9cf263a9cf85133a5910714f26a5bde3bc72ce2ad02e0da793e06a75ccee"
+    },
+    "react-pdf": {
+      "source": "molefrog/skills",
+      "sourceType": "github",
+      "skillPath": "skills/react-pdf/SKILL.md",
+      "computedHash": "cdaa874c3fa3a76b0c82534dfee9e4cabb44f9d7ba48a699527d3e4c0b2d48af"
+    },
     "supabase": {
       "source": "supabase/agent-skills",
       "sourceType": "github",

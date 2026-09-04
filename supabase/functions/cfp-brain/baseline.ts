@@ -6,6 +6,13 @@
 //   2. unified economic assumptions so retirement/investment/goals never
 //      diverge on returns or inflation.
 
+import {
+  annualizeCashflow,
+  ANNUAL_OCCURRENCES,
+  defaultBasis,
+  isAssetTransfer,
+  type CashflowBasis,
+} from "../_shared/cashflow/periods.ts";
 import type {
   BaselineAssumptions,
   CfpData,
@@ -33,14 +40,11 @@ export const BASELINE_DEFAULTS = {
   default_band: "balanced",
 } as const;
 
-export const CASHFLOW_ANNUALIZE: Record<string, number> = {
-  weekly: 52,
-  monthly: 12,
-  quarterly: 4,
-  semi_annual: 2,
-  annual: 1,
-  one_off: 0,
-};
+/** @deprecated Re-exported from the shared module so existing importers keep
+ *  working. The annualisation itself lives in _shared/cashflow/periods.ts —
+ *  applying this table row-by-row is what treated a month's actual figure as a
+ *  standing monthly commitment. */
+export const CASHFLOW_ANNUALIZE = ANNUAL_OCCURRENCES;
 
 /** Asset types counting as emergency-fund-eligible liquid assets. */
 export const LIQUID_ASSET_TYPES = ["savings", "fixed_deposit", "money_market"];
@@ -54,18 +58,8 @@ export function ageFromDob(dob: string | null, now = new Date()): number | null 
   return Math.floor((now.getTime() - t) / (365.25 * 24 * 3600 * 1000));
 }
 
-/** 小会计口径: rows linked to the client's own asset are transfers (savings →
- * investment etc.), not true income/expenses. Loan repayments
- * (linked_liability_id) remain true expenses. */
-export function isAssetTransfer(r: CfpData["cashflow"][number]): boolean {
-  return r.linked_asset_id != null;
-}
-
-function annualize(rows: CfpData["cashflow"], direction: "inflow" | "outflow"): number {
-  return rows
-    .filter((r) => r.direction === direction && !isAssetTransfer(r))
-    .reduce((s, r) => s + r.amount * (CASHFLOW_ANNUALIZE[r.frequency] ?? 12), 0);
-}
+/** 小会计口径 — re-exported from the shared module; see periods.ts. */
+export { isAssetTransfer };
 
 export function resolveAssumptions(
   riskProfile: string | null,
@@ -102,14 +96,35 @@ export function computeBaseline(
   );
   const notes: string[] = [];
 
-  const annualIncome = annualize(f.cashflow, "inflow");
-  const annualExpenses = annualize(f.cashflow, "outflow");
-  const monthlyIncome = annualIncome / 12;
+  // The plan is annualised from the months the advisor chose. Absent a choice,
+  // from every month the client has on record — never from "the latest month",
+  // which is the rule that used to silently discard most of the data.
+  const basis: CashflowBasis | null = inputs.cashflow_basis ??
+    defaultBasis(f.cashflow);
+  const cf = annualizeCashflow(f.cashflow, basis);
+  const annualIncome = cf.annual_income;
+  const annualExpenses = cf.annual_expenses;
+  const monthlyIncome = cf.monthly_income;
   // Essential-expense proxy: all recurring outflows. Category strings are
   // free-text, so a conservative "everything is essential" reading keeps the
   // emergency fund honest rather than optimistic.
-  const monthlyEssential = annualExpenses / 12;
+  const monthlyEssential = cf.monthly_expenses;
   notes.push("紧急预备金按全部经常性月支出为「必要支出」口径计算");
+  if (basis) {
+    notes.push(
+      `收支按 ${basis.year} 年 ${basis.from_month}–${basis.to_month} 月的实际记录年化`,
+    );
+    // A gap in the record is a fact about the data, not a rounding question:
+    // the advisor has to know the average came from fewer months than they
+    // selected before they read anything built on it.
+    if (cf.months_with_data.length < cf.basis_months) {
+      notes.push(
+        `基准区间 ${cf.basis_months} 个月中,仅 ${cf.months_with_data.length} 个月有记录,月均按有记录的月份计算`,
+      );
+    }
+  } else {
+    notes.push("未录得任何月份的收支记录,收入与支出按零处理");
+  }
   notes.push("与自有资产挂钩的现金流视为资产转移，不计入收入或支出（还贷除外）");
 
   const emergencyNeedLow = monthlyEssential * assumptions.emergency_months_low;
@@ -147,8 +162,34 @@ export function computeBaseline(
     notes.push("未录得经常性收入，收入相关比率不具参考意义");
   }
 
+  // Joint report: every figure above is already the couple's combined position
+  // (f holds the merged household data). The timeline still runs on the primary
+  // client's age — a dual retirement horizon is out of scope, so say so.
+  const partner = f.household?.partner.client ?? null;
+  const partnerAge = partner ? ageFromDob(partner.date_of_birth, now) : null;
+  const partnerRetirementAge = partner
+    ? partner.retirement_age ?? assumptions.default_retirement_age
+    : null;
+  if (partner) {
+    notes.push("联合规划：收入、支出、资产与负债为夫妻两人合并口径");
+    notes.push(
+      `退休时间轴按主客户年龄计算；配偶年龄 ${
+        partnerAge ?? "未知"
+      }、计划退休年龄 ${partnerRetirementAge} 另行列示`,
+    );
+    const dupes = f.household?.duplicates ?? [];
+    if (dupes.length > 0) {
+      notes.push(
+        `联合规划：检测到 ${dupes.length} 项两人重复录入的资产／负债，请确认共同持有的项目只录在一方名下`,
+      );
+    }
+  }
+
   return {
     version: 1,
+    cashflow_basis: basis,
+    cashflow_basis_months: cf.basis_months,
+    cashflow_months_with_data: cf.months_with_data,
     annual_income: round(annualIncome),
     annual_expenses: round(annualExpenses),
     monthly_income: round(monthlyIncome),
@@ -178,6 +219,13 @@ export function computeBaseline(
     years_to_retirement: age != null ? Math.max(0, retirementAge - age) : null,
     dependents: f.client.number_of_dependants ?? 0,
     marital_status: f.client.marital_status,
+    ...(partner
+      ? {
+        household_mode: true,
+        partner_age: partnerAge,
+        partner_retirement_age: partnerRetirementAge,
+      }
+      : {}),
     assumptions,
     baseline_notes: notes,
   };

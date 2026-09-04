@@ -92,32 +92,32 @@ export default function InsuranceRenderer({ c, setDraft, readOnly, t }: Renderer
         </div>
       </div>
 
-      {/* CNA (read-only, deterministic) */}
+      {/* CNA (read-only, deterministic). On a joint report cfp-brain computes
+          one CNA per spouse — protection need is per life — so render each
+          separately rather than a household total that hides who is short. */}
       <div>
         <SectionHeading hint={t('deterministic — edit client data to change', '确定性计算——改客户资料才会变')}>
           {t('Capital Need Analysis', '资本需求分析 CNA')}
         </SectionHeading>
-        <div className="grid sm:grid-cols-3 gap-3">
-          {(c.cna?.gaps || []).filter((g: any) => !g.flag_only).map((g: any) => (
-            <div key={g.key} className="border border-slate-100 rounded-xl p-3">
-              <div className="text-xs text-slate-500 mb-1">{g.key === 'life' ? t('Life', '人寿') : t('Critical Illness', '重疾')}</div>
-              <div className="text-xs text-slate-400">{t('Need', '需求')} {fmtRM(g.need)}</div>
-              <div className="text-xs text-slate-400">{t('Covered', '已覆盖')} {fmtRM(g.covered)}</div>
-              <div className={`text-sm font-bold mt-1 ${g.gap > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
-                {g.gap > 0 ? `${t('Gap', '缺口')} ${fmtRM(g.gap)}` : `✓ ${t('Sufficient', '已足够')}`}
+        {Array.isArray(c.per_person) && c.per_person.length > 0 ? (
+          <div className="space-y-4">
+            {c.per_person.map((p: any, i: number) => (
+              <div key={i}>
+                <div className="text-xs font-semibold text-xin-blue mb-2">
+                  {p.role === 'partner' ? t('Spouse', '配偶') : t('Client', '客户')}
+                </div>
+                <CnaGapCards cna={p.cna} t={t} />
+                {p.commentary && <p className="text-xs text-slate-500 mt-2">{p.commentary}</p>}
               </div>
-            </div>
-          ))}
-          {(c.cna?.gaps || []).filter((g: any) => g.flag_only).map((g: any) => (
-            <div key={g.key} className="border border-slate-100 rounded-xl p-3">
-              <div className="text-xs text-slate-500 mb-1">{t('Medical', '医疗')}</div>
-              <div className={`text-sm font-bold mt-1 ${g.has_cover ? 'text-emerald-600' : 'text-red-600'}`}>
-                {g.has_cover ? `✓ ${t('Has cover', '已有保障')}` : t('No cover found', '未见保障')}
-              </div>
-            </div>
-          ))}
-        </div>
-        <AssumptionsList items={c.cna?.assumptions} />
+            ))}
+            <AssumptionsList items={c.cna?.assumptions} />
+          </div>
+        ) : (
+          <>
+            <CnaGapCards cna={c.cna} t={t} />
+            <AssumptionsList items={c.cna?.assumptions} />
+          </>
+        )}
       </div>
 
       {/* Coverage review */}
@@ -301,5 +301,32 @@ export default function InsuranceRenderer({ c, setDraft, readOnly, t }: Renderer
         </div>
       )}
     </>
+  );
+}
+
+// The three deterministic CNA gap cards. Rendered once on an individual report,
+// once per spouse on a joint one.
+function CnaGapCards({ cna, t }: { cna: any; t: (en: string, zh: string) => string }) {
+  return (
+    <div className="grid sm:grid-cols-3 gap-3">
+      {(cna?.gaps || []).filter((g: any) => !g.flag_only).map((g: any) => (
+        <div key={g.key} className="border border-slate-100 rounded-xl p-3">
+          <div className="text-xs text-slate-500 mb-1">{g.key === 'life' ? t('Life', '人寿') : t('Critical Illness', '重疾')}</div>
+          <div className="text-xs text-slate-400">{t('Need', '需求')} {fmtRM(g.need)}</div>
+          <div className="text-xs text-slate-400">{t('Covered', '已覆盖')} {fmtRM(g.covered)}</div>
+          <div className={`text-sm font-bold mt-1 ${g.gap > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+            {g.gap > 0 ? `${t('Gap', '缺口')} ${fmtRM(g.gap)}` : `✓ ${t('Sufficient', '已足够')}`}
+          </div>
+        </div>
+      ))}
+      {(cna?.gaps || []).filter((g: any) => g.flag_only).map((g: any) => (
+        <div key={g.key} className="border border-slate-100 rounded-xl p-3">
+          <div className="text-xs text-slate-500 mb-1">{t('Medical', '医疗')}</div>
+          <div className={`text-sm font-bold mt-1 ${g.has_cover ? 'text-emerald-600' : 'text-red-600'}`}>
+            {g.has_cover ? `✓ ${t('Has cover', '已有保障')}` : t('No cover found', '未见保障')}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }

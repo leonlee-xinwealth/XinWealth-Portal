@@ -4,6 +4,30 @@
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
 import { computeLegacy, type LegacyDet } from "./calc.ts";
+import { promptJson } from "../../promptSafety.ts";
+import {
+  consequenceInstructionLines,
+  consequenceSchema,
+  severityInstructionLines,
+  severitySchema,
+  solutionInstructionLines,
+  solutionSchema,
+  type ConsequenceCard,
+  type NarrativeCard,
+  type Severity,
+} from "../../narrativeBlocks.ts";
+
+/**
+ * The exposures P18 can lead with. Each maps to a figure or flag the legacy
+ * calculator owns, so whichever the model picks, the PDF has a number for it.
+ */
+export const LEGACY_EXPOSURE_KEYS = [
+  "no_will",
+  "estate_liquidity",
+  "nomination_gap",
+  "faraid_distribution",
+  "creditor_exposure",
+] as const;
 
 export interface LegacyNarrative {
   executive_summary: {
@@ -11,10 +35,18 @@ export interface LegacyNarrative {
     action_plan: string;
     expected_completion_date: string;
     remarks: string;
+    /** status dot on the report's executive-summary page; absent on sections
+     *  generated before the slot existed, which render without a dot */
+    severity?: Severity;
   };
   estate_review: string;
   readiness: string;
   recommendations: Array<{ title: string; detail: string; priority: number }>;
+  /** P18 无遗嘱的代价 — the model picks which exposure leads; every amount on
+   *  the page is looked up in `det` by the PDF. */
+  consequences?: ConsequenceCard;
+  /** P19 传承方案建议 */
+  solution?: NarrativeCard;
 }
 
 export interface LegacySectionContent extends LegacyNarrative, LegacyDet {
@@ -34,15 +66,19 @@ const RESPONSE_SCHEMA = {
         action_plan: { type: "STRING" },
         expected_completion_date: { type: "STRING" },
         remarks: { type: "STRING" },
+        severity: severitySchema(),
       },
       required: [
         "findings",
         "action_plan",
         "expected_completion_date",
         "remarks",
+        "severity",
       ],
     },
     estate_review: { type: "STRING" },
+    consequences: consequenceSchema([...LEGACY_EXPOSURE_KEYS]),
+    solution: solutionSchema(),
     readiness: { type: "STRING" },
     recommendations: {
       type: "ARRAY",
@@ -62,6 +98,8 @@ const RESPONSE_SCHEMA = {
     "estate_review",
     "readiness",
     "recommendations",
+    "consequences",
+    "solution",
   ],
 };
 
@@ -136,8 +174,11 @@ export function buildLegacyPrompt(
     "Tone: professional, plain English, written so a layperson feels the",
     "real-world stakes. This is a draft the advisor will edit.",
     "",
+    ...consequenceInstructionLines("estate arrangement", [...LEGACY_EXPOSURE_KEYS]),
+    ...solutionInstructionLines("estate"),
+    ...severityInstructionLines(),
     "Client legacy JSON (sole source of numbers):",
-    JSON.stringify(context),
+    promptJson(context),
   ].join("\n");
 }
 

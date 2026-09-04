@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
+import FamilyLinkCard from '../FamilyLinkCard';
 
-const MY_STATES = ['Johor','Kedah','Kelantan','Melaka','Negeri Sembilan','Pahang','Perak','Perlis','Pulau Pinang','Sabah','Sarawak','Selangor','Terengganu','WP Kuala Lumpur','WP Labuan','WP Putrajaya'];
+const MY_STATES =['Johor','Kedah','Kelantan','Melaka','Negeri Sembilan','Pahang','Perak','Perlis','Pulau Pinang','Sabah','Sarawak','Selangor','Terengganu','WP Kuala Lumpur','WP Labuan','WP Putrajaya'];
 
 export default function ProfileTab({ client, onSave }: { client: any; onSave: () => void }) {
   const { language } = useLanguage();
@@ -97,35 +98,46 @@ export default function ProfileTab({ client, onSave }: { client: any; onSave: ()
           <Row label={t('Bank Account No.','银行账号')}>{editing ? <Inp value={form.bank_account_number||''} onChange={v2 => set('bank_account_number',v2)} /> : <SensitiveValue value={v.bank_account_number} fieldName="bank_account_number" revealed={revealed.bank_account_number} onReveal={revealSensitive} />}</Row>
           <Row label={t('Client Status','客户状态')}>{editing ? <Sel value={form.status} onChange={v2 => set('status',v2)} opts={[['prospect',t('Prospect','潜在')],['active',t('Active','活跃')],['inactive',t('Inactive','非活跃')]]} /> : v.status}</Row>
         </Card>
+
+        <Card title={t('Family','家庭关系')}>
+          <FamilyLinkCard client={client} />
+        </Card>
       </div>
     </div>
   );
 }
 
-const Card = ({ title, children }: any) => (
+const Card = ({ title, children }: { title: React.ReactNode; children: React.ReactNode }) => (
   <div className="bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3 border-b border-slate-50 pb-2">{title}</h3>
     {children}
   </div>
 );
-const Row = ({ label, children }: any) => (
+const Row = ({ label, children }: { label: React.ReactNode; children: React.ReactNode }) => (
   <div className="flex items-center py-2 border-b border-slate-50 last:border-0 gap-2">
     <span className="w-32 shrink-0 text-xs text-slate-400 font-medium">{label}</span>
     <span className="flex-1 text-sm text-xin-blue">{children}</span>
   </div>
 );
-const Btn = ({ onClick, primary, children, disabled }: any) => (
+const Btn = ({ onClick, primary, children, disabled }: {
+  onClick: () => void; primary?: boolean; children: React.ReactNode; disabled?: boolean;
+}) => (
   <button onClick={onClick} disabled={disabled}
     className={`px-4 py-2 rounded-xl text-sm font-semibold transition-colors ${primary ? 'bg-xin-blue text-white hover:bg-xin-blueLight' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'} disabled:opacity-50`}
   >{children}</button>
 );
-const maskSensitive = (value: string, visiblePrefix = 10) => {
+const maskSensitive = (value: string | null | undefined, visiblePrefix = 10) => {
   if (!value) return '—';
   const raw = String(value);
   if (raw.length <= 4) return '****';
   return `${raw.slice(0, Math.min(visiblePrefix, raw.length - 4))}****`;
 };
-const SensitiveValue = ({ value, fieldName, revealed, onReveal }: any) => (
+const SensitiveValue = ({ value, fieldName, revealed, onReveal }: {
+  value?: string | null;
+  fieldName: 'nric' | 'bank_account_number';
+  revealed?: boolean;
+  onReveal: (fieldName: 'nric' | 'bank_account_number') => void;
+}) => (
   <span className="inline-flex items-center gap-2 flex-wrap">
     <span>{revealed ? (value || '—') : maskSensitive(value)}</span>
     {value && !revealed ? (
@@ -139,14 +151,18 @@ const SensitiveValue = ({ value, fieldName, revealed, onReveal }: any) => (
     ) : null}
   </span>
 );
-const Inp = ({ value, onChange, type = 'text' }: any) => (
-  <input type={type} value={value} onChange={(e: any) => onChange(e.target.value)}
+const Inp = ({ value, onChange, type = 'text' }: {
+  value: string; onChange: (value: string) => void; type?: string;
+}) => (
+  <input type={type} value={value} onChange={e => onChange(e.target.value)}
     className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold" />
 );
-const Sel = ({ value, onChange, opts }: any) => (
-  <select value={value} onChange={(e: any) => onChange(e.target.value)}
+const Sel = ({ value, onChange, opts }: {
+  value: string; onChange: (value: string) => void; opts: Array<[string, string]>;
+}) => (
+  <select value={value} onChange={e => onChange(e.target.value)}
     className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold bg-white">
-    {opts.map(([v, l]: any) => <option key={v} value={v}>{l}</option>)}
+    {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
   </select>
 );
 

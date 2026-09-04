@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "https://deno.land/std@0.168.0/testing/asserts.ts";
-import { computeRetirement, simulateDrawdown } from "./calc.ts";
+import { computeRetirement, growingAnnuityPv, simulateDrawdown } from "./calc.ts";
 import { computeBaseline } from "../../baseline.ts";
 import { makeCfpData } from "../../baseline.test.ts";
 import { pmtMonthly } from "../goals/calc.ts";
@@ -145,4 +145,114 @@ Deno.test("insufficient_data: depletion_age null, both survives flags false, rat
   assertEquals(d.survives_to_85, false);
   assertEquals(d.survives_to_100, false);
   assertEquals(d.post_retirement_rate_used, 0.055);
+});
+
+// ---------------------------------------------------------------------------
+// 资金耐久曲线 — the year-by-year series the report plots on P23/P24.
+// ---------------------------------------------------------------------------
+
+Deno.test("drawdown series: ends on the depletion year and lands on zero", () => {
+  const r = simulateDrawdown(100000, 50000, 60, 0.03, 0.02, 100);
+  assertEquals(r.depletion_age, 62);
+  // one row per year lived through, 60..62 inclusive
+  assertEquals(r.series.length, 3);
+  assertEquals(r.series.map((p) => p.age), [60, 61, 62]);
+  // the curve touches the axis rather than plunging below it
+  assertEquals(r.series[r.series.length - 1].closing, 0);
+  assertEquals(r.series[r.series.length - 1].age, r.depletion_age);
+});
+
+Deno.test("drawdown series: opening chains from the prior year and ages ascend", () => {
+  const r = simulateDrawdown(3_000_000, 120000, 60, 0.055, 0.035, 100);
+  assertEquals(r.series[0].opening, 3_000_000);
+  assertEquals(r.series[0].age, 60);
+  for (let i = 1; i < r.series.length; i++) {
+    assert(r.series[i].age === r.series[i - 1].age + 1, "ages must be consecutive");
+  }
+  // withdrawals grow with inflation
+  assert(r.series[1].withdrawal > r.series[0].withdrawal);
+});
+
+Deno.test("drawdown series: survivor runs to maxAge and never reaches zero", () => {
+  const r = simulateDrawdown(100_000_000, 50000, 60, 0.055, 0.035, 100);
+  assertEquals(r.depletion_age, null);
+  assertEquals(r.series.length, 40); // 60..99
+  assert(r.series[r.series.length - 1].closing > 0);
+});
+
+Deno.test("computeRetirement exposes both curves; optimized starts at capital_needed", () => {
+  const d = det();
+  assertEquals(d.drawdown_max_age, 100);
+  assert(d.drawdown_baseline.length > 0);
+  assertEquals(d.drawdown_baseline[0].opening, d.total_projected);
+  if (d.gap > 0) {
+    assertEquals(d.drawdown_optimized[0].opening, d.capital_needed);
+    // closing the gap can only extend the runway
+    assert(d.drawdown_optimized.length >= d.drawdown_baseline.length);
+  } else {
+    // already on track — one line, not two
+    assertEquals(d.drawdown_optimized, d.drawdown_baseline);
+  }
+});
+
+Deno.test("insufficient_data: both curves empty rather than a bogus flat line", () => {
+  const d = det({ client: { ...makeCfpData().client, date_of_birth: null } });
+  assert(d.insufficient_data);
+  assertEquals(d.drawdown_baseline, []);
+  assertEquals(d.drawdown_optimized, []);
+  assertEquals(d.drawdown_max_age, 100);
+});
+
+Deno.test("the drawdown series never reaches the LLM prompt", async () => {
+  const { buildRetirementPrompt } = await import("./section.ts");
+  const f = makeCfpData();
+  const b = computeBaseline(f, {}, NOW);
+  const prompt = buildRetirementPrompt(computeRetirement(f, b), b, f);
+  assert(!prompt.includes("drawdown_"), "prompt must not carry the series");
+  assert(!prompt.includes("\"opening\""), "prompt must not carry series rows");
+  // the scalar summary the narrative actually needs is still there
+  assert(prompt.includes("survives_to_85"));
+});
+
+// ---------------------------------------------------------------------------
+// 两种退休定义 — P22 prints these side by side, and the gap between them is the
+// decision the client is being asked to make. Both must come from the same
+// assumptions as the drawdown curve, or the report argues with itself.
+// ---------------------------------------------------------------------------
+
+Deno.test("depletion capital is the present value of a rising income stream", () => {
+  // 20 years of RM 100,000 rising at 3%, discounted at 5.5%.
+  const pv = growingAnnuityPv(100_000, 0.055, 0.03, 20);
+  const byHand = (100_000 / (0.055 - 0.03)) *
+    (1 - Math.pow(1.03 / 1.055, 20));
+  assertEquals(Math.round(pv), Math.round(byHand));
+});
+
+Deno.test("depletion capital handles a return that exactly matches inflation", () => {
+  // The closed form divides by (rate - growth); at parity it must not blow up.
+  const pv = growingAnnuityPv(100_000, 0.04, 0.04, 20);
+  assertEquals(Math.round(pv), Math.round(100_000 * 20 / 1.04));
+  assert(Number.isFinite(pv));
+});
+
+Deno.test("depletion capital is zero when there is nothing to fund", () => {
+  assertEquals(growingAnnuityPv(0, 0.05, 0.03, 20), 0);
+  assertEquals(growingAnnuityPv(100_000, 0.05, 0.03, 0), 0);
+});
+
+Deno.test("living off the yield always costs more than spending the capital down", () => {
+  // If this ever inverted, the report would tell a client that never touching
+  // their principal is the cheaper of the two plans.
+  const det = computeRetirement(makeCfpData(), computeBaseline(makeCfpData(), {}, NOW), NOW);
+  assert(det.capital_needed > det.capital_needed_depletion,
+    `passive ${det.capital_needed} should exceed depletion ${det.capital_needed_depletion}`);
+  assert(det.capital_needed_depletion > 0);
+});
+
+Deno.test("both capital figures are zero when there is not enough data to project", () => {
+  const f = makeCfpData({ client: { ...makeCfpData().client, date_of_birth: null } });
+  const det = computeRetirement(f, computeBaseline(f, {}, NOW), NOW);
+  assertEquals(det.insufficient_data, true);
+  assertEquals(det.capital_needed, 0);
+  assertEquals(det.capital_needed_depletion, 0);
 });

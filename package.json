@@ -8,6 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:deno": "deno test --no-check --allow-env supabase/functions/",
+    "typecheck": "tsc --noEmit",
     "proofs": "tsx scripts/generate-proofs.ts"
   },
   "dependencies": {

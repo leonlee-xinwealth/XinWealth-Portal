@@ -1,0 +1,250 @@
+{
+  "note": "Shared expectations for _shared/cashflow/periods.ts. Read by BOTH the Deno test (periods.test.ts) and the vitest one (components/advisor/__tests__/cashflowPeriods.test.ts). One file so the browser and the edge function can never drift on the 口径 that produces every figure in the report. Figures marked REAL come from live client records.",
+  "cases": [
+    {
+      "name": "REAL Lee Wei Qi — June is the only complete month",
+      "why": "Five expenses were entered in June and one more in July. Under month-actual semantics June's position is RM 1,420, and that is what a June basis must report.",
+      "rows": [
+        { "direction": "inflow", "amount": 2577, "frequency": "monthly", "period_month": "2026-06-01", "category": "salary" },
+        { "direction": "outflow", "amount": 580, "frequency": "monthly", "period_month": "2026-06-01", "category": "personal" },
+        { "direction": "outflow", "amount": 340, "frequency": "monthly", "period_month": "2026-06-01", "category": "transportation" },
+        { "direction": "outflow", "amount": 200, "frequency": "monthly", "period_month": "2026-06-01", "category": "personal" },
+        { "direction": "outflow", "amount": 200, "frequency": "monthly", "period_month": "2026-06-01", "category": "miscellaneous" },
+        { "direction": "outflow", "amount": 100, "frequency": "monthly", "period_month": "2026-06-01", "category": "personal" },
+        { "direction": "outflow", "amount": 128, "frequency": "monthly", "period_month": "2026-07-01", "category": "household" }
+      ],
+      "basis": { "year": 2026, "from_month": 6, "to_month": 6 },
+      "expect": {
+        "monthly_income": 2577,
+        "monthly_expenses": 1420,
+        "annual_income": 30924,
+        "annual_expenses": 17040,
+        "basis_months": 1,
+        "months_with_data": [6],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      },
+      "ytd": { "year": 2026, "income": 2577, "expenses": 1548, "surplus": 1029, "months_with_data": [6, 7] }
+    },
+    {
+      "name": "REAL Lee Wei Qi — averaging June and July halves the position",
+      "why": "July holds one row (RM 128) against June's five. Averaging is arithmetically right and probably not what the advisor wants, which is exactly why months_with_data and the per-month entry counts are surfaced instead of being resolved silently.",
+      "rows": "@case:0",
+      "basis": { "year": 2026, "from_month": 6, "to_month": 7 },
+      "expect": {
+        "monthly_income": 1288.5,
+        "monthly_expenses": 774,
+        "annual_income": 15462,
+        "annual_expenses": 9288,
+        "basis_months": 2,
+        "months_with_data": [6, 7],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      }
+    },
+    {
+      "name": "a whole-year basis divides by the months that HAVE data, not by twelve",
+      "why": "The single most damaging thing this function could do is treat unrecorded months as zero income. Dividing by 12 here would report RM 129/month of spending against a real RM 1,548 across two months.",
+      "rows": "@case:0",
+      "basis": { "year": 2026, "from_month": 1, "to_month": 12 },
+      "expect": {
+        "monthly_income": 1288.5,
+        "monthly_expenses": 774,
+        "annual_income": 15462,
+        "annual_expenses": 9288,
+        "basis_months": 12,
+        "months_with_data": [6, 7],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      }
+    },
+    {
+      "name": "REAL annual bonus counts once for the year, even from outside the month window",
+      "why": "Lim Wei Jian's RM 18,400 bonus sits in March with frequency 'annual'. It is real 2026 income when the basis is June–July, and folding it into a monthly average would multiply it by twelve.",
+      "rows": [
+        { "direction": "inflow", "amount": 18400, "frequency": "annual", "period_month": "2026-03-01", "category": "bonus" },
+        { "direction": "inflow", "amount": 6000, "frequency": "monthly", "period_month": "2026-06-01", "category": "salary" },
+        { "direction": "inflow", "amount": 4000, "frequency": "monthly", "period_month": "2026-07-01", "category": "salary" }
+      ],
+      "basis": { "year": 2026, "from_month": 6, "to_month": 7 },
+      "expect": {
+        "monthly_income": 6533.333333333333,
+        "monthly_expenses": 0,
+        "annual_income": 78400,
+        "annual_expenses": 0,
+        "basis_months": 2,
+        "months_with_data": [6, 7],
+        "annual_items_income": 18400,
+        "annual_items_expenses": 0
+      },
+      "ytd": { "year": 2026, "income": 28400, "expenses": 0, "surplus": 28400, "months_with_data": [3, 6, 7] }
+    },
+    {
+      "name": "the user's own example: RM 6,000 in June and RM 4,000 in July",
+      "why": "Actual income for the year so far is RM 10,000; the annual RUN-RATE is RM 60,000. Both are correct and they are not the same number — the cashflow screen shows the first, the plan is built on the second.",
+      "rows": [
+        { "direction": "inflow", "amount": 6000, "frequency": "monthly", "period_month": "2026-06-01", "category": "salary" },
+        { "direction": "outflow", "amount": 5000, "frequency": "monthly", "period_month": "2026-06-01", "category": "household" },
+        { "direction": "inflow", "amount": 4000, "frequency": "monthly", "period_month": "2026-07-01", "category": "salary" },
+        { "direction": "outflow", "amount": 3000, "frequency": "monthly", "period_month": "2026-07-01", "category": "household" }
+      ],
+      "basis": { "year": 2026, "from_month": 6, "to_month": 7 },
+      "expect": {
+        "monthly_income": 5000,
+        "monthly_expenses": 4000,
+        "annual_income": 60000,
+        "annual_expenses": 48000,
+        "basis_months": 2,
+        "months_with_data": [6, 7],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      },
+      "ytd": { "year": 2026, "income": 10000, "expenses": 8000, "surplus": 2000, "months_with_data": [6, 7] }
+    },
+    {
+      "name": "one-off items drop out",
+      "why": "Zero occurrences a year, unchanged from the historical CASHFLOW_ANNUALIZE table.",
+      "rows": [
+        { "direction": "inflow", "amount": 1000, "frequency": "monthly", "period_month": "2026-06-01" },
+        { "direction": "inflow", "amount": 5000, "frequency": "one_off", "period_month": "2026-06-01" }
+      ],
+      "basis": { "year": 2026, "from_month": 6, "to_month": 6 },
+      "expect": {
+        "monthly_income": 1000,
+        "monthly_expenses": 0,
+        "annual_income": 12000,
+        "annual_expenses": 0,
+        "basis_months": 1,
+        "months_with_data": [6],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      }
+    },
+    {
+      "name": "quarterly items occur four times a year",
+      "rows": [
+        { "direction": "inflow", "amount": 3000, "frequency": "quarterly", "period_month": "2026-02-01" }
+      ],
+      "basis": { "year": 2026, "from_month": 6, "to_month": 7 },
+      "expect": {
+        "monthly_income": 1000,
+        "monthly_expenses": 0,
+        "annual_income": 12000,
+        "annual_expenses": 0,
+        "basis_months": 2,
+        "months_with_data": [],
+        "annual_items_income": 12000,
+        "annual_items_expenses": 0
+      }
+    },
+    {
+      "name": "transfers into the client's own assets are not spending",
+      "why": "小会计口径, carried over unchanged from baseline.ts.",
+      "rows": [
+        { "direction": "outflow", "amount": 1000, "frequency": "monthly", "period_month": "2026-06-01", "linked_asset_id": "a-1" },
+        { "direction": "outflow", "amount": 500, "frequency": "monthly", "period_month": "2026-06-01" }
+      ],
+      "basis": { "year": 2026, "from_month": 6, "to_month": 6 },
+      "expect": {
+        "monthly_income": 0,
+        "monthly_expenses": 500,
+        "annual_income": 0,
+        "annual_expenses": 6000,
+        "basis_months": 1,
+        "months_with_data": [6],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      },
+      "ytd": { "year": 2026, "income": 0, "expenses": 500, "surplus": -500, "months_with_data": [6] }
+    },
+    {
+      "name": "a loan repayment IS spending",
+      "why": "linked_liability_id must not be confused with linked_asset_id — servicing debt is money leaving the household.",
+      "rows": [
+        { "direction": "outflow", "amount": 900, "frequency": "monthly", "period_month": "2026-06-01", "linked_liability_id": "l-1" }
+      ],
+      "basis": { "year": 2026, "from_month": 6, "to_month": 6 },
+      "expect": {
+        "monthly_income": 0,
+        "monthly_expenses": 900,
+        "annual_income": 0,
+        "annual_expenses": 10800,
+        "basis_months": 1,
+        "months_with_data": [6],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      }
+    },
+    {
+      "name": "another year's rows are ignored entirely",
+      "rows": [
+        { "direction": "inflow", "amount": 9999, "frequency": "monthly", "period_month": "2025-06-01" },
+        { "direction": "inflow", "amount": 8000, "frequency": "annual", "period_month": "2025-03-01" },
+        { "direction": "inflow", "amount": 1000, "frequency": "monthly", "period_month": "2026-06-01" }
+      ],
+      "basis": { "year": 2026, "from_month": 6, "to_month": 6 },
+      "expect": {
+        "monthly_income": 1000,
+        "monthly_expenses": 0,
+        "annual_income": 12000,
+        "annual_expenses": 0,
+        "basis_months": 1,
+        "months_with_data": [6],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      }
+    },
+    {
+      "name": "a client with nothing recorded yields zeros, never NaN",
+      "why": "The divisor guard: dividing by an empty month set must not produce NaN, which would propagate silently through every ratio in the report.",
+      "rows": [],
+      "basis": { "year": 2026, "from_month": 1, "to_month": 12 },
+      "expect": {
+        "monthly_income": 0,
+        "monthly_expenses": 0,
+        "annual_income": 0,
+        "annual_expenses": 0,
+        "basis_months": 12,
+        "months_with_data": [],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      },
+      "ytd": { "year": 2026, "income": 0, "expenses": 0, "surplus": 0, "months_with_data": [] }
+    },
+    {
+      "name": "a reversed basis is normalised rather than yielding nothing",
+      "rows": "@case:4",
+      "basis": { "year": 2026, "from_month": 7, "to_month": 6 },
+      "expect": {
+        "monthly_income": 5000,
+        "monthly_expenses": 4000,
+        "annual_income": 60000,
+        "annual_expenses": 48000,
+        "basis_months": 2,
+        "months_with_data": [6, 7],
+        "annual_items_income": 0,
+        "annual_items_expenses": 0
+      }
+    }
+  ],
+  "defaultBasis": [
+    {
+      "name": "picks the most recent year and spans its recorded months",
+      "rows": "@case:0",
+      "expect": { "year": 2026, "from_month": 6, "to_month": 7 }
+    },
+    {
+      "name": "ignores older years entirely",
+      "rows": [
+        { "direction": "inflow", "amount": 1, "frequency": "monthly", "period_month": "2024-01-01" },
+        { "direction": "inflow", "amount": 1, "frequency": "monthly", "period_month": "2026-09-01" }
+      ],
+      "expect": { "year": 2026, "from_month": 9, "to_month": 9 }
+    },
+    {
+      "name": "no data means no basis, so the caller must handle it",
+      "rows": [],
+      "expect": null
+    }
+  ]
+}

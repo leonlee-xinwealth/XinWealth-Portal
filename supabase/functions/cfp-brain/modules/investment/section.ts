@@ -3,8 +3,10 @@
 // names, institutions or instrument names ever reach the LLM.
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
-import { budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
+import { BUDGET_LINE, budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
 import { computeInvestment, type InvestmentDet } from "./calc.ts";
+import { promptJson } from "../../promptSafety.ts";
+import { severityInstructionLines, severitySchema, type Severity } from "../../narrativeBlocks.ts";
 
 export interface InvestmentNarrative {
   executive_summary: {
@@ -12,6 +14,9 @@ export interface InvestmentNarrative {
     action_plan: string;
     expected_completion_date: string;
     remarks: string;
+    /** status dot on the report's executive-summary page; absent on sections
+     *  generated before the slot existed, which render without a dot */
+    severity?: Severity;
   };
   allocation_review: string;
   rebalancing_plan: string;
@@ -35,12 +40,14 @@ const RESPONSE_SCHEMA = {
         action_plan: { type: "STRING" },
         expected_completion_date: { type: "STRING" },
         remarks: { type: "STRING" },
+        severity: severitySchema(),
       },
       required: [
         "findings",
         "action_plan",
         "expected_completion_date",
         "remarks",
+        "severity",
       ],
     },
     allocation_review: { type: "STRING" },
@@ -75,7 +82,7 @@ export function buildInvestmentPrompt(
     marital_status: b.marital_status,
     dependents: b.dependents,
     investment: det,
-    budget_context: sectionBudgetContext(b, "wealth"),
+    budget_context: sectionBudgetContext(b, BUDGET_LINE.investment_planning),
   };
   return [
     "You are the analysis assistant of a licensed financial advisor in Malaysia,",
@@ -129,8 +136,9 @@ export function buildInvestmentPrompt(
     "Tone: professional, plain English, written so a layperson feels the",
     "real-world stakes. This is a draft the advisor will edit.",
     "",
+    ...severityInstructionLines(),
     "Client investment JSON (sole source of numbers):",
-    JSON.stringify(context),
+    promptJson(context),
   ].join("\n");
 }
 

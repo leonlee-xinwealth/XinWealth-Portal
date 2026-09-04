@@ -3,7 +3,33 @@
 // single coordinated plan: downside protection first, upside after — never
 // two sections spending the same surplus ringgit twice.
 
-import type { FinancialBaseline } from "./types.ts";
+import type { FinancialBaseline, SectionType } from "./types.ts";
+import type { BudgetKey } from "./modules/synthesis/calc.ts";
+
+/**
+ * Which line of 首席规划师's waterfall each section may spend.
+ *
+ * Every buildPrompt reads this map, and so does fingerprint.ts. That is the
+ * point: the budget figure recorded in a section's fingerprint has to be the
+ * same one that reached its prompt, and two hand-typed copies of the key is
+ * exactly how those quietly diverge.
+ *
+ * 税务 and 传承 spend no surplus; 综合 owns the whole waterfall, which already
+ * sits inside its own deterministic output.
+ */
+export const BUDGET_LINE = {
+  cashflow_planning: "emergency",
+  goals_planning: "goals",
+  insurance_planning: "protection",
+  investment_planning: "wealth",
+  retirement_planning: "retirement",
+  tax_planning: null,
+  legacy_planning: null,
+  financial_health: null,
+  // `satisfies` rather than a type annotation: the map is still checked for
+  // exhaustiveness over SectionType, but each entry keeps its literal type, so
+  // call sites that read a known-non-null line need no assertion.
+} as const satisfies Record<SectionType, BudgetKey | null>;
 
 export interface SectionBudgetContext {
   annual_surplus: number;
@@ -20,7 +46,7 @@ export interface SectionBudgetContext {
 /** JSON payload for the prompt context; null-safe when synthesis is absent. */
 export function sectionBudgetContext(
   b: FinancialBaseline,
-  lineKey: string,
+  lineKey: BudgetKey,
 ): SectionBudgetContext | null {
   const bs = b.budget_summary;
   if (!bs) return null;

@@ -9,6 +9,7 @@
 import type { CnaResult } from "../../../_shared/insurance/cna.ts";
 import type { SectionNarrative } from "./assemble.ts";
 import { callGeminiJson } from "../../../_shared/llm/gemini.ts";
+import { promptJson } from "../../promptSafety.ts";
 
 /** Final layman-facing view. `version` and `language` are stamped in code;
  * every prose field is produced by the LLM from PII-free input. */
@@ -215,10 +216,10 @@ export function buildClientViewPrompt(
     "leak zero personal data; keep all output in the requested language.",
     "",
     "Advisor narrative (source prose — rephrase, do not copy verbatim):",
-    JSON.stringify(narrativePayload),
+    promptJson(narrativePayload),
     "",
     "CNA JSON (sole source of numbers — quote verbatim, never recompute):",
-    JSON.stringify(cna),
+    promptJson(cna),
   ].join("\n");
 }
 

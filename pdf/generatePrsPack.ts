@@ -76,7 +76,9 @@ export async function generatePack(data: PrsFormData): Promise<{ bytes: Uint8Arr
 
 /** Trigger a browser download of the merged PDF. */
 export function downloadBytes(bytes: Uint8Array, filename: string): void {
-  const blob = new Blob([bytes], { type: 'application/pdf' });
+  // .slice() copies into a plain ArrayBuffer — a bare Uint8Array is typed over
+  // ArrayBufferLike (possibly SharedArrayBuffer), which is not a valid BlobPart.
+  const blob = new Blob([bytes.slice().buffer as ArrayBuffer], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
