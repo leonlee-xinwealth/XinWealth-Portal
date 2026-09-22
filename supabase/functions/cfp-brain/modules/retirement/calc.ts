@@ -6,9 +6,8 @@
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
 import { pmtMonthly } from "../goals/calc.ts";
+import { EPF_ASSET_TYPES, isRetirementCapital } from "../../../_shared/taxonomy/balance.ts";
 
-const EPF_ASSET_TYPES = ["epf_account_1", "epf_account_2", "epf_account_3"];
-const OTHER_INVESTABLE_ASSET_TYPES = ["stock", "etf", "bond", "unit_trust"];
 /** 11% employee + 12% employer statutory EPF contribution. */
 const EPF_CONTRIBUTION_RATE = 0.23;
 /** the drawdown stress test runs to 100 — the report plots the curve to here */
@@ -176,7 +175,7 @@ export function computeRetirement(
   );
   const otherInvestable = round(
     f.assets
-      .filter((a) => OTHER_INVESTABLE_ASSET_TYPES.includes(a.asset_type))
+      .filter((a) => isRetirementCapital(a.asset_type) && !EPF_ASSET_TYPES.includes(a.asset_type))
       .reduce((s, a) => s + (a.current_value ?? 0), 0) +
       f.holdings.reduce((s, h) => s + (h.market_value ?? 0), 0),
   );

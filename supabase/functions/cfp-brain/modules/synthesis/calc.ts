@@ -10,6 +10,7 @@ import {
   annualizeCashflow,
   type CashflowBasis,
 } from "../../../_shared/cashflow/periods.ts";
+import { groupOf } from "../../../_shared/taxonomy/cashflow.ts";
 import type { CashflowDet } from "../cashflow/calc.ts";
 import type { GoalsDet } from "../goals/calc.ts";
 import type { InsuranceDet } from "../insurance/module.ts";
@@ -110,19 +111,10 @@ export interface SynthesisDet {
 const round = (n: number) => Math.round(n);
 const clamp100 = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 
-const PASSIVE_KEYWORDS = [
-  "dividend",
-  "rental",
-  "rent",
-  "interest",
-  "passive",
-  "股息",
-  "租金",
-  "利息",
-];
-
 /**
- * Passive income per month, on the SAME basis as every other cashflow figure.
+ * Passive income per month: the taxonomy's I2 被动收入 group (rent, dividends,
+ * interest, royalties, pensions, policy payouts), on the SAME basis as every
+ * other cashflow figure.
  *
  * The subset is filtered by category first, then run through the shared
  * annualiser — so rental income recorded for June and July is averaged across
@@ -134,8 +126,7 @@ export function passiveIncomeMonthly(
   basis: CashflowBasis | null,
 ): number {
   const passive = f.cashflow.filter((r) =>
-    r.direction === "inflow" &&
-    PASSIVE_KEYWORDS.some((k) => (r.category ?? "").toLowerCase().includes(k))
+    r.direction === "inflow" && groupOf(r.category)?.id === "I2"
   );
   return round(annualizeCashflow(passive, basis).monthly_income);
 }

@@ -93,18 +93,20 @@ Deno.test("wealth freedom stages and next-stage gap", () => {
   assertEquals(wealthFreedomStage(1000, 0).stage, null);
 });
 
-Deno.test("passive income matches keyword categories, excluding transfers", () => {
+Deno.test("passive income is the I2 group, excluding transfers", () => {
   const f = makeCfpData({
     cashflow: [
-      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
-      { direction: "inflow", amount: 1200, frequency: "monthly", category: "Rental - condo", period_month: "2026-06-01" },
+      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary_basic", period_month: "2026-06-01" },
+      { direction: "inflow", amount: 1200, frequency: "monthly", category: "rental_income", period_month: "2026-06-01" },
+      // a legacy code still resolves: dividend → dividend_company (I2)
       { direction: "inflow", amount: 6000, frequency: "annual", category: "dividend", period_month: "2026-06-01" },
-      { direction: "inflow", amount: 500, frequency: "monthly", category: "利息收入", period_month: "2026-06-01" },
-      { direction: "inflow", amount: 900, frequency: "monthly", category: "dividend sweep", linked_asset_id: "a-1", period_month: "2026-06-01" },
+      { direction: "inflow", amount: 500, frequency: "monthly", category: "interest_income", period_month: "2026-06-01" },
+      // drawing on savings is a transfer, never passive income
+      { direction: "inflow", amount: 900, frequency: "monthly", category: "savings_withdrawal", period_month: "2026-06-01" },
       { direction: "outflow", amount: 6000, frequency: "monthly", category: "household", period_month: "2026-06-01" },
     ],
   });
-  // 1200 + 500 + 500(=6000/12) = 2200; transfer-linked row excluded
+  // 1200 + 500 + 500(=6000/12) = 2200
   assertEquals(passiveIncomeMonthly(f), 2200);
 });
 

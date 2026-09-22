@@ -5,7 +5,7 @@
 // client SEE where money goes.
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
-import { CASHFLOW_ANNUALIZE, isAssetTransfer } from "../../baseline.ts";
+import { annualizeByCategory, isTransferCode } from "../../../_shared/cashflow/periods.ts";
 
 export type EmergencyFundStatus = "sufficient" | "partial" | "insufficient";
 
@@ -44,23 +44,21 @@ const round = (n: number) => Math.round(n);
 
 function breakdown(
   rows: CfpData["cashflow"],
+  basis: FinancialBaseline["cashflow_basis"],
   direction: "inflow" | "outflow",
   monthlyTotal: number,
 ): CategoryBreakdown[] {
-  const byCategory = new Map<string, number>();
-  for (const r of rows) {
-    if (r.direction !== direction || isAssetTransfer(r)) continue;
-    const monthly = r.amount * (CASHFLOW_ANNUALIZE[r.frequency] ?? 12) / 12;
-    const key = r.category ?? "uncategorised";
-    byCategory.set(key, (byCategory.get(key) ?? 0) + monthly);
-  }
-  return [...byCategory.entries()]
-    .map(([category, monthly]) => ({
+  // Same divisor as the totals, so the categories add up to the whole.
+  return annualizeByCategory(rows, basis)
+    .map((t) => ({
+      category: t.category,
+      monthly: direction === "inflow" ? t.monthly_income : t.monthly_expenses,
+    }))
+    .filter((t) => t.monthly > 0)
+    .map(({ category, monthly }) => ({
       category,
       monthly_amount: round(monthly),
-      share: monthlyTotal > 0
-        ? Number((monthly / monthlyTotal).toFixed(4))
-        : null,
+      share: monthlyTotal > 0 ? Number((monthly / monthlyTotal).toFixed(4)) : null,
     }))
     .sort((a, b) => b.monthly_amount - a.monthly_amount);
 }
@@ -90,15 +88,12 @@ export function computeCashflow(
     annual_surplus: b.annual_surplus,
     savings_ratio: b.savings_ratio,
     debt_service_ratio: b.debt_service_ratio,
-    income_breakdown: breakdown(f.cashflow, "inflow", monthlyIncome),
-    expense_breakdown: breakdown(f.cashflow, "outflow", monthlyExpenses),
+    income_breakdown: breakdown(f.cashflow, b.cashflow_basis, "inflow", monthlyIncome),
+    expense_breakdown: breakdown(f.cashflow, b.cashflow_basis, "outflow", monthlyExpenses),
     asset_transfers_monthly: round(
-      f.cashflow
-        .filter((r) => r.direction === "outflow" && isAssetTransfer(r))
-        .reduce(
-          (s, r) => s + r.amount * (CASHFLOW_ANNUALIZE[r.frequency] ?? 12) / 12,
-          0,
-        ),
+      annualizeByCategory(f.cashflow, b.cashflow_basis, { includeTransfers: true })
+        .filter((t) => isTransferCode(t.category))
+        .reduce((s, t) => s + t.monthly_expenses, 0),
     ),
     emergency_fund: {
       need_low: needLow,

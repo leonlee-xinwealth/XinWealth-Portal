@@ -2,6 +2,7 @@
 // the deterministic CnaInput. No LLM, no network.
 
 import { type CnaInput, incomeBandMidpoint } from "./cna.ts";
+import { isLiquid } from "../taxonomy/balance.ts";
 
 /** "RM500,000" / "500000.50" / "unknown" → number (0 when unparseable). */
 export function parseAmount(raw: unknown): number {
@@ -68,7 +69,6 @@ export function buildProspectCnaInput(
   };
 }
 
-const LIQUID_ASSET_TYPES = ["savings", "fixed_deposit", "money_market"];
 const LIFE_POLICY_TYPES = ["life", "investment_linked"];
 
 const PREMIUM_ANNUALIZE: Record<string, number> = {
@@ -230,7 +230,7 @@ export function buildCfpCnaInput(
       0,
     ),
     liquid_assets: overrides.liquid_assets ?? f.assets
-      .filter((a) => LIQUID_ASSET_TYPES.includes(a.asset_type))
+      .filter((a) => isLiquid(a.asset_type))
       .reduce((s, a) => s + (a.current_value ?? 0), 0),
     life_cover: lifeCover,
     ci_cover: ciCover,

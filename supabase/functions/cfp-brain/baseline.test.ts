@@ -140,12 +140,12 @@ Deno.test("asset transfers are excluded from income and expenses (小会计口�
       cashflow: [
         { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
         { direction: "outflow", amount: 6000, frequency: "monthly", category: "household", period_month: "2026-06-01" },
-        // transfer into own investment account — savings, not spending
-        { direction: "outflow", amount: 2000, frequency: "monthly", category: "invest", linked_asset_id: "a-1", period_month: "2026-06-01" },
-        // transfer from FD back to checking — not income
-        { direction: "inflow", amount: 5000, frequency: "monthly", category: "fd_out", linked_asset_id: "a-2", period_month: "2026-06-01" },
-        // loan repayment stays a true expense
-        { direction: "outflow", amount: 1500, frequency: "monthly", category: "mortgage", linked_liability_id: "l-1", period_month: "2026-06-01" },
+        // saving into a fund — a transfer by category, not spending
+        { direction: "outflow", amount: 2000, frequency: "monthly", category: "unit_trust_contribution", period_month: "2026-06-01" },
+        // drawing on an FD — a transfer by category, not income
+        { direction: "inflow", amount: 5000, frequency: "monthly", category: "savings_withdrawal", period_month: "2026-06-01" },
+        // the mortgage installment is 'split' and still counts as spending (P1)
+        { direction: "outflow", amount: 1500, frequency: "monthly", category: "mortgage_installment", linked_liability_id: "l-1", period_month: "2026-06-01" },
       ],
     }),
     {},

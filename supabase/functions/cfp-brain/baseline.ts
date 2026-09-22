@@ -13,6 +13,7 @@ import {
   isAssetTransfer,
   type CashflowBasis,
 } from "../_shared/cashflow/periods.ts";
+import { LIQUID_ASSET_TYPES as TAXONOMY_LIQUID } from "../_shared/taxonomy/balance.ts";
 import type {
   BaselineAssumptions,
   CfpData,
@@ -46,8 +47,8 @@ export const BASELINE_DEFAULTS = {
  *  standing monthly commitment. */
 export const CASHFLOW_ANNUALIZE = ANNUAL_OCCURRENCES;
 
-/** Asset types counting as emergency-fund-eligible liquid assets. */
-export const LIQUID_ASSET_TYPES = ["savings", "fixed_deposit", "money_market"];
+/** Emergency-fund-eligible liquid assets: taxonomy class A. */
+export const LIQUID_ASSET_TYPES: readonly string[] = TAXONOMY_LIQUID;
 
 const round = (n: number) => Math.round(n);
 
@@ -125,7 +126,7 @@ export function computeBaseline(
   } else {
     notes.push("未录得任何月份的收支记录,收入与支出按零处理");
   }
-  notes.push("与自有资产挂钩的现金流视为资产转移，不计入收入或支出（还贷除外）");
+  notes.push("储蓄/投资转入、资产变现与借入视为资产转移，不计入收入或支出；贷款月供仍计入支出");
 
   const emergencyNeedLow = monthlyEssential * assumptions.emergency_months_low;
   const emergencyNeedHigh = monthlyEssential * assumptions.emergency_months_high;
