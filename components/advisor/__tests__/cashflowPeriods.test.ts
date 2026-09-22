@@ -1,14 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import {
+  annualizeByCategory,
   annualizeCashflow,
   defaultBasis,
   formatBasis,
   monthlyBreakdown,
+  TRANSFER_CATEGORIES_INLINE,
   yearToDateTotals,
   type CashflowBasis,
   type PeriodRow,
 } from '../../../supabase/functions/_shared/cashflow/periods';
 import CASES from '../../../supabase/functions/_shared/cashflow/periods.cases.json';
+import { TRANSFER_CATEGORY_CODES } from '../../../supabase/functions/_shared/taxonomy/cashflow';
 
 // The vitest half of the dual-runtime check.
 //
@@ -88,4 +91,31 @@ describe('what the advisor screen shows', () => {
     expect(formatBasis({ year: 2026, from_month: 6, to_month: 7 })).toBe('2026 年 6–7 月');
     expect(formatBasis({ year: 2026, from_month: 6, to_month: 7 }, 'en')).toBe('Jun–Jul 2026');
   });
+});
+
+describe('shared cases — annualizeByCategory', () => {
+  it('uses the taxonomy transfer list', () => {
+    expect([...TRANSFER_CATEGORIES_INLINE].sort()).toEqual([...TRANSFER_CATEGORY_CODES]);
+  });
+  for (const c of CASES.byCategory) {
+    it(c.name, () => {
+      const rows = c.rows as PeriodRow[];
+      const basis = c.basis as CashflowBasis;
+      const by = Object.fromEntries(annualizeByCategory(rows, basis).map((x) => [x.category, x]));
+      for (const [cat, want] of Object.entries(c.expect)) {
+        expect(by[cat]?.monthly_income ?? 0, cat).toBeCloseTo(want.monthly_income, 6);
+        expect(by[cat]?.monthly_expenses ?? 0, cat).toBeCloseTo(want.monthly_expenses, 6);
+      }
+      expect(by.to_savings).toBeUndefined();
+      const total = annualizeCashflow(rows, basis);
+      const sum = annualizeByCategory(rows, basis).reduce((s, x) => s + x.monthly_expenses, 0);
+      expect(sum).toBeCloseTo(total.monthly_expenses, 6);
+      const withT = Object.fromEntries(
+        annualizeByCategory(rows, basis, { includeTransfers: true }).map((x) => [x.category, x]),
+      );
+      for (const [cat, want] of Object.entries(c.expectWithTransfers)) {
+        expect(withT[cat]?.monthly_expenses ?? 0, cat).toBeCloseTo(want.monthly_expenses, 6);
+      }
+    });
+  }
 });

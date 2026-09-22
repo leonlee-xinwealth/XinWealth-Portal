@@ -4,16 +4,19 @@ import {
   assertEquals,
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
+  annualizeByCategory,
   annualizeCashflow,
   defaultBasis,
   formatBasis,
   monthlyBreakdown,
   recordedYears,
+  TRANSFER_CATEGORIES_INLINE,
   yearToDateTotals,
   type CashflowBasis,
   type PeriodRow,
 } from "./periods.ts";
 import CASES from "./periods.cases.json" with { type: "json" };
+import { TRANSFER_CATEGORY_CODES } from "../taxonomy/cashflow.ts";
 
 // The Deno half of the dual-runtime check. components/advisor/__tests__/
 // cashflowPeriods.test.ts runs the SAME periods.cases.json under vitest, so the
@@ -152,4 +155,36 @@ Deno.test("the basis reads back the way an advisor would say it", () => {
   assertEquals(formatBasis({ year: 2026, from_month: 6, to_month: 6 }), "2026 年 6 月");
   assertEquals(formatBasis({ year: 2026, from_month: 6, to_month: 7 }, "en"), "Jun–Jul 2026");
   assertEquals(formatBasis(null), "无记录");
+});
+
+// ---------------------------------------------------------------------------
+// Transfers by category, and per-category annualisation (spec 2026-09-22 §1)
+// ---------------------------------------------------------------------------
+
+Deno.test("periods.ts's inline transfer list is the taxonomy's", () => {
+  assertEquals([...TRANSFER_CATEGORIES_INLINE].sort(), [...TRANSFER_CATEGORY_CODES]);
+});
+
+Deno.test("shared cases: annualizeByCategory", async (t) => {
+  for (const c of CASES.byCategory) {
+    await t.step(c.name, () => {
+      const rows = c.rows as PeriodRow[];
+      const basis = c.basis as CashflowBasis;
+      const by = Object.fromEntries(annualizeByCategory(rows, basis).map((x) => [x.category, x]));
+      for (const [cat, want] of Object.entries(c.expect)) {
+        assertAlmostEquals(by[cat]?.monthly_income ?? 0, want.monthly_income, 1e-6, `${cat} income`);
+        assertAlmostEquals(by[cat]?.monthly_expenses ?? 0, want.monthly_expenses, 1e-6, `${cat} expenses`);
+      }
+      assertEquals(by["to_savings"], undefined);
+      const total = annualizeCashflow(rows, basis);
+      const sum = annualizeByCategory(rows, basis).reduce((s, x) => s + x.monthly_expenses, 0);
+      assertAlmostEquals(sum, total.monthly_expenses, 1e-6);
+      const withT = Object.fromEntries(
+        annualizeByCategory(rows, basis, { includeTransfers: true }).map((x) => [x.category, x]),
+      );
+      for (const [cat, want] of Object.entries(c.expectWithTransfers)) {
+        assertAlmostEquals(withT[cat]?.monthly_expenses ?? 0, want.monthly_expenses, 1e-6, cat);
+      }
+    });
+  }
 });

@@ -50,7 +50,8 @@ export interface PeriodRow {
   frequency: string;
   /** YYYY-MM-DD (the first of the month); the month this figure belongs to */
   period_month: string;
-  /** non-null = a transfer into the client's own asset, not a true expense */
+  /** the asset this row belongs to (rent → its condo). Relational only: it
+   *  does NOT make the row a transfer — the category does. */
   linked_asset_id?: string | null;
   linked_liability_id?: string | null;
   category?: string | null;
@@ -88,12 +89,35 @@ export interface CashflowTotals {
 }
 
 /**
- * 小会计口径: a row linked to one of the client's own assets is a transfer
- * (savings → investment), not income or spending. Loan repayments
- * (linked_liability_id) stay true expenses.
+ * Category codes whose money stays the client's own — savings into an FD or a
+ * fund, selling an asset, an EPF withdrawal, a loan drawdown, a card repayment.
+ * A verbatim mirror of TRANSFER_CATEGORY_CODES in ../taxonomy/cashflow.ts: this
+ * file may not import it, so periods.test.ts and cashflowPeriods.test.ts pin
+ * the two lists together.
+ */
+export const TRANSFER_CATEGORIES_INLINE: readonly string[] = [
+  "asnb_contribution", "asset_purchase", "asset_sale", "borrowing_family",
+  "business_capital", "credit_card_payment", "crypto_purchase", "epf_employee",
+  "epf_voluntary", "epf_withdrawal", "fd_placement", "gold_purchase",
+  "investment_contribution", "investment_other", "lend_out", "loan_drawdown",
+  "prs_contribution", "savings_withdrawal", "sspn", "stock_etf_purchase",
+  "tabung_haji", "to_savings", "unit_trust_contribution",
+];
+const TRANSFER_SET = new Set(TRANSFER_CATEGORIES_INLINE);
+
+/**
+ * 小会计口径: a transfer moves the client's own money between pockets — it is
+ * neither income nor spending. Decided by CATEGORY (spec 2026-09-22 §1). Loan
+ * installments are 'split' and still count as spending until P2 separates the
+ * principal.
  */
 export function isAssetTransfer(r: PeriodRow): boolean {
-  return r.linked_asset_id != null;
+  return isTransferCode(r.category);
+}
+
+/** The same test for a bare category code (e.g. a per-category total). */
+export function isTransferCode(code: string | null | undefined): boolean {
+  return code != null && TRANSFER_SET.has(code);
 }
 
 /** Year of a period_month, or null when the value is unusable. */
@@ -258,6 +282,65 @@ export function annualizeCashflow(
     annual_items_income: annualItemsIncome,
     annual_items_expenses: annualItemsExpenses,
   };
+}
+
+export interface CategoryTotals {
+  category: string;
+  annual_income: number;
+  annual_expenses: number;
+  monthly_income: number;
+  monthly_expenses: number;
+}
+
+/**
+ * annualizeCashflow, split by category. Monthly rows are divided by the SAME
+ * number of months as the totals (months in the basis holding any
+ * non-transfer data), so the categories add up exactly to annualizeCashflow's
+ * figures and no share can exceed 100%.
+ *
+ * `includeTransfers` adds transfer categories (e.g. SSPN and PRS deposits for
+ * the tax-relief scan); they share the same divisor.
+ */
+export function annualizeByCategory(
+  rows: PeriodRow[],
+  basis: CashflowBasis | null,
+  opts: { includeTransfers?: boolean } = {},
+): CategoryTotals[] {
+  const b = normalise(basis, new Date().getFullYear());
+  const divisor = annualizeCashflow(rows, basis).months_with_data.length || 1;
+  const acc = new Map<string, { mi: number; me: number; ai: number; ae: number }>();
+
+  for (const r of rows ?? []) {
+    if (!opts.includeTransfers && isAssetTransfer(r)) continue;
+    if (yearOf(r.period_month) !== b.year) continue;
+    const key = r.category ?? "uncategorised";
+    const a = acc.get(key) ?? { mi: 0, me: 0, ai: 0, ae: 0 };
+    const amount = amountOf(r);
+    const inflow = r.direction === "inflow";
+    if (isMonthlyActual(r)) {
+      const m = monthOf(r.period_month);
+      if (m == null || m < b.from_month || m > b.to_month) continue;
+      if (inflow) a.mi += amount;
+      else a.me += amount;
+    } else {
+      const annual = amount * (ANNUAL_OCCURRENCES[r.frequency] ?? 12);
+      if (inflow) a.ai += annual;
+      else a.ae += annual;
+    }
+    acc.set(key, a);
+  }
+
+  return [...acc.entries()].map(([category, a]) => {
+    const annual_income = (a.mi / divisor) * 12 + a.ai;
+    const annual_expenses = (a.me / divisor) * 12 + a.ae;
+    return {
+      category,
+      annual_income,
+      annual_expenses,
+      monthly_income: annual_income / 12,
+      monthly_expenses: annual_expenses / 12,
+    };
+  });
 }
 
 export interface YearActuals {
