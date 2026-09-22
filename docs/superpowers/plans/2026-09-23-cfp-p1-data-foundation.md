@@ -1678,6 +1678,7 @@ git commit -m "feat(cashflow): transfers are decided by category; per-category a
 - Create: `supabase/functions/_shared/taxonomy/index.ts`
 - Create: `scripts/build-taxonomy.mjs`
 - Create (generated, committed): `api/_lib/taxonomy.mjs`
+- Create: `scripts/build-taxonomy.d.mts` (types for the builder, same shape as `scripts/build-suitability-pdf.d.mts`) and `api/_lib/taxonomy.d.mts` (`export * from '../../supabase/functions/_shared/taxonomy/index.ts';`), so `npx tsc --noEmit` stays at 0 errors
 - Test: `scripts/__tests__/taxonomyBundle.test.ts`
 
 - [ ] **Step 1: Write the failing test**
@@ -1716,7 +1717,7 @@ describe("committed taxonomy bundle", () => {
 
   it("works when loaded the way a Vercel function loads it", async () => {
     const t = await import("../../api/_lib/taxonomy.mjs");
-    expect(t.resolveCategory("household").code).toBe("living_other");
+    expect(t.resolveCategory("household")?.code).toBe("living_other");
     expect(t.isTransferCategory("to_savings")).toBe(true);
     expect(t.classifyAsset({ asset_type: "other", name: "Maybank Gold (MIGA)" }).asset_type).toBe("gold");
     expect(t.liquidityLevel("savings")).toBe("high");

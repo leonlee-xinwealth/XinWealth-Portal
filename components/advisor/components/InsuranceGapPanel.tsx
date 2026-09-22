@@ -37,7 +37,7 @@ export default function InsuranceGapPanel({ clientId, refreshKey }: { clientId: 
     setErr('');
     try {
       const [{ data: cashflow, error: cErr }, { data: policies, error: pErr }] = await Promise.all([
-        supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, linked_asset_id').eq('client_id', clientId),
+        supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category').eq('client_id', clientId),
         supabase.from('insurance_policies').select('sum_assured, policy_type, end_date, policy_riders(category, sum_assured, room_board_daily, annual_limit)').eq('client_id', clientId),
       ]);
       if (cErr || pErr) throw (cErr || pErr);

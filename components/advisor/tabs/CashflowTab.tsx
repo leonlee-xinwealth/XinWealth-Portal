@@ -6,6 +6,9 @@ import {
   monthlyBreakdown, recordedYears, yearToDateTotals,
   type PeriodRow,
 } from '../../../supabase/functions/_shared/cashflow/periods';
+import {
+  CASHFLOW_CATEGORIES, CASHFLOW_GROUPS, categoryLabel, wealthEffectOf,
+} from '../../../supabase/functions/_shared/taxonomy/cashflow';
 
 // A cashflow entry records ONE MONTH'S actual figure for one category, so this
 // screen is organised by month. The totals shown here are ACTUALS — what the
@@ -29,7 +32,6 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   const { language } = useLanguage();
   const t = (en: string, zh: string) => language === 'zh' ? zh : en;
   const [entries, setEntries] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'inflow'|'outflow'|null>(null);
   const [form, setForm] = useState({
@@ -53,11 +55,9 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   const setEdit = (k: string, v: any) => setEditForm((p: any) => ({ ...p, [k]: v }));
 
   async function load() {
-    const [{ data: e }, { data: c }] = await Promise.all([
-      supabase.from('cashflow_entries').select('*').eq('client_id', clientId).order('direction').order('category'),
-      supabase.from('cashflow_categories').select('*').order('sort_order'),
-    ]);
-    setEntries(e || []); setCategories(c || []); setLoading(false);
+    const { data: e } = await supabase.from('cashflow_entries').select('*')
+      .eq('client_id', clientId).order('direction').order('category');
+    setEntries(e || []); setLoading(false);
   }
   useEffect(() => { load(); }, [clientId]);
 
@@ -103,6 +103,9 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
       frequency: editForm.frequency,
       is_recurring: editForm.is_recurring,
       source_note: editForm.source_note || null,
+      // an advisor saving the row is the review — clear the migration's flag
+      needs_review: false,
+      review_reason: null,
       // Re-filing an entry under the right month is the fix for data that was
       // captured in one batch but belongs to another period.
       period_month: toPeriodMonth(
@@ -168,9 +171,7 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   const thinMonths = breakdown.length > 1
     ? breakdown.filter(m => m.entries === 1 && breakdown.some(o => o.entries >= 3))
     : [];
-  const catLabel = (code: string) => { const c = categories.find(x => x.code === code); if (!c) return code; return language === 'zh' && c.label_zh ? c.label_zh : c.label; };
-  const inflowCats = categories.filter(c => c.direction === 'inflow' || c.direction === 'both');
-  const outflowCats = categories.filter(c => c.direction === 'outflow' || c.direction === 'both');
+  const catLabel = (code: string) => categoryLabel(code, language === 'zh' ? 'zh' : 'en');
 
   if (loading) return <Loader />;
 
@@ -275,18 +276,15 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
         </div>
       )}
       <div className="grid grid-cols-2 gap-4">
-        <EntryTable title={t('Income','收入')} color="text-emerald-600" borderColor="border-emerald-200" entries={inflows} cats={inflowCats} catLabel={catLabel} monthName={monthName} showMonth={viewMonth === 'all'} onAdd={() => setModal('inflow')} onDelete={handleDelete} addLabel={t('Add Income','添加收入')}
+        <EntryTable title={t('Income','收入')} color="text-emerald-600" borderColor="border-emerald-200" entries={inflows} direction="inflow" catLabel={catLabel} monthName={monthName} showMonth={viewMonth === 'all'} onAdd={() => setModal('inflow')} onDelete={handleDelete} addLabel={t('Add Income','添加收入')}
           editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language} />
-        <EntryTable title={t('Expenses','支出')} color="text-red-500" borderColor="border-red-200" entries={outflows} cats={outflowCats} catLabel={catLabel} monthName={monthName} showMonth={viewMonth === 'all'} onAdd={() => setModal('outflow')} onDelete={handleDelete} addLabel={t('Add Expense','添加支出')}
+        <EntryTable title={t('Expenses','支出')} color="text-red-500" borderColor="border-red-200" entries={outflows} direction="outflow" catLabel={catLabel} monthName={monthName} showMonth={viewMonth === 'all'} onAdd={() => setModal('outflow')} onDelete={handleDelete} addLabel={t('Add Expense','添加支出')}
           editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language} />
       </div>
       {modal && (
         <Modal title={modal==='inflow'?t('Add Income','添加收入'):t('Add Expense','添加支出')} onClose={() => setModal(null)}>
           <Fr label={t('Category','类别')}>
-            <select value={form.category} onChange={e => set('category', e.target.value)} className={inp}>
-              <option value="">—</option>
-              {(modal==='inflow'?inflowCats:outflowCats).map((c: any) => <option key={c.code} value={c.code}>{language==='zh'&&c.label_zh?c.label_zh:c.label}</option>)}
-            </select>
+            <CategorySelect direction={modal} value={form.category} onChange={v => set('category', v)} language={language} allowEmpty />
           </Fr>
           <Fr label={t('Amount (MYR)','金额 (MYR)')}><input type="number" value={form.amount} onChange={e => set('amount', e.target.value)} className={inp} placeholder="0.00" /></Fr>
           <Fr label={t('Frequency','频率')}>
@@ -313,11 +311,15 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   );
 }
 
-function EntryTable({ title, color, borderColor, entries, cats, catLabel, monthName, showMonth, onAdd, onDelete, addLabel, editingId, editForm, setEdit, onEdit, onCancelEdit, onSaveEdit, savingEdit, t, language }: any) {
+function EntryTable({ title, color, borderColor, entries, direction, catLabel, monthName, showMonth, onAdd, onDelete, addLabel, editingId, editForm, setEdit, onEdit, onCancelEdit, onSaveEdit, savingEdit, t, language }: any) {
   // Each row already IS one month's figure, so the total is a plain sum. The
   // old `monthly(e)` converted every row to a monthly rate and summed those,
   // which is what made June's and July's figures look like one position.
-  const total = entries.reduce((s: number, e: any) => s + Number(e.amount ?? 0), 0);
+  // Transfers move the client's own money between pockets (spec §1): shown,
+  // but kept out of the income / spending total.
+  const isTransfer = (e: any) => wealthEffectOf(e.category, e.direction) === 'transfer';
+  const total = entries.filter((e: any) => !isTransfer(e)).reduce((s: number, e: any) => s + Number(e.amount ?? 0), 0);
+  const transferTotal = entries.filter(isTransfer).reduce((s: number, e: any) => s + Number(e.amount ?? 0), 0);
   return (
     <div className={`bg-white rounded-2xl border ${borderColor} overflow-hidden shadow-sm`}>
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-50">
@@ -330,9 +332,7 @@ function EntryTable({ title, color, borderColor, entries, cats, catLabel, monthN
             editingId === e.id ? (
               <div key={e.id} className="px-5 py-3 border-b border-slate-50 last:border-0 bg-slate-50/60">
                 <Fr label={t('Category','类别')}>
-                  <select value={editForm.category} onChange={ev => setEdit('category', ev.target.value)} className={inp}>
-                    {cats.map((c: any) => <option key={c.code} value={c.code}>{language==='zh'&&c.label_zh?c.label_zh:c.label}</option>)}
-                  </select>
+                  <CategorySelect direction={direction} value={editForm.category} onChange={(v: string) => setEdit('category', v)} language={language} />
                 </Fr>
                 <Fr label={t('Amount (MYR)','金额 (MYR)')}><input type="number" value={editForm.amount} onChange={ev => setEdit('amount', ev.target.value)} className={inp} placeholder="0.00" /></Fr>
                 <Fr label={t('Frequency','频率')}>
@@ -357,7 +357,11 @@ function EntryTable({ title, color, borderColor, entries, cats, catLabel, monthN
             ) : (
               <div key={e.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-50 last:border-0">
                 <div>
-                  <div className="text-sm font-medium text-xin-blue">{catLabel(e.category)}</div>
+                  <div className="text-sm font-medium text-xin-blue flex items-center gap-1.5 flex-wrap">
+                    {catLabel(e.category)}
+                    {isTransfer(e) && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{t('Transfer','资产转移')}</span>}
+                    {e.needs_review && <span title={e.review_reason || ''} className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">{t('Needs review','待分类')}</span>}
+                  </div>
                   <div className="text-xs text-slate-400">
                     {showMonth ? `${monthName(Number(String(e.period_month ?? '').slice(5,7)))} · ` : ''}
                     {e.frequency !== 'monthly' ? `${e.frequency} · ` : ''}
@@ -376,6 +380,12 @@ function EntryTable({ title, color, borderColor, entries, cats, catLabel, monthN
             <span className="text-xs font-semibold text-slate-500">{t('Total','合计')}</span>
             <span className={`text-sm font-bold ${color}`}>RM {fmt(total)}</span>
           </div>
+          {transferTotal > 0 && (
+            <div className="flex items-center justify-between px-5 py-2 bg-slate-50 text-xs text-slate-500">
+              <span>{t('Transfers (not in total)','资产转移（不计入合计）')}</span>
+              <span>RM {fmt(transferTotal)}</span>
+            </div>
+          )}
         </>
       )}
     </div>
@@ -392,5 +402,28 @@ const Modal = ({ title, onClose, children }: any) => (
 );
 const Fr = ({ label, children }: any) => <div className="mb-3"><label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>{children}</div>;
 const inp = 'w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold';
+
+// Grouped by the chart of accounts (I1–I4 / O1–O10). A legacy code that is no
+// longer offered still shows as the current value, so opening an old row never
+// silently re-files it.
+function CategorySelect({ direction, value, onChange, language, allowEmpty }: {
+  direction: 'inflow' | 'outflow'; value: string; onChange: (v: string) => void; language: string; allowEmpty?: boolean;
+}) {
+  const zh = language === 'zh';
+  const known = CASHFLOW_CATEGORIES.some(c => c.code === value);
+  return (
+    <select value={value} onChange={e => onChange(e.target.value)} className={inp}>
+      {allowEmpty && <option value="">—</option>}
+      {value && !known && <option value={value}>{categoryLabel(value, zh ? 'zh' : 'en')} ({value})</option>}
+      {CASHFLOW_GROUPS.filter(g => g.direction === direction).map(g => (
+        <optgroup key={g.id} label={`${g.id} · ${zh ? g.label_zh : g.label_en}`}>
+          {CASHFLOW_CATEGORIES.filter(c => c.group === g.id).map(c => (
+            <option key={c.code} value={c.code}>{zh ? c.label_zh : c.label_en}</option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  );
+}
 const Loader = () => <div className="flex items-center justify-center h-40"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-xin-blue" /></div>;
 const fmt = (n: number) => n.toLocaleString('en-MY', { minimumFractionDigits: 0, maximumFractionDigits: 0 });

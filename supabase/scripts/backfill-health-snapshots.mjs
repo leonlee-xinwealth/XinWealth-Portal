@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import {
   annualizeCashflow, defaultBasis,
 } from '../functions/_shared/cashflow/periods.ts';
+import { isLiquid } from '../functions/_shared/taxonomy/balance.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '.env.migration') });
@@ -56,11 +57,7 @@ async function buildSnapshot(client) {
   const netWorth = totalAssets - totalLiabilities;
 
   const cashAndFD = assets
-    .filter((a) => {
-      const type = String(a.asset_type || a.kind || '').toLowerCase();
-      const liquidity = String(a.liquidity || '').toLowerCase();
-      return liquidity === 'high' || ['savings', 'fixed_deposit', 'money_market', 'money_market_fund'].includes(type);
-    })
+    .filter((a) => isLiquid(String(a.asset_type || a.kind || '')))
     .reduce((sum, a) => sum + n(a.current_value ?? a.value), 0);
 
   const totalMonthlyDebtRepayment = liabilities.reduce((sum, l) => sum + n(l.monthly_payment), 0);

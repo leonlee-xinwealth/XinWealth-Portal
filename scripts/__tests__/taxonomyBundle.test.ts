@@ -29,7 +29,7 @@ describe("committed taxonomy bundle", () => {
 
   it("works when loaded the way a Vercel function loads it", async () => {
     const t = await import("../../api/_lib/taxonomy.mjs");
-    expect(t.resolveCategory("household").code).toBe("living_other");
+    expect(t.resolveCategory("household")?.code).toBe("living_other");
     expect(t.isTransferCategory("to_savings")).toBe(true);
     expect(t.classifyAsset({ asset_type: "other", name: "Maybank Gold (MIGA)" }).asset_type).toBe("gold");
     expect(t.liquidityLevel("savings")).toBe("high");
