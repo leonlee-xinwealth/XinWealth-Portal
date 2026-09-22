@@ -2741,7 +2741,7 @@ Fixes for the four write paths:
 The pure mapping moves into two small `api/_lib` modules so it can be tested.
 
 **Files:**
-- Create: `api/_lib/kycMapping.js`, `api/_lib/portalLabels.js`
+- Create: `api/_lib/kycMapping.js`, `api/_lib/portalLabels.js`, plus their `.d.ts` type declarations (so `npx tsc --noEmit` stays at 0 errors when the vitest suites import them)
 - Modify: `api/kyc.js`, `api/levelUp.js`, `api/health.js`
 - Test: `scripts/__tests__/kycMapping.test.ts`, `scripts/__tests__/portalLabels.test.ts`
 
