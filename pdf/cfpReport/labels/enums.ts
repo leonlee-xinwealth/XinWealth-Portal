@@ -11,6 +11,12 @@
 // `label_zh` and the tax module emits it on `reliefs_detail[].label`.
 
 import type { CfpReportLanguage } from "../types";
+import {
+  ASSET_TYPES as TAXONOMY_ASSETS,
+  LIABILITY_TYPES as TAXONOMY_LIABILITIES,
+  type AssetClass,
+} from "../../../supabase/functions/_shared/taxonomy/balance";
+import { categoryLabel } from "../../../supabase/functions/_shared/taxonomy/cashflow";
 
 /** Balance-sheet grouping. The blueprint wants 流动性资产 called out separately
  *  from 投资资产 and 自住/固定资产 on P8's composition chart. */
@@ -32,39 +38,32 @@ export interface LiabilityTypeMeta extends EnumLabel {
   secured: boolean;
 }
 
-export const ASSET_TYPES: Record<string, AssetTypeMeta> = {
-  savings:       { zh: "储蓄存款",     en: "Savings",           group: "liquid" },
-  fixed_deposit: { zh: "定期存款",     en: "Fixed Deposit",     group: "liquid" },
-  money_market:  { zh: "货币市场基金", en: "Money Market Fund", group: "liquid" },
-  epf_account_1: { zh: "公积金 户口一", en: "EPF Account 1",    group: "retirement" },
-  epf_account_2: { zh: "公积金 户口二", en: "EPF Account 2",    group: "retirement" },
-  epf_account_3: { zh: "公积金 户口三", en: "EPF Account 3",    group: "retirement" },
-  unit_trust:    { zh: "信托基金",     en: "Unit Trust",        group: "investment" },
-  stock:         { zh: "股票",         en: "Stocks",            group: "investment" },
-  bond:          { zh: "债券",         en: "Bonds",             group: "investment" },
-  etf:           { zh: "交易所交易基金", en: "ETF",             group: "investment" },
-  property:      { zh: "房产",         en: "Property",          group: "fixed" },
-  vehicle:       { zh: "车辆",         en: "Vehicle",           group: "fixed" },
-  business:      { zh: "生意股权",     en: "Business Interest", group: "fixed" },
-  other:         { zh: "其他资产",     en: "Other Asset",       group: "fixed" },
+/** Report grouping per taxonomy class (spec §3.3). */
+const GROUP_BY_CLASS: Record<AssetClass, AssetGroup> = {
+  A: "liquid",
+  B: "retirement",
+  C: "investment",
+  D: "fixed",
 };
 
-export const LIABILITY_TYPES: Record<string, LiabilityTypeMeta> = {
-  mortgage:        { zh: "房屋贷款", en: "Mortgage",        highInterest: false, secured: true },
-  car_loan:        { zh: "汽车贷款", en: "Car Loan",        highInterest: false, secured: true },
-  personal_loan:   { zh: "个人贷款", en: "Personal Loan",   highInterest: true,  secured: false },
-  study_loan:      { zh: "教育贷款", en: "Study Loan",      highInterest: false, secured: false },
-  renovation_loan: { zh: "装修贷款", en: "Renovation Loan", highInterest: false, secured: false },
-  credit_card:     { zh: "信用卡",   en: "Credit Card",     highInterest: true,  secured: false },
-  business_loan:   { zh: "商业贷款", en: "Business Loan",   highInterest: false, secured: false },
-  other:           { zh: "其他负债", en: "Other Liability", highInterest: false, secured: false },
-};
+// Derived from the taxonomy so the report can never print a type the
+// database holds but this file forgot. `enums.test.ts` keeps them honest.
+export const ASSET_TYPES: Record<string, AssetTypeMeta> = Object.fromEntries(
+  TAXONOMY_ASSETS.map((a) => [a.code, { zh: a.label_zh, en: a.label_en, group: GROUP_BY_CLASS[a.class] }]),
+);
+
+export const LIABILITY_TYPES: Record<string, LiabilityTypeMeta> = Object.fromEntries(
+  TAXONOMY_LIABILITIES.map((l) => [
+    l.code,
+    { zh: l.label_zh, en: l.label_en, highInterest: l.high_interest, secured: l.secured },
+  ]),
+);
 
 export const ASSET_GROUP_LABELS: Record<AssetGroup, EnumLabel> = {
   liquid:     { zh: "流动资产", en: "Liquid Assets" },
   investment: { zh: "投资资产", en: "Investment Assets" },
   retirement: { zh: "退休资产", en: "Retirement Assets" },
-  fixed:      { zh: "固定资产", en: "Fixed Assets" },
+  fixed:      { zh: "自用资产", en: "Personal-use Assets" },
 };
 
 /** Order the balance sheet groups top-to-bottom, most liquid first. */
@@ -86,6 +85,11 @@ export function assetGroupOf(type: string): AssetGroup {
 
 export function isHighInterest(type: string): boolean {
   return LIABILITY_TYPES[type]?.highInterest ?? false;
+}
+
+/** A cash-flow category code as the client should read it. */
+export function cashflowCategoryLabel(code: string | null | undefined, lang: CfpReportLanguage): string {
+  return categoryLabel(code, lang === "en" ? "en" : "zh");
 }
 
 // --------------------------------------------------------------- demographics

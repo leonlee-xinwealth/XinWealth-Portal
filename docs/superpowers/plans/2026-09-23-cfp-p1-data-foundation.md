@@ -2350,7 +2350,20 @@ describe("cash-flow category labels", () => {
 
   and add `cashflowCategoryLabel` to the `../enums` import.
 
-In `select/__tests__/cashflow.test.ts`, every expected `category` string that is a raw code becomes its `label_zh` (`household` → `其他日常`, `personal` → `其他生活方式`, `transportation` → `其他交通`, `salary` → `基本薪水`, `miscellaneous` → `其他支出`, `dependants` → `其他家庭开销`). Blank categories still read `未分类`.
+In `select/__tests__/cashflow.test.ts` the existing fixtures use Chinese free text (`薪资`, `房贷`…), which an unknown-code lookup passes through unchanged, so they stay as they are. Add, after the `"labels a blank category…"` test:
+
+```ts
+  it("prints the Chinese label for a taxonomy code, not the raw code", () => {
+    const v2 = selectCashflow(payload({
+      ...CONTENT,
+      expense_breakdown: [
+        { category: "groceries", monthly_amount: 100, share: 0.6 },
+        { category: "household", monthly_amount: 50, share: 0.3 },
+      ],
+    }));
+    expect(v2.expenses.map((r) => r.category)).toEqual(["杂货/菜市", "其他日常"]);
+  });
+```
 
 Run: `npx vitest run pdf/cfpReport`
 Expected: FAIL — `cashflowCategoryLabel` is not exported; label mismatches.

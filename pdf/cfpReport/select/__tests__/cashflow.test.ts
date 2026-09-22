@@ -91,6 +91,17 @@ describe("reading the section", () => {
     }));
     expect(v2.expenses[0].category).toBe("未分类");
   });
+
+  it("prints the Chinese label for a taxonomy code, not the raw code", () => {
+    const v2 = selectCashflow(payload({
+      ...CONTENT,
+      expense_breakdown: [
+        { category: "groceries", monthly_amount: 100, share: 0.6 },
+        { category: "household", monthly_amount: 50, share: 0.3 },
+      ],
+    }));
+    expect(v2.expenses.map((r) => r.category)).toEqual(["杂货/菜市", "其他日常"]);
+  });
 });
 
 describe("waterfall", () => {

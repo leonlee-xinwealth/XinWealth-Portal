@@ -3,8 +3,9 @@ import { ASSET_OPTS, LIAB_OPTS } from "../../../../components/advisor/tabs/Netwo
 import { LIQUID_ASSET_TYPES } from "../../../../supabase/functions/cfp-brain/baseline.ts";
 import {
   ASSET_TYPES, LIABILITY_TYPES, ASSET_GROUP_LABELS, ASSET_GROUP_ORDER,
-  assetTypeLabel, liabilityTypeLabel, assetGroupOf, isHighInterest,
+  assetTypeLabel, liabilityTypeLabel, assetGroupOf, isHighInterest, cashflowCategoryLabel,
 } from "../enums";
+import { ASSET_TYPES as TAXONOMY_ASSETS } from "../../../../supabase/functions/_shared/taxonomy/balance";
 
 describe("enum label coverage", () => {
   // The advisor UI is the only thing that creates these rows, so its option
@@ -20,8 +21,8 @@ describe("enum label coverage", () => {
     expect(missing).toEqual([]);
   });
 
-  it("carries no label for a type the UI cannot produce", () => {
-    const known = new Set(ASSET_OPTS.map(([k]) => k));
+  it("carries no label for a type the taxonomy does not define", () => {
+    const known = new Set(TAXONOMY_ASSETS.map((a) => a.code));
     expect(Object.keys(ASSET_TYPES).filter((k) => !known.has(k))).toEqual([]);
   });
 
@@ -55,8 +56,8 @@ describe("asset grouping agrees with the ratio maths", () => {
 
 describe("lookup helpers", () => {
   it("resolves labels in both languages", () => {
-    expect(assetTypeLabel("epf_account_1", "zh")).toBe("公积金 户口一");
-    expect(assetTypeLabel("epf_account_1", "en")).toBe("EPF Account 1");
+    expect(assetTypeLabel("epf_account_1", "zh")).toBe("公积金 退休户口");
+    expect(assetTypeLabel("epf_account_1", "en")).toBe("EPF Akaun Persaraan");
     expect(liabilityTypeLabel("mortgage", "zh")).toBe("房屋贷款");
   });
 
@@ -71,5 +72,13 @@ describe("lookup helpers", () => {
     expect(isHighInterest("credit_card")).toBe(true);
     expect(isHighInterest("personal_loan")).toBe(true);
     expect(isHighInterest("mortgage")).toBe(false);
+  });
+});
+
+describe("cash-flow category labels", () => {
+  it("prints the taxonomy label, resolving legacy codes", () => {
+    expect(cashflowCategoryLabel("groceries", "zh")).toBe("杂货/菜市");
+    expect(cashflowCategoryLabel("household", "zh")).toBe("其他日常");
+    expect(cashflowCategoryLabel("mystery", "zh")).toBe("mystery");
   });
 });

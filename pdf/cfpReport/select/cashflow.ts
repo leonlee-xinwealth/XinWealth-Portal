@@ -12,6 +12,7 @@ import type { Slice } from "../viz/Donut";
 import type { WaterfallStep } from "../viz/Waterfall";
 import type { TableRow } from "../viz/DataTable";
 import { money } from "../viz/DataTable";
+import { cashflowCategoryLabel } from "../labels/enums";
 
 export interface CategoryRow {
   category: string;
@@ -56,7 +57,9 @@ function rows(raw: unknown): CategoryRow[] {
   if (!Array.isArray(raw)) return [];
   return raw
     .map((r) => ({
-      category: String(r?.category ?? "").trim() || "未分类",
+      category: String(r?.category ?? "").trim()
+        ? cashflowCategoryLabel(String(r.category).trim(), "zh")
+        : "未分类",
       monthly: num(r?.monthly_amount),
       share: typeof r?.share === "number" ? r.share : null,
     }))
