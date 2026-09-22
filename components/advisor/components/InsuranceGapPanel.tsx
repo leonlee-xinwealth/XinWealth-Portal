@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { fmtRM, safeNumber, toMonthly } from '../utils/finance';
+import { fmtRM, safeNumber } from '../utils/finance';
+import {
+  annualizeCashflow, defaultBasis, type PeriodRow,
+} from '../../../supabase/functions/_shared/cashflow/periods';
 
 type Row = {
   label: string;
@@ -34,14 +37,15 @@ export default function InsuranceGapPanel({ clientId, refreshKey }: { clientId: 
     setErr('');
     try {
       const [{ data: cashflow, error: cErr }, { data: policies, error: pErr }] = await Promise.all([
-        supabase.from('cashflow_entries').select('amount, frequency, direction').eq('client_id', clientId),
+        supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category').eq('client_id', clientId),
         supabase.from('insurance_policies').select('sum_assured, policy_type, end_date, policy_riders(category, sum_assured, room_board_daily, annual_limit)').eq('client_id', clientId),
       ]);
       if (cErr || pErr) throw (cErr || pErr);
 
-      const monthlyIncome = (cashflow || [])
-        .filter((e: any) => (e.direction || '').toLowerCase() === 'inflow')
-        .reduce((s: number, e: any) => s + toMonthly(safeNumber(e.amount), e.frequency), 0);
+      // Same 口径 as the CFP report and the health score: average the months on
+      // record rather than treating each row as a standing monthly commitment.
+      const rows = (cashflow || []) as PeriodRow[];
+      const monthlyIncome = annualizeCashflow(rows, defaultBasis(rows)).monthly_income;
       const incomeAnnual = monthlyIncome > 0 ? monthlyIncome * 12 : null;
       setAnnualIncome(incomeAnnual);
 

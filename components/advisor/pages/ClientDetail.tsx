@@ -15,9 +15,21 @@ import FormKitTab from '../tabs/FormKitTab';
 import CfpTab from '../tabs/CfpTab';
 import PortfolioTab from '../tabs/PortfolioTab';
 import HealthScoreCard from '../components/HealthScoreCard';
+import { fetchFamilyRelations, type FamilyRelation } from '../FamilyLinkCard';
 import { getCaseTemplate, CASE_TYPE_LABELS } from '../cases/caseTemplates';
 
 type Tab = 'activity' | 'profile' | 'review' | 'cashflow' | 'networth' | 'insurance' | 'portfolio' | 'cfp' | 'formkit';
+
+const TABS: Tab[] = ['activity', 'profile', 'review', 'cashflow', 'networth', 'insurance', 'portfolio', 'cfp', 'formkit'];
+
+/** ?tab= lets another page hand the advisor back to a specific tab — the CFP
+ *  review route returns here, and dropping them on Activity would make them
+ *  hunt for the report they just came from. Read once at mount; the tab strip
+ *  owns the state afterwards. */
+function initialTab(): Tab {
+  const q = new URLSearchParams(window.location.search).get('tab');
+  return (TABS as string[]).includes(q ?? '') ? (q as Tab) : 'activity';
+}
 
 interface Policy {
   id: string;
@@ -39,10 +51,11 @@ export default function ClientDetail() {
   const t = (en: string, zh: string) => language === 'zh' ? zh : en;
   const navigate = useNavigate();
   const [client, setClient] = useState<any>(null);
-  const [tab, setTab] = useState<Tab>('activity');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [loading, setLoading] = useState(true);
   const [pendingCount, setPendingCount] = useState(0);
   const [converting, setConverting] = useState(false);
+  const [spouse, setSpouse] = useState<FamilyRelation | null>(null);
 
   // New Case modal state
   const [showNewCase, setShowNewCase] = useState(false);
@@ -58,6 +71,12 @@ export default function ClientDetail() {
     const { data } = await supabase.from('clients').select('*').eq('id', id).single();
     setClient(data);
     setLoading(false);
+  }
+
+  async function loadSpouse() {
+    if (!id) return;
+    const rels = await fetchFamilyRelations(id);
+    setSpouse(rels.find(r => r.relationship_type === 'spouse') ?? null);
   }
 
   async function handleConvert() {
@@ -99,6 +118,7 @@ export default function ClientDetail() {
     loadClient();
     loadPending();
     loadPolicies();
+    loadSpouse();
   }, [id]);
 
   async function startPrsApplication() {
@@ -216,6 +236,17 @@ export default function ClientDetail() {
                 <span className="text-xs text-slate-400">
                   🎂 {new Date(client.date_of_birth).toLocaleDateString('en-MY', { day: 'numeric', month: 'short' })}
                 </span>
+              </>
+            )}
+            {spouse && (
+              <>
+                <span className="text-xs text-slate-300">·</span>
+                <button
+                  onClick={() => navigate(`/advisor/clients/${spouse.related_client_id}`)}
+                  className="text-xs text-slate-400 hover:text-xin-gold transition-colors"
+                >
+                  💍 {t('Spouse', '配偶')}: {spouse.related?.full_name ?? '—'}
+                </button>
               </>
             )}
             <div className="flex items-center gap-2 flex-wrap">

@@ -2,7 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { RefreshCw } from 'lucide-react';
-import { firstDayOfCurrentMonth, fmtMultiplier, fmtPercent, fmtRM, safeNumber, toMonthly, yyyyMmDd } from '../utils/finance';
+import { firstDayOfCurrentMonth, fmtMultiplier, fmtPercent, fmtRM, safeNumber, yyyyMmDd } from '../utils/finance';
+import {
+  annualizeCashflow, defaultBasis, type PeriodRow,
+} from '../../../supabase/functions/_shared/cashflow/periods';
+import { isLiquid } from '../../../supabase/functions/_shared/taxonomy/balance';
 
 type Tone = 'good' | 'warn' | 'bad' | 'na';
 
@@ -42,28 +46,32 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
     try {
       const today = new Date().toISOString().split('T')[0];
       const [{ data: assets, error: aErr }, { data: liabilities, error: lErr }, { data: cashflow, error: cErr }, { data: policies, error: pErr }] = await Promise.all([
-        supabase.from('assets').select('current_value, liquidity').eq('client_id', clientId),
+        supabase.from('assets').select('current_value, asset_type').eq('client_id', clientId),
         supabase.from('liabilities').select('outstanding_balance, monthly_payment').eq('client_id', clientId),
-        supabase.from('cashflow_entries').select('amount, frequency, direction').eq('client_id', clientId),
+        supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category').eq('client_id', clientId),
         supabase.from('insurance_policies').select('sum_assured, policy_type, end_date').eq('client_id', clientId),
       ]);
 
       const combinedError = aErr || lErr || cErr || pErr;
       if (combinedError) throw combinedError;
 
-      const monthlyIncome = (cashflow || [])
-        .filter((e: any) => (e.direction || '').toLowerCase() === 'inflow')
-        .reduce((s: number, e: any) => s + toMonthly(safeNumber(e.amount), e.frequency), 0);
-      const monthlyExpenses = (cashflow || [])
-        .filter((e: any) => (e.direction || '').toLowerCase() === 'outflow')
-        .reduce((s: number, e: any) => s + toMonthly(safeNumber(e.amount), e.frequency), 0);
+      // A row records ONE MONTH'S actual figure, so the run-rate these ratios
+      // need comes from averaging the recorded months — not from converting
+      // every row to a monthly rate and summing them, which treats June's and
+      // July's positions as two concurrent commitments. Same function the CFP
+      // report uses (_shared/cashflow/periods.ts); no basis is chosen on this
+      // widget, so it takes every month the client has on record.
+      const rows = (cashflow || []) as PeriodRow[];
+      const totals = annualizeCashflow(rows, defaultBasis(rows));
+      const monthlyIncome = totals.monthly_income;
+      const monthlyExpenses = totals.monthly_expenses;
       const monthlySurplus = monthlyIncome - monthlyExpenses;
 
       const totalMonthlyLoanRepayment = (liabilities || [])
         .reduce((s: number, l: any) => s + safeNumber(l.monthly_payment), 0);
 
       const liquidAssets = (assets || [])
-        .filter((a: any) => String(a.liquidity || '').toLowerCase() === 'high')
+        .filter((a: any) => isLiquid(a.asset_type))
         .reduce((s: number, a: any) => s + safeNumber(a.current_value), 0);
 
       const totalAssets = (assets || []).reduce((s: number, a: any) => s + safeNumber(a.current_value), 0);

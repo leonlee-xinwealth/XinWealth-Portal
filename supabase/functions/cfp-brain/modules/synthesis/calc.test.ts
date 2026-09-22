@@ -93,17 +93,96 @@ Deno.test("wealth freedom stages and next-stage gap", () => {
   assertEquals(wealthFreedomStage(1000, 0).stage, null);
 });
 
-Deno.test("passive income matches keyword categories, excluding transfers", () => {
+Deno.test("passive income is the I2 group, excluding transfers", () => {
   const f = makeCfpData({
     cashflow: [
-      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
-      { direction: "inflow", amount: 1200, frequency: "monthly", category: "Rental - condo" },
-      { direction: "inflow", amount: 6000, frequency: "annual", category: "dividend" },
-      { direction: "inflow", amount: 500, frequency: "monthly", category: "利息收入" },
-      { direction: "inflow", amount: 900, frequency: "monthly", category: "dividend sweep", linked_asset_id: "a-1" },
-      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household" },
+      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary_basic", period_month: "2026-06-01" },
+      { direction: "inflow", amount: 1200, frequency: "monthly", category: "rental_income", period_month: "2026-06-01" },
+      // a legacy code still resolves: dividend → dividend_company (I2)
+      { direction: "inflow", amount: 6000, frequency: "annual", category: "dividend", period_month: "2026-06-01" },
+      { direction: "inflow", amount: 500, frequency: "monthly", category: "interest_income", period_month: "2026-06-01" },
+      // drawing on savings is a transfer, never passive income
+      { direction: "inflow", amount: 900, frequency: "monthly", category: "savings_withdrawal", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household", period_month: "2026-06-01" },
     ],
   });
-  // 1200 + 500 + 500(=6000/12) = 2200; transfer-linked row excluded
+  // 1200 + 500 + 500(=6000/12) = 2200
   assertEquals(passiveIncomeMonthly(f), 2200);
+});
+
+// ---------------------------------------------------------------------------
+// headlines — the cross-module figures the SWOT page argues from.
+//
+// The contract that matters is that this is a SELECTION. If it ever starts
+// recomputing, the SWOT page can contradict the page that owns the figure, and
+// the client is reading two different numbers for the same thing.
+// ---------------------------------------------------------------------------
+
+const B = () => computeBaseline(makeCfpData(), {}, NOW);
+
+Deno.test("headlines copy each figure from the module that owns it", () => {
+  const b = B();
+  const prior = makePrior({
+    cashflow_planning: { emergency_fund: { months_covered: 8.3, shortfall: 0 } },
+    legacy_planning: {
+      distribution: { will_status: "no_will" },
+      estate_liquidity: { shortfall: 120_000 },
+    },
+    goals_planning: {
+      total_required_monthly: 1500,
+      goals: [{ on_track: false }, { on_track: true }, { on_track: false }],
+    },
+  });
+  const h = computeSynthesis(makeCfpData(), b, prior).headlines;
+
+  assertEquals(h.life_gap, 750_000);
+  assertEquals(h.ci_gap, 0);
+  assertEquals(h.medical_covered, true);
+  assertEquals(h.emergency_months_covered, 8.3);
+  assertEquals(h.goals_off_track_count, 2);
+  assertEquals(h.goals_shortfall_monthly, 1500);
+  assertEquals(h.has_will, false);
+  assertEquals(h.estate_liquidity_shortfall, 120_000);
+  // Straight from the baseline, so the ratio page and the SWOT page can never
+  // print different numbers for the same ratio.
+  assertEquals(h.savings_ratio, b.savings_ratio);
+  assertEquals(h.solvency_ratio, b.solvency_ratio);
+  assertEquals(h.net_worth, b.net_worth);
+});
+
+Deno.test("a section that has not been generated yields null, not zero", () => {
+  // Zero would read as "no gap" on the SWOT board — the model would write
+  // "protection is fully covered" about a client whose insurance was never run.
+  const h = computeSynthesis(makeCfpData(), B(), {}).headlines;
+  assertEquals(h.life_gap, null);
+  assertEquals(h.ci_gap, null);
+  assertEquals(h.medical_covered, null);
+  assertEquals(h.has_will, null);
+  assertEquals(h.depletion_age, null);
+  assertEquals(h.retirement_on_track, null);
+});
+
+Deno.test("liquid-to-net-worth declines to divide by a negative net worth", () => {
+  const f = makeCfpData({
+    assets: [{ asset_type: "savings", current_value: 10_000, cost_value: null, ownership_type: null }],
+    liabilities: [{
+      liability_type: "mortgage", outstanding_balance: 500_000,
+      interest_rate: 0.04, monthly_payment: 2000, end_date: null,
+    }],
+  });
+  const h = computeSynthesis(f, computeBaseline(f, {}, NOW), makePrior()).headlines;
+  assert(h.net_worth < 0);
+  assertEquals(h.liquid_to_net_worth, null);
+});
+
+Deno.test("headlines survive a module that returned only part of its output", () => {
+  // Synthesis is the one section that must always render; a summary field is
+  // not allowed to be the thing that breaks it.
+  const h = computeSynthesis(
+    makeCfpData(), B(),
+    { insurance_planning: {}, cashflow_planning: {}, legacy_planning: {} } as ModuleOutputs,
+  ).headlines;
+  assertEquals(h.life_gap, null);
+  assertEquals(h.emergency_months_covered, null);
+  assertEquals(h.estate_liquidity_shortfall, 0);
 });

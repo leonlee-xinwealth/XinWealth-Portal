@@ -99,11 +99,11 @@ Deno.test("no recurring income flags insufficient_data without throwing", () => 
   assertEquals(d.effective_rate, null);
 });
 
-Deno.test("detected relief keyword hit is annualized and capped", () => {
+Deno.test("detected relief category is annualized and capped", () => {
   const d = det({
     cashflow: [
-      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
-      { direction: "outflow", amount: 800, frequency: "monthly", category: "Clinic bills" },
+      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 800, frequency: "monthly", category: "health_medical", period_month: "2026-06-01" },
     ],
   });
   const medical = reliefByKey(d, "medical_expenses");
@@ -115,13 +115,12 @@ Deno.test("detected relief keyword hit is annualized and capped", () => {
 Deno.test("medical insurance category is claimed under medical_insurance, not medical_expenses", () => {
   const d = det({
     cashflow: [
-      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
+      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
       {
         direction: "outflow",
         amount: 200,
         frequency: "monthly",
-        category: "Medical Insurance premium",
-      },
+        category: "medical_card", period_month: "2026-06-01" },
     ],
   });
   const medInsurance = reliefByKey(d, "medical_insurance");
@@ -136,8 +135,8 @@ Deno.test("advisor override beats a detected relief value", () => {
   const d = det(
     {
       cashflow: [
-        { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
-        { direction: "outflow", amount: 1000, frequency: "monthly", category: "Hospital bills" },
+        { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+        { direction: "outflow", amount: 1000, frequency: "monthly", category: "health_medical", period_month: "2026-06-01" },
       ],
     },
     { reliefs: { medical_expenses: 500 } },
@@ -150,12 +149,12 @@ Deno.test("advisor override beats a detected relief value", () => {
 Deno.test("detectReliefsFromCashflow sums matched categories across frequencies", () => {
   const f: CfpData = makeCfpData({
     cashflow: [
-      { direction: "outflow", amount: 100, frequency: "weekly", category: "Gym membership" },
-      { direction: "outflow", amount: 500, frequency: "quarterly", category: "SSPN 教育储蓄" },
-      { direction: "outflow", amount: 50, frequency: "monthly", category: "unrelated groceries" },
+      { direction: "outflow", amount: 100, frequency: "weekly", category: "fitness", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 500, frequency: "quarterly", category: "sspn", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 50, frequency: "monthly", category: "groceries", period_month: "2026-06-01" },
     ],
   });
-  const detected = detectReliefsFromCashflow(f);
+  const detected = detectReliefsFromCashflow(f, { year: 2026, from_month: 1, to_month: 12 });
   assertEquals(detected.lifestyle, 100 * 52);
   assertEquals(detected.sspn, 500 * 4);
   assertEquals(detected.medical_expenses, undefined);

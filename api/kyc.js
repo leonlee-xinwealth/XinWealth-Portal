@@ -1,4 +1,7 @@
 import { applyCors, configError, supabaseAdmin } from './_lib/supabase.js';
+import {
+  assetCashflowEntries, INCOME_CATEGORY_MAP, kycAssetFields, kycExpenseEntry, kycIncomeEntry,
+} from './_lib/kycMapping.js';
 
 // =============================================================
 // Public KYC submission endpoint.
@@ -46,18 +49,8 @@ const TAX_STATUS_MAP = {
   'Not Taxable':  null
 };
 
-// Income field -> cashflow_categories.code (inflow)
-const INCOME_CATEGORY_MAP = {
-  salary:             'salary',
-  bonus:              'bonus',
-  directorFee:        'director_fee',
-  commission:         'commission',
-  dividendCompany:    'dividend',
-  dividendInvestment: 'investment_return',
-  rentalIncome:       'rental_income'
-};
-
-// Expense field -> cashflow_categories.code (outflow)
+// Expense cards. Only the KEYS are used: each card's items are filed by
+// kycExpenseEntry (api/_lib/kycMapping.js) under the chart of accounts.
 const EXPENSE_CATEGORY_MAP = {
   household:      'household',
   transportation: 'transportation',
@@ -79,7 +72,7 @@ const SIMPLE_ASSET_FIELDS = [
 
 // List-type assets -> [kycKey, asset_type, derived liability_type | null]
 const ASSET_LIST_TYPES = [
-  ['properties',  'property', 'mortgage'],
+  ['properties',  'own_residence', 'mortgage'], // "for own stay only"
   ['vehicles',    'vehicle',  'car_loan'],
   ['otherAssets', 'other',    null]
 ];
@@ -101,28 +94,10 @@ const INVESTMENT_ASSET_TYPE_MAP = {
   stocks:           'stock',
   bonds:            'bond',
   unitTrusts:       'unit_trust',
-  fixedDeposits:    'property',
-  forex:            'other',
+  fixedDeposits:    'investment_property', // "Properties (for investment purpose only)"
+  forex:            'forex',
   moneyMarket:      'money_market',
   otherInvestments: 'other'
-};
-
-// asset_type -> liquidity_level (assets.liquidity is NOT NULL, default 'medium')
-const LIQUIDITY_BY_TYPE = {
-  savings:       'high',
-  money_market:  'high',
-  etf:           'high',
-  stock:         'high',
-  unit_trust:    'high',
-  bond:          'medium',
-  fixed_deposit: 'medium',
-  epf_account_1: 'low',
-  epf_account_2: 'low',
-  epf_account_3: 'low',
-  property:      'low',
-  vehicle:       'low',
-  business:      'low',
-  other:         'medium'
 };
 
 // ---------- helpers ----------
@@ -142,8 +117,6 @@ const parseRate = (val) => {
 };
 
 const mapEnum = (value, map) => (value != null && map.hasOwnProperty(value)) ? map[value] : null;
-
-const liquidityFor = (assetType) => LIQUIDITY_BY_TYPE[assetType] || 'medium';
 
 // First day of the reporting month (YYYY-MM-01) for cashflow_entries.period_month
 const periodMonthFromKyc = (basic) => {
@@ -344,11 +317,10 @@ export default async function handler(req, res) {
       if (amt > 0) {
         assetRows.push({
           client_id:     clientId,
-          asset_type:    assetType,
+          ...kycAssetFields(assetType, name),
           name,
           current_value: amt,
           currency:      'MYR',
-          liquidity:     liquidityFor(assetType),
           metadata:      {}
         });
       }
@@ -356,19 +328,29 @@ export default async function handler(req, res) {
 
     // List assets — track loan-linked items so we can create matching liabilities
     const linkedLoanMeta = []; // { rowIndex, liabilityType, ... }
+    // The monthly inflow / outflow the form collects per asset, filed as rows
+    // linked to it once the asset ids are known.
+    const assetCashMeta = [];
     for (const [key, assetType, derivedLiabilityType] of ASSET_LIST_TYPES) {
       const items = assets?.[key] || [];
       for (const it of items) {
         const amt = parseAmount(it.amount);
         if (amt <= 0 && !it.description) continue;
         const rowIndex = assetRows.length;
+        const placed = kycAssetFields(assetType, it.description);
+        assetCashMeta.push({
+          rowIndex,
+          assetType: placed.asset_type,
+          name: it.description || placed.asset_type,
+          monthlyIncome: parseAmount(it.monthlyIncome),
+          monthlyExpenses: parseAmount(it.monthlyExpenses),
+        });
         assetRows.push({
           client_id:     clientId,
-          asset_type:    assetType,
+          ...placed,
           name:          it.description || `${assetType} item`,
           current_value: amt,
           currency:      'MYR',
-          liquidity:     liquidityFor(assetType),
           metadata: {
             purchasePrice: it.purchasePrice ?? null,
             tenure:        it.tenure ?? null,
@@ -395,14 +377,21 @@ export default async function handler(req, res) {
       for (const it of items) {
         const amt = parseAmount(it.amount);
         if (amt <= 0 && !it.description) continue;
+        const placed = kycAssetFields(assetType, it.description);
+        assetCashMeta.push({
+          rowIndex: assetRows.length,
+          assetType: placed.asset_type,
+          name: it.description || placed.asset_type,
+          monthlyIncome: parseAmount(it.monthlyIncome),
+          monthlyExpenses: parseAmount(it.monthlyExpenses),
+        });
         assetRows.push({
           client_id:     clientId,
-          asset_type:    assetType,
+          ...placed,
           name:          it.description || `${assetType} holding`,
           current_value: amt,
           cost_value:    amt > 0 ? amt : null,
           currency:      'MYR',
-          liquidity:     liquidityFor(assetType),
           metadata:      {}
         });
       }
@@ -458,24 +447,23 @@ export default async function handler(req, res) {
     // 4. Build cashflow rows (income = inflow, expenses = outflow)
     const cashflowRows = [];
 
-    for (const [kycKey, category] of Object.entries(INCOME_CATEGORY_MAP)) {
+    for (const kycKey of Object.keys(INCOME_CATEGORY_MAP)) {
       const amt = parseAmount(income?.[kycKey]);
       if (amt > 0) {
         cashflowRows.push({
           client_id:    clientId,
           direction:    'inflow',
-          category,
+          ...kycIncomeEntry(kycKey),
           amount:       amt,
           currency:     'MYR',
           period_month: periodMonth,
-          is_recurring: kycKey !== 'bonus',
-          frequency:    'monthly',
+          is_recurring: true,
           source_note:  null
         });
       }
     }
 
-    for (const [kycKey, category] of Object.entries(EXPENSE_CATEGORY_MAP)) {
+    for (const kycKey of Object.keys(EXPENSE_CATEGORY_MAP)) {
       const items = expenses?.[kycKey] || [];
       for (const it of items) {
         const amt = parseAmount(it.amount);
@@ -483,13 +471,22 @@ export default async function handler(req, res) {
         cashflowRows.push({
           client_id:    clientId,
           direction:    'outflow',
-          category,
+          ...kycExpenseEntry(kycKey, it),
           amount:       amt,
           currency:     'MYR',
           period_month: periodMonth,
-          is_recurring: true,
-          frequency:    'monthly',
-          source_note:  it.type || it.description || null
+          is_recurring: true
+        });
+      }
+    }
+
+    for (const m of assetCashMeta) {
+      for (const e of assetCashflowEntries(m)) {
+        cashflowRows.push({
+          client_id: clientId, currency: 'MYR', period_month: periodMonth,
+          is_recurring: true, frequency: 'monthly',
+          linked_asset_id: insertedAssets[m.rowIndex]?.id || null,
+          ...e,
         });
       }
     }

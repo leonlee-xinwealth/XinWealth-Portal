@@ -28,7 +28,9 @@ export type CfpLabelKey =
   | "otherCategory" | "onTrack" | "notOnTrack" | "hasCover" | "noCover"
   | "survives85" | "survives100" | "depletes85" | "depletes100"
   | "capitalNeeded" | "totalProjected" | "currentAllocation" | "scoreComponents" | "budgetWaterfall"
-  | "surplus" | "netAssets" | "netLiabilities";
+  | "surplus" | "netAssets" | "netLiabilities"
+  // joint household plans
+  | "jointPlanNote" | "colOwner" | "client" | "spouse" | "protectionPerPerson";
 
 export const LABELS: Record<CfpReportLanguage, Record<CfpLabelKey, string>> = {
   en: {
@@ -117,6 +119,12 @@ export const LABELS: Record<CfpReportLanguage, Record<CfpLabelKey, string>> = {
     surplus: "Surplus",
     netAssets: "Total Assets",
     netLiabilities: "Total Liabilities",
+    jointPlanNote:
+      "This is a joint household plan. Cash flow, net worth, retirement, tax, goals and legacy are analysed on the couple's combined position; protection needs are analysed separately for each spouse.",
+    colOwner: "Owner",
+    client: "Client",
+    spouse: "Spouse",
+    protectionPerPerson: "Protection Needs by Person",
   },
   zh: {
     reportTitle: "财务报告",
@@ -204,6 +212,12 @@ export const LABELS: Record<CfpReportLanguage, Record<CfpLabelKey, string>> = {
     surplus: "盈余",
     netAssets: "资产合计",
     netLiabilities: "负债合计",
+    jointPlanNote:
+      "本报告为夫妻联合规划。现金流、净值、退休、税务、目标与传承按两人合并口径分析；保障需求则分别按各自情况测算。",
+    colOwner: "归属",
+    client: "客户",
+    spouse: "配偶",
+    protectionPerPerson: "个人保障需求",
   },
 };
 

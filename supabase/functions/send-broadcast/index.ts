@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { loadConfig } from '../_shared/config.ts'
 
 const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY') ?? ''
 const FROM_EMAIL = Deno.env.get('BROADCAST_FROM_EMAIL') ?? 'no-reply@example.com'
@@ -7,9 +8,30 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? ''
 
+// The DB has no generated types, so a bare `ReturnType<typeof createClient>`
+// resolves its rows to `never` and every column access fails to compile.
+// Same convention as cfp-brain/db.ts.
+// deno-lint-ignore no-explicit-any
+type Db = any
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-agent-secret',
+}
+
+async function sha256(s: string): Promise<Uint8Array> {
+  return new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)),
+  )
+}
+
+/** Constant-time secret comparison via digest equality (mirrors cfp-brain). */
+async function secretMatches(candidate: string, expected: string): Promise<boolean> {
+  if (!expected) return false
+  const [a, b] = await Promise.all([sha256(candidate), sha256(expected)])
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]
+  return diff === 0
 }
 
 serve(async (req) => {
@@ -18,17 +40,35 @@ serve(async (req) => {
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')
-    if (!authHeader) return jsonError('Unauthorized', 401)
-
-    const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { Authorization: authHeader } },
-    })
-    const { data: { user }, error: userErr } = await userClient.auth.getUser()
-    if (userErr || !user) return jsonError('Unauthorized', 401)
-
     const serviceClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
     const body = await req.json()
+
+    // --- Auth: pg_cron agent secret OR advisor JWT (same pattern as cfp-brain).
+    // The scheduler has no human user, so auth.getUser() can never succeed for
+    // it — machine callers authenticate with x-agent-secret instead, and are
+    // restricted to the scheduler mode. Sending a broadcast on demand still
+    // requires a real advisor.
+    let user: { id: string } | null = null
+    const agentSecret = req.headers.get('x-agent-secret')
+    if (agentSecret !== null) {
+      const cfg = await loadConfig(serviceClient)
+      if (!(await secretMatches(agentSecret, cfg.AGENT_SHARED_SECRET))) {
+        return jsonError('Unauthorized', 401)
+      }
+      if (body.mode !== 'process_scheduled') {
+        return jsonError('Forbidden', 403)
+      }
+    } else {
+      const authHeader = req.headers.get('Authorization')
+      if (!authHeader) return jsonError('Unauthorized', 401)
+
+      const userClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
+      })
+      const { data: { user: u }, error: userErr } = await userClient.auth.getUser()
+      if (userErr || !u) return jsonError('Unauthorized', 401)
+      user = u
+    }
 
     // Mode: process all due scheduled broadcasts
     if (body.mode === 'process_scheduled') {
@@ -46,7 +86,10 @@ serve(async (req) => {
       return jsonOk({ processed })
     }
 
-    // Mode: send a specific broadcast
+    // Mode: send a specific broadcast. Unreachable for machine callers (they
+    // are 403'd above), but keep the narrowing explicit rather than asserted.
+    if (!user) return jsonError('Forbidden', 403)
+
     const { broadcastId } = body
     if (!broadcastId) return jsonError('broadcastId required', 400)
 
@@ -72,7 +115,7 @@ serve(async (req) => {
   }
 })
 
-async function sendBroadcast(broadcastId: string, db: ReturnType<typeof createClient>) {
+async function sendBroadcast(broadcastId: string, db: Db) {
   const { data: broadcast } = await db
     .from('broadcasts')
     .select('*')
@@ -162,7 +205,7 @@ async function sendBroadcast(broadcastId: string, db: ReturnType<typeof createCl
   return { sent: sentCount }
 }
 
-async function markSent(db: ReturnType<typeof createClient>, id: string, count: number) {
+async function markSent(db: Db, id: string, count: number) {
   await db
     .from('broadcasts')
     .update({ status: 'sent', sent_at: new Date().toISOString(), recipient_count: count })

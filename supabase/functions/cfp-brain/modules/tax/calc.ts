@@ -5,7 +5,8 @@
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
 import { annualPremiumTotal } from "../../../_shared/insurance/mapping.ts";
-import { CASHFLOW_ANNUALIZE } from "../../baseline.ts";
+import { annualizeByCategory, type CashflowBasis } from "../../../_shared/cashflow/periods.ts";
+import { resolveCategory } from "../../../_shared/taxonomy/cashflow.ts";
 import {
   marginalRateFor,
   NON_RESIDENT_FLAT_RATE,
@@ -58,42 +59,31 @@ type DetectableReliefKey =
   | "lifestyle"
   | "prs";
 
-// Order matters: more specific keyword sets are checked first so, e.g., a
-// "medical insurance" category lands in medical_insurance and never also
-// matches the generic medical_expenses rule.
-const RELIEF_KEYWORD_RULES: Array<{ key: DetectableReliefKey; keywords: string[] }> = [
-  { key: "medical_insurance", keywords: ["medical insurance", "medical card", "医保"] },
-  { key: "medical_expenses", keywords: ["medical", "医疗", "clinic", "hospital"] },
-  { key: "sspn", keywords: ["education", "sspn", "教育"] },
-  {
-    key: "lifestyle",
-    keywords: ["lifestyle", "book", "sport", "gym", "internet", "书", "运动"],
-  },
-  { key: "prs", keywords: ["prs", "私人退休"] },
-];
+// Which cash-flow categories evidence which relief. Codes, not keywords: the
+// category column is a foreign key into the taxonomy, so a guess is never
+// needed. SSPN and PRS deposits are transfers, so the scan includes transfers.
+const RELIEF_BY_CATEGORY: Readonly<Record<string, DetectableReliefKey>> = {
+  medical_card: "medical_insurance",
+  health_medical: "medical_expenses",
+  sspn: "sspn",
+  prs_contribution: "prs",
+  fitness: "lifestyle",
+  self_education: "lifestyle",
+  telco: "lifestyle",
+  subscriptions: "lifestyle",
+};
 
-function detectReliefKey(category: string | null): DetectableReliefKey | null {
-  if (!category) return null;
-  const lower = category.toLowerCase();
-  for (const rule of RELIEF_KEYWORD_RULES) {
-    if (rule.keywords.some((kw) => lower.includes(kw.toLowerCase()))) {
-      return rule.key;
-    }
-  }
-  return null;
-}
-
-/** Scans recurring outflow rows for relief-eligible expense categories and
- * annualizes the matches (same frequency multipliers as baseline.ts). Caller
- * still applies the relief cap; this only sums the raw matched amounts. */
-export function detectReliefsFromCashflow(f: CfpData): Record<string, number> {
+/** Annual amounts per detectable relief, on the plan's own basis. Caller
+ * still applies the relief cap; this only sums the matched amounts. */
+export function detectReliefsFromCashflow(
+  f: CfpData,
+  basis: CashflowBasis | null = null,
+): Record<string, number> {
   const totals: Record<string, number> = {};
-  for (const row of f.cashflow) {
-    if (row.direction !== "outflow") continue;
-    const key = detectReliefKey(row.category);
-    if (!key) continue;
-    const multiplier = CASHFLOW_ANNUALIZE[row.frequency] ?? 12;
-    totals[key] = (totals[key] ?? 0) + row.amount * multiplier;
+  for (const t of annualizeByCategory(f.cashflow, basis, { includeTransfers: true })) {
+    const key = RELIEF_BY_CATEGORY[resolveCategory(t.category)?.code ?? ""];
+    if (!key || t.annual_expenses <= 0) continue;
+    totals[key] = (totals[key] ?? 0) + t.annual_expenses;
   }
   return totals;
 }
@@ -107,7 +97,7 @@ export function computeTax(
   const nonResident = !!f.client.tax_residency &&
     f.client.tax_residency !== "resident";
   const overrides = inputs.reliefs ?? {};
-  const detected = detectReliefsFromCashflow(f);
+  const detected = detectReliefsFromCashflow(f, b.cashflow_basis);
 
   const reliefsDetail: ReliefDetail[] = RELIEFS.map((r) => {
     let auto = 0;

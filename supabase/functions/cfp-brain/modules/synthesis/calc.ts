@@ -6,11 +6,16 @@
 // income vs 2× monthly expenses).
 
 import type { CfpData, FinancialBaseline, ModuleOutputs } from "../../types.ts";
-import { CASHFLOW_ANNUALIZE, isAssetTransfer } from "../../baseline.ts";
+import {
+  annualizeCashflow,
+  type CashflowBasis,
+} from "../../../_shared/cashflow/periods.ts";
+import { groupOf } from "../../../_shared/taxonomy/cashflow.ts";
 import type { CashflowDet } from "../cashflow/calc.ts";
 import type { GoalsDet } from "../goals/calc.ts";
 import type { InsuranceDet } from "../insurance/module.ts";
 import type { RetirementDet } from "../retirement/calc.ts";
+import type { LegacyDet } from "../legacy/calc.ts";
 
 export type BudgetKey =
   | "protection"
@@ -47,8 +52,44 @@ export interface WealthFreedom {
   next_stage_gap_monthly: number | null;
 }
 
+/**
+ * The cross-module figures the SWOT page argues from.
+ *
+ * 综合's prompt is the only one that has to reason across the whole plan —
+ * "储蓄率健康，但保障缺口 RM 2.21M，退休金 81 岁见底" is a sentence no single
+ * module can write. Until now its prompt context carried none of those numbers,
+ * so the SWOT could only be written from the budget waterfall.
+ *
+ * Strictly a SELECTION. Every value below is copied from another module's
+ * deterministic output or from the baseline — nothing is recomputed here, so
+ * this can never disagree with the page that owns the figure. It also never
+ * touches `f`: raw client data has no business in a cross-module summary, and
+ * keeping the rule mechanical is what keeps the PII boundary honest.
+ */
+export interface SynthesisHeadlines {
+  savings_ratio: number | null;
+  debt_service_ratio: number | null;
+  solvency_ratio: number | null;
+  liquid_to_net_worth: number | null;
+  emergency_months_covered: number | null;
+  emergency_shortfall: number;
+  life_gap: number | null;
+  ci_gap: number | null;
+  medical_covered: boolean | null;
+  retirement_gap: number;
+  depletion_age: number | null;
+  retirement_on_track: boolean | null;
+  goals_shortfall_monthly: number;
+  goals_off_track_count: number;
+  has_will: boolean | null;
+  estate_liquidity_shortfall: number;
+  net_worth: number;
+  total_liabilities: number;
+}
+
 export interface SynthesisDet {
   health_score: number | null;
+  headlines: SynthesisHeadlines;
   score_components: ScoreComponent[];
   budget: {
     annual_surplus: number;
@@ -70,32 +111,24 @@ export interface SynthesisDet {
 const round = (n: number) => Math.round(n);
 const clamp100 = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 
-const PASSIVE_KEYWORDS = [
-  "dividend",
-  "rental",
-  "rent",
-  "interest",
-  "passive",
-  "股息",
-  "租金",
-  "利息",
-];
-
-export function passiveIncomeMonthly(f: CfpData): number {
-  return round(
-    f.cashflow
-      .filter((r) =>
-        r.direction === "inflow" &&
-        !isAssetTransfer(r) &&
-        PASSIVE_KEYWORDS.some((k) =>
-          (r.category ?? "").toLowerCase().includes(k)
-        )
-      )
-      .reduce(
-        (s, r) => s + r.amount * (CASHFLOW_ANNUALIZE[r.frequency] ?? 12) / 12,
-        0,
-      ),
+/**
+ * Passive income per month: the taxonomy's I2 被动收入 group (rent, dividends,
+ * interest, royalties, pensions, policy payouts), on the SAME basis as every
+ * other cashflow figure.
+ *
+ * The subset is filtered by category first, then run through the shared
+ * annualiser — so rental income recorded for June and July is averaged across
+ * those two months, exactly as salary is. Doing it row-by-row instead treated
+ * each month's figure as a separate standing income stream.
+ */
+export function passiveIncomeMonthly(
+  f: CfpData,
+  basis: CashflowBasis | null,
+): number {
+  const passive = f.cashflow.filter((r) =>
+    r.direction === "inflow" && groupOf(r.category)?.id === "I2"
   );
+  return round(annualizeCashflow(passive, basis).monthly_income);
 }
 
 export function wealthFreedomStage(
@@ -125,6 +158,51 @@ export function wealthFreedomStage(
   };
 }
 
+/** Pure selection — see SynthesisHeadlines. No arithmetic beyond a ratio of two
+ *  baseline figures that no module owns. */
+function selectHeadlines(
+  b: FinancialBaseline,
+  cashflow: CashflowDet | undefined,
+  insurance: InsuranceDet | undefined,
+  retirement: RetirementDet | undefined,
+  goals: GoalsDet | undefined,
+  legacy: LegacyDet | undefined,
+): SynthesisHeadlines {
+  // Every read below is fully optional-chained. Synthesis already tolerates a
+  // module being absent (missing_modules); tolerating a PARTIAL one costs
+  // nothing and keeps a summary field from being able to break the whole
+  // reconciliation, which is the one section that must always render.
+  const gapOf = (key: string) =>
+    insurance?.cna?.gaps?.find((g) => g.key === key) ?? null;
+  const life = gapOf("life");
+  const ci = gapOf("ci");
+  const medical = gapOf("medical");
+
+  return {
+    savings_ratio: b.savings_ratio,
+    debt_service_ratio: b.debt_service_ratio,
+    solvency_ratio: b.solvency_ratio,
+    // The one derived value, and only because it spans two baseline fields that
+    // no module claims. Negative net worth yields null rather than a ratio that
+    // reads backwards.
+    liquid_to_net_worth: b.net_worth > 0 ? b.liquid_assets_total / b.net_worth : null,
+    emergency_months_covered: cashflow?.emergency_fund?.months_covered ?? null,
+    emergency_shortfall: cashflow?.emergency_fund?.shortfall ?? 0,
+    life_gap: life?.gap ?? null,
+    ci_gap: ci?.gap ?? null,
+    medical_covered: medical?.has_cover ?? null,
+    retirement_gap: retirement?.gap ?? 0,
+    depletion_age: retirement?.depletion_age ?? null,
+    retirement_on_track: retirement?.on_track ?? null,
+    goals_shortfall_monthly: goals?.total_required_monthly ?? 0,
+    goals_off_track_count: goals?.goals?.filter((g) => !g.on_track).length ?? 0,
+    has_will: legacy?.distribution ? legacy.distribution.will_status === "has_will" : null,
+    estate_liquidity_shortfall: legacy?.estate_liquidity?.shortfall ?? 0,
+    net_worth: b.net_worth,
+    total_liabilities: b.total_liabilities,
+  };
+}
+
 export function computeSynthesis(
   f: CfpData,
   b: FinancialBaseline,
@@ -134,6 +212,7 @@ export function computeSynthesis(
   const insurance = prior.insurance_planning as InsuranceDet | undefined;
   const retirement = prior.retirement_planning as RetirementDet | undefined;
   const goals = prior.goals_planning as GoalsDet | undefined;
+  const legacy = prior.legacy_planning as LegacyDet | undefined;
 
   const missing: string[] = [];
   if (!cashflow) missing.push("cashflow_planning");
@@ -197,8 +276,8 @@ export function computeSynthesis(
   const requiredTotal = lines.reduce((s, l) => s + l.required_annual, 0);
 
   // --- health score (weights renormalised over available components) ---
-  const lifeGap = insurance?.cna.gaps.find((g) => g.key === "life");
-  const ciGap = insurance?.cna.gaps.find((g) => g.key === "ci");
+  const lifeGap = insurance?.cna?.gaps?.find((g) => g.key === "life");
+  const ciGap = insurance?.cna?.gaps?.find((g) => g.key === "ci");
   const coverageScores: number[] = [];
   for (const g of [lifeGap, ciGap]) {
     if (g && (g.need ?? 0) > 0) {
@@ -265,6 +344,7 @@ export function computeSynthesis(
   return {
     health_score: healthScore,
     score_components: components,
+    headlines: selectHeadlines(b, cashflow, insurance, retirement, goals, legacy),
     budget: {
       annual_surplus: round(surplus),
       required_total: round(requiredTotal),
@@ -272,7 +352,7 @@ export function computeSynthesis(
       lines,
     },
     wealth_freedom: wealthFreedomStage(
-      passiveIncomeMonthly(f),
+      passiveIncomeMonthly(f, b.cashflow_basis),
       b.annual_expenses / 12,
     ),
     missing_modules: missing,

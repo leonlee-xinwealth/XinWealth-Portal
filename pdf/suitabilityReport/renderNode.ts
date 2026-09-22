@@ -20,7 +20,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import React from "react";
-import { Font, renderToBuffer } from "@react-pdf/renderer";
+import { Font, renderToBuffer, type DocumentProps } from "@react-pdf/renderer";
 import { registerFonts } from "../insuranceReport/fonts.js";
 import { splitForCjkWrap } from "../cjkWrap.js";
 import SuitabilityReportPdf from "./SuitabilityReportPdf.js";
@@ -69,5 +69,10 @@ export async function renderSuitabilityPdf(data: SuitabilityReportData): Promise
   registerFonts(fontPath);
   Font.registerHyphenationCallback(splitForCjkWrap);
 
-  return renderToBuffer(React.createElement(SuitabilityReportPdf, { data }));
+  // SuitabilityReportPdf renders a <Document>, but its element type is the
+  // component's own props, not DocumentProps, which is what renderToBuffer
+  // declares. The cast asserts what the component actually returns.
+  return renderToBuffer(
+    React.createElement(SuitabilityReportPdf, { data }) as React.ReactElement<DocumentProps>,
+  );
 }

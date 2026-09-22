@@ -3,6 +3,14 @@ import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The same 口径 the CFP report and the advisor screens use. A cashflow row
+// records ONE MONTH'S actual figure, so a run-rate comes from averaging the
+// recorded months — converting each row to a monthly rate and summing them
+// treats June's and July's positions as two concurrent commitments.
+import {
+  annualizeCashflow, defaultBasis,
+} from '../functions/_shared/cashflow/periods.ts';
+import { isLiquid } from '../functions/_shared/taxonomy/balance.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: join(__dirname, '.env.migration') });
@@ -18,18 +26,6 @@ const supabase = createClient(
 
 const n = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
 const ratio = (a, b) => b > 0 ? a / b : null;
-const toMonthly = (amount, frequency) => {
-  const value = n(amount);
-  switch (String(frequency || 'monthly').toLowerCase()) {
-    case 'weekly': return value * 52 / 12;
-    case 'biweekly': return value * 26 / 12;
-    case 'quarterly': return value / 3;
-    case 'semi_annual': return value / 6;
-    case 'annual':
-    case 'yearly': return value / 12;
-    default: return value;
-  }
-};
 
 async function all(table, columns, clientId) {
   const { data, error } = await supabase.from(table).select(columns).eq('client_id', clientId);
@@ -51,12 +47,9 @@ async function buildSnapshot(client) {
     all('portfolio_holdings', '*', client.id),
   ]);
 
-  const monthlyIncome = cashflows
-    .filter((e) => String(e.direction || '').toLowerCase() === 'inflow')
-    .reduce((sum, e) => sum + toMonthly(e.amount, e.frequency), 0);
-  const monthlyExpenses = cashflows
-    .filter((e) => String(e.direction || '').toLowerCase() === 'outflow')
-    .reduce((sum, e) => sum + toMonthly(e.amount, e.frequency), 0);
+  const cashflowTotals = annualizeCashflow(cashflows, defaultBasis(cashflows));
+  const monthlyIncome = cashflowTotals.monthly_income;
+  const monthlyExpenses = cashflowTotals.monthly_expenses;
   const monthlySavings = monthlyIncome - monthlyExpenses;
 
   const totalAssets = assets.reduce((sum, a) => sum + n(a.current_value ?? a.value), 0);
@@ -64,11 +57,7 @@ async function buildSnapshot(client) {
   const netWorth = totalAssets - totalLiabilities;
 
   const cashAndFD = assets
-    .filter((a) => {
-      const type = String(a.asset_type || a.kind || '').toLowerCase();
-      const liquidity = String(a.liquidity || '').toLowerCase();
-      return liquidity === 'high' || ['savings', 'fixed_deposit', 'money_market', 'money_market_fund'].includes(type);
-    })
+    .filter((a) => isLiquid(String(a.asset_type || a.kind || '')))
     .reduce((sum, a) => sum + n(a.current_value ?? a.value), 0);
 
   const totalMonthlyDebtRepayment = liabilities.reduce((sum, l) => sum + n(l.monthly_payment), 0);
@@ -88,13 +77,17 @@ async function buildSnapshot(client) {
 
   const annualIncome = monthlyIncome * 12;
   const annualExpenses = monthlyExpenses * 12;
-  const annualPassiveIncome = cashflows
-    .filter((e) => {
-      const category = String(e.category || '').toLowerCase();
-      return String(e.direction || '').toLowerCase() === 'inflow'
-        && (category.includes('rental') || category.includes('dividend') || category.includes('interest'));
-    })
-    .reduce((sum, e) => sum + toMonthly(e.amount, e.frequency) * 12, 0);
+  // Filter to the passive categories first, then run the SAME annualiser — so
+  // rental income recorded for June and July is averaged across those months
+  // exactly as salary is.
+  const passiveRows = cashflows.filter((e) => {
+    const category = String(e.category || '').toLowerCase();
+    return String(e.direction || '').toLowerCase() === 'inflow'
+      && (category.includes('rental') || category.includes('dividend') || category.includes('interest'));
+  });
+  const annualPassiveIncome = annualizeCashflow(
+    passiveRows, defaultBasis(cashflows),
+  ).annual_income;
 
   return {
     client_id: client.id,

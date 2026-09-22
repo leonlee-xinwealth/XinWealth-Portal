@@ -392,7 +392,7 @@ describe("allocation and the time-horizon equity cap", () => {
     expect(r.allocation.growth).toEqual({ min: 0, max: 10 });
     // Defensive and diversifier are untouched, and 100% is still reachable.
     expect(r.allocation.defensive).toEqual({ min: 70, max: 90 });
-    expect(r.allocation.defensive.max + r.allocation.growth.max! + r.allocation.diversifier.max!)
+    expect(r.allocation.defensive.max! + r.allocation.growth.max! + r.allocation.diversifier.max!)
       .toBeGreaterThanOrEqual(100);
   });
 
@@ -401,7 +401,7 @@ describe("allocation and the time-horizon equity cap", () => {
     expect(r.profile).toBe("BALANCED");
     expect(r.allocation.capApplied).toBe(true);
     expect(r.allocation.growth).toEqual({ min: 30, max: 40 });
-    expect(r.allocation.defensive.max + r.allocation.growth.max! + r.allocation.diversifier.max!)
+    expect(r.allocation.defensive.max! + r.allocation.growth.max! + r.allocation.diversifier.max!)
       .toBeGreaterThanOrEqual(100);
   });
 

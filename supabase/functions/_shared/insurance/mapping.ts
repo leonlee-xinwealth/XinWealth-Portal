@@ -2,6 +2,7 @@
 // the deterministic CnaInput. No LLM, no network.
 
 import { type CnaInput, incomeBandMidpoint } from "./cna.ts";
+import { isLiquid } from "../taxonomy/balance.ts";
 
 /** "RM500,000" / "500000.50" / "unknown" → number (0 when unparseable). */
 export function parseAmount(raw: unknown): number {
@@ -68,7 +69,6 @@ export function buildProspectCnaInput(
   };
 }
 
-const LIQUID_ASSET_TYPES = ["savings", "fixed_deposit", "money_market"];
 const LIFE_POLICY_TYPES = ["life", "investment_linked"];
 
 const PREMIUM_ANNUALIZE: Record<string, number> = {
@@ -140,6 +140,19 @@ export interface CfpFinancials {
 // portal's InsuranceGapPanel so the report matches what the advisor sees).
 const CI_RIDER_CATEGORIES = ["critical_illness", "cancer"];
 
+/**
+ * Annualise inflows row by row.
+ *
+ * Correct ONLY where each row is a standing commitment with its own cadence —
+ * which is the prospect path (buildProspectCnaInput), where income arrives as a
+ * band rather than as dated records.
+ *
+ * WRONG for cashflow_entries, where a row is ONE MONTH'S actual amount. Summing
+ * June's RM 6,000 and July's RM 4,000 and multiplying each by twelve reports
+ * RM 120,000 of income for a client earning RM 60,000. cfp-brain therefore
+ * passes the baseline's figure through `overrides.annual_income`; the basis-
+ * aware calculation lives in _shared/cashflow/periods.ts.
+ */
 export function annualizeInflows(
   inflows: CfpFinancials["inflows"],
 ): number {
@@ -168,6 +181,12 @@ export function annualPremiumTotal(
 export interface CnaBaselineOverrides {
   liquid_assets?: number;
   education_need?: number;
+  /**
+   * The household's annual income, already computed on the plan's cashflow
+   * basis. Supply it whenever a FinancialBaseline exists — see the note on
+   * annualizeInflows for why re-deriving it here gets the wrong answer.
+   */
+  annual_income?: number;
 }
 
 /** Build CnaInput from live DB financials.
@@ -201,13 +220,17 @@ export function buildCfpCnaInput(
     allRiders.some((r) => r.category === "medical");
 
   return {
-    annual_income: annualizeInflows(f.inflows),
+    // The baseline's figure wins: it was annualised from the months the advisor
+    // chose, so the income replacement and CI needs below rest on the same
+    // basis as every other figure in the report. Falling back to the row-by-row
+    // sum keeps the prospect path (no baseline, income as a band) working.
+    annual_income: overrides.annual_income ?? annualizeInflows(f.inflows),
     liabilities_total: f.liabilities.reduce(
       (s, l) => s + (l.outstanding_balance ?? 0),
       0,
     ),
     liquid_assets: overrides.liquid_assets ?? f.assets
-      .filter((a) => LIQUID_ASSET_TYPES.includes(a.asset_type))
+      .filter((a) => isLiquid(a.asset_type))
       .reduce((s, a) => s + (a.current_value ?? 0), 0),
     life_cover: lifeCover,
     ci_cover: ciCover,

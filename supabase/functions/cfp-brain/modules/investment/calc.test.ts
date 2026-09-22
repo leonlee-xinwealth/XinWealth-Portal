@@ -138,8 +138,8 @@ Deno.test("wealth_projection FV term is zero when monthly surplus is zero", () =
   const d = det({
     client: { ...makeCfpData().client, risk_profile: null }, // -> balanced band, r=0.06
     cashflow: [
-      { direction: "inflow", amount: 6000, frequency: "monthly", category: "salary" },
-      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household" },
+      { direction: "inflow", amount: 6000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household", period_month: "2026-06-01" },
     ],
   });
   assertEquals(d.monthly_surplus, 0);

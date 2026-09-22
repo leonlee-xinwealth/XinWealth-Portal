@@ -10,6 +10,15 @@
 //   chat             {report_id, section_type, message}  → ask the agent (脱敏)
 //   revise           {report_id, section_type, instruction} → rewrite narrative
 //                    per advisor instruction; deterministic numbers untouched
+//
+//   refresh_fingerprints {report_id}                    → recheck every section
+//                    against the current numbers; no LLM, no writes unless
+//                    something actually moved
+//
+// generate_section and revise refuse to overwrite an `approved` section unless
+// the caller passes {force: true} — the advisor's sign-off is the one thing in
+// this pipeline the model may not quietly discard. The guard lives here rather
+// than in React because the n8n path (x-agent-secret) never touches the UI.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -17,7 +26,14 @@ import { type AgentConfig, loadConfig } from "../_shared/config.ts";
 import { callGeminiJson } from "../_shared/llm/gemini.ts";
 import { fetchCfpData } from "./db.ts";
 import { computeAll } from "./orchestrator.ts";
-import { markFailed, saveDraft, upsertGenerating } from "./sectionLifecycle.ts";
+import {
+  markFailed,
+  readPriorSection,
+  saveDraft,
+  upsertGenerating,
+} from "./sectionLifecycle.ts";
+import { sectionFingerprint } from "./fingerprint.ts";
+import { sweepStaleness } from "./staleness.ts";
 import { findModule, ORDERED_MODULES, SECTION_LABELS } from "./modules/registry.ts";
 import { generateGenericClientView } from "./clientView.ts";
 import {
@@ -28,6 +44,16 @@ import {
   redactSensitive,
 } from "./chat.ts";
 import type { PlanningInputs, SectionType } from "./types.ts";
+
+/** `partner_client_id` non-null = joint household plan; every fetchCfpData call
+ * must pass it or chat/revise would recompute against single-client data and
+ * disagree with the saved draft. */
+interface CfpReportRow {
+  id: string;
+  client_id: string;
+  partner_client_id: string | null;
+  planning_inputs: PlanningInputs | null;
+}
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -105,19 +131,25 @@ serve(async (req) => {
     const reportId = body.report_id;
     const sectionType = body.section_type as SectionType;
     if (!reportId) return jsonError("report_id required", 400);
-    if (!sectionType || !SECTION_LABELS[sectionType]) {
+    // Every mode but the whole-report sweep addresses one section.
+    const wholeReport = body.mode === "refresh_fingerprints";
+    if (!wholeReport && (!sectionType || !SECTION_LABELS[sectionType])) {
       return jsonError("Unknown section_type", 400);
     }
 
     const { data: report } = await serviceClient
       .from("financial_reports")
-      .select("id, client_id, advisor_id, planning_inputs")
+      .select("id, client_id, partner_client_id, advisor_id, planning_inputs")
       .eq("id", reportId)
       .single();
     if (!report) return jsonError("Report not found", 404);
     // Advisor-JWT callers may only work on their own clients' reports.
     if (advisorId && report.advisor_id !== advisorId) {
       return jsonError("Forbidden", 403);
+    }
+
+    if (wholeReport) {
+      return await runRefreshFingerprints(serviceClient, report);
     }
 
     const module = findModule(sectionType);
@@ -132,6 +164,7 @@ serve(async (req) => {
         sectionType,
         module,
         cfg,
+        body.force === true,
       );
     }
 
@@ -165,6 +198,7 @@ serve(async (req) => {
         module,
         cfg,
         body.instruction,
+        body.force === true,
       );
     }
 
@@ -174,15 +208,71 @@ serve(async (req) => {
   }
 });
 
+/**
+ * Recheck every section against the numbers as they stand right now.
+ *
+ * Staleness is otherwise only ever noticed when somebody regenerates something.
+ * An advisor who edits an asset in the client's profile and never touches the
+ * report leaves eight approved sections quietly rotting while the export gate
+ * stays open — which would make the entire guarantee decorative. computeAll is
+ * pure and sub-second, so the report page can afford to call this on open and
+ * after any edit that moves the numbers.
+ *
+ * No LLM, and no writes at all unless a fingerprint actually moved.
+ */
+async function runRefreshFingerprints(
+  // deno-lint-ignore no-explicit-any
+  db: any,
+  report: CfpReportRow,
+) {
+  const data = await fetchCfpData(db, report.client_id, report.partner_client_id);
+  if (!data) return jsonError("Client financial data unavailable", 400);
+
+  const { baseline, det } = computeAll(
+    ORDERED_MODULES,
+    data,
+    report.planning_inputs ?? {},
+  );
+
+  // Keep the stored baseline in step with what we just judged against;
+  // otherwise the UI's ratios and this sweep's verdict come from different
+  // computations of the same client.
+  await db.from("financial_reports").update({ baseline }).eq("id", report.id);
+
+  const stale = await sweepStaleness(db, report.id, det, baseline);
+  return jsonOk({ stale });
+}
+
+/**
+ * 409 unless the caller means it. Returned as a body the UI can read, so the
+ * review page can offer "regenerate anyway" rather than showing a raw error.
+ */
+function approvedLock(sectionType: SectionType) {
+  return new Response(
+    JSON.stringify({
+      error: `${SECTION_LABELS[sectionType]} 已定稿，重新生成会覆盖已审核的内容`,
+      code: "section_approved",
+      section_type: sectionType,
+    }),
+    { status: 409, headers: { ...CORS, "Content-Type": "application/json" } },
+  );
+}
+
 async function runGenerateSection(
   // deno-lint-ignore no-explicit-any
   db: any,
-  report: { id: string; client_id: string; planning_inputs: PlanningInputs | null },
+  report: CfpReportRow,
   sectionType: SectionType,
   // deno-lint-ignore no-explicit-any
   module: any,
   cfg: AgentConfig,
+  force: boolean,
 ) {
+  // Read before writing: upsertGenerating flips status to 'generating', which
+  // erases the very state this guard inspects.
+  const prior = await readPriorSection(db, report.id, sectionType);
+  if (prior.status === "approved" && !force) return approvedLock(sectionType);
+
   // The function is the sole writer of the section row's lifecycle.
   const sectionId = await upsertGenerating(
     db,
@@ -192,7 +282,7 @@ async function runGenerateSection(
   );
 
   try {
-    const data = await fetchCfpData(db, report.client_id);
+    const data = await fetchCfpData(db, report.client_id, report.partner_client_id);
     if (!data) throw new Error("Client financial data unavailable");
 
     const { baseline, det } = computeAll(
@@ -212,11 +302,18 @@ async function runGenerateSection(
     const narrative = await callGeminiJson(prompt, schema, cfg.GEMINI_API_KEY);
     const content = module.assemble(sectionDet, narrative, data);
 
-    const updated = await saveDraft(db, sectionId, content);
-    return jsonOk({ section: updated });
+    const fingerprint = await sectionFingerprint(sectionType, sectionDet, baseline);
+    const updated = await saveDraft(db, sectionId, content, fingerprint);
+
+    // This run rewrote the shared baseline — including the budget waterfall,
+    // which reallocates every other section's spending. Sections whose basis
+    // moved lose their approval here, while the advisor is still looking.
+    const stale = await sweepStaleness(db, report.id, det, baseline, sectionType);
+
+    return jsonOk({ section: updated, stale });
   } catch (e) {
     const message = (e as Error)?.message ?? "Unknown error";
-    await markFailed(db, sectionId, message);
+    await markFailed(db, sectionId, message, prior.hadContent);
     return jsonError(message, 500);
   }
 }
@@ -290,7 +387,7 @@ function narrativeContextFor(module: any, content: unknown): unknown {
 async function runChat(
   // deno-lint-ignore no-explicit-any
   db: any,
-  report: { id: string; client_id: string; planning_inputs: PlanningInputs | null },
+  report: CfpReportRow,
   sectionType: SectionType,
   // deno-lint-ignore no-explicit-any
   module: any,
@@ -308,7 +405,7 @@ async function runChat(
   }
 
   try {
-    const data = await fetchCfpData(db, report.client_id);
+    const data = await fetchCfpData(db, report.client_id, report.partner_client_id);
     if (!data) throw new Error("Client financial data unavailable");
     const { baseline, det } = computeAll(
       ORDERED_MODULES,
@@ -355,25 +452,29 @@ async function runChat(
 async function runRevise(
   // deno-lint-ignore no-explicit-any
   db: any,
-  report: { id: string; client_id: string; planning_inputs: PlanningInputs | null },
+  report: CfpReportRow,
   sectionType: SectionType,
   // deno-lint-ignore no-explicit-any
   module: any,
   cfg: AgentConfig,
   rawInstruction: string,
+  force: boolean,
 ) {
   const { data: section } = await db
     .from("report_sections")
-    .select("id, content")
+    .select("id, content, status")
     .eq("report_id", report.id)
     .eq("section_type", sectionType)
     .single();
   if (!section || !section.content) {
     return jsonError("Section not generated yet", 400);
   }
+  // Revise rewrites the narrative in place, so it overwrites an approval just
+  // as thoroughly as a regeneration does.
+  if (section.status === "approved" && !force) return approvedLock(sectionType);
 
   try {
-    const data = await fetchCfpData(db, report.client_id);
+    const data = await fetchCfpData(db, report.client_id, report.partner_client_id);
     if (!data) throw new Error("Client financial data unavailable");
     const { baseline, det } = computeAll(
       ORDERED_MODULES,
@@ -396,7 +497,8 @@ async function runRevise(
     );
     const content = module.assemble(sectionDet, narrative, data);
 
-    const updated = await saveDraft(db, section.id, content);
+    const fingerprint = await sectionFingerprint(sectionType, sectionDet, baseline);
+    const updated = await saveDraft(db, section.id, content, fingerprint);
 
     await db.from("cfp_chat_messages").insert([
       { section_id: section.id, role: "advisor", message: `[修改指示] ${instruction}` },

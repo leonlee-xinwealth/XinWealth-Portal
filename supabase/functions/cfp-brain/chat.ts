@@ -12,6 +12,7 @@
 import { callGeminiJson } from "../_shared/llm/gemini.ts";
 import { SECTION_LABELS } from "./modules/registry.ts";
 import type { FinancialBaseline, SectionType } from "./types.ts";
+import { promptJson } from "./promptSafety.ts";
 
 /** Malaysian NRIC (with or without dashes) and 8+ digit account-like runs. */
 export function redactSensitive(text: string): string {
@@ -84,16 +85,16 @@ export function buildChatPrompt(
     "the context (e.g. over_budget, asset_transfers_monthly); use plain words.",
     "",
     "Deterministic analysis (sole source of numbers):",
-    JSON.stringify(det),
+    promptJson(det),
     "",
     "Shared financial baseline summary:",
-    JSON.stringify(baselineChatSummary(baseline)),
+    promptJson(baselineChatSummary(baseline)),
     "",
     "Current section narrative (advisor-editable draft):",
-    JSON.stringify(narrativeContext ?? {}),
+    promptJson(narrativeContext ?? {}),
     "",
     "Conversation so far:",
-    JSON.stringify(history),
+    promptJson(history),
     "",
     "Advisor's message:",
     advisorMessage,
@@ -130,7 +131,7 @@ export function buildRevisePrompt(
     "still applies — quote deterministic figures verbatim, never invent any.",
     "",
     "Current draft narrative:",
-    JSON.stringify(currentNarrative),
+    promptJson(currentNarrative),
     "",
     "Advisor's instruction:",
     instruction,

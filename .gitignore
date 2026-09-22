@@ -33,3 +33,20 @@ supabase/.temp/
 
 # transpile-only Vercel function simulation output
 .simbuild/
+
+# Local agent/skill tooling — not project code. .claude/settings.json and the
+# committed CLAUDE.md stay tracked; installed skills, spawned agents and
+# worktrees are machine-local and run to tens of megabytes.
+.agents/
+.trae/
+.superpowers/
+.claude/worktrees/
+.claude/skills/
+.claude/agents/
+
+# CJK variable-font SOURCES: inputs to scripts/build-cfp-fonts.mjs only, never
+# loaded at runtime (react-pdf cannot use variable fonts — see pdf/cfpReport/
+# fonts.ts). 43MB that would sit in history forever. Download from
+# https://fonts.google.com/noto when the static faces need rebuilding; the baked
+# XwSansSC-*/XwSerifSC-* faces ARE committed because the report needs them.
+public/fonts/*-VF.ttf

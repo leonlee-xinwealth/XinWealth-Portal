@@ -1,0 +1,19 @@
+# Supabase CLI project config.
+#
+# This file exists for ONE reason: to keep `verify_jwt = false` in version
+# control for the functions that need it. Both brains authenticate themselves —
+# an advisor JWT, or the shared `x-agent-secret` header that n8n uses — and the
+# CLI defaults `verify_jwt` to true. Deploying without these entries silently
+# cuts the n8n path, and nothing in the app would show an error: the automation
+# would simply stop working.
+
+project_id = "lqnnboepevcivcxvkoct"
+
+[functions.cfp-brain]
+verify_jwt = false
+
+[functions.insurance-brain]
+verify_jwt = false
+
+[functions.send-broadcast]
+verify_jwt = false

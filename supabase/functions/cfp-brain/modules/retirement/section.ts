@@ -3,8 +3,17 @@
 // institutions or account numbers ever reach the LLM.
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
-import { budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
+import { BUDGET_LINE, budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
 import { computeRetirement, type RetirementDet } from "./calc.ts";
+import { promptJson } from "../../promptSafety.ts";
+import {
+  severityInstructionLines,
+  severitySchema,
+  solutionInstructionLines,
+  solutionSchema,
+  type NarrativeCard,
+  type Severity,
+} from "../../narrativeBlocks.ts";
 
 export interface RetirementNarrative {
   executive_summary: {
@@ -12,10 +21,21 @@ export interface RetirementNarrative {
     action_plan: string;
     expected_completion_date: string;
     remarks: string;
+    /** status dot on the report's executive-summary page; absent on sections
+     *  generated before the slot existed, which render without a dot */
+    severity?: Severity;
   };
   gap_analysis: string;
   funding_plan: string;
   recommendations: Array<{ title: string; detail: string; priority: number }>;
+  /** P22 退休目标与定义 — prose for the two definitions the page sets side by
+   *  side. The capital figures themselves come from det. */
+  vision?: {
+    depletion_body: string;
+    passive_body: string;
+  };
+  /** P24 退休方案建议 */
+  solution?: NarrativeCard;
 }
 
 export interface RetirementSectionContent extends RetirementNarrative, RetirementDet {
@@ -35,16 +55,27 @@ const RESPONSE_SCHEMA = {
         action_plan: { type: "STRING" },
         expected_completion_date: { type: "STRING" },
         remarks: { type: "STRING" },
+        severity: severitySchema(),
       },
       required: [
         "findings",
         "action_plan",
         "expected_completion_date",
         "remarks",
+        "severity",
       ],
     },
     gap_analysis: { type: "STRING" },
     funding_plan: { type: "STRING" },
+    vision: {
+      type: "OBJECT",
+      properties: {
+        depletion_body: { type: "STRING" },
+        passive_body: { type: "STRING" },
+      },
+      required: ["depletion_body", "passive_body"],
+    },
+    solution: solutionSchema(),
     recommendations: {
       type: "ARRAY",
       items: {
@@ -63,6 +94,8 @@ const RESPONSE_SCHEMA = {
     "gap_analysis",
     "funding_plan",
     "recommendations",
+    "vision",
+    "solution",
   ],
 };
 
@@ -71,13 +104,26 @@ export function buildRetirementPrompt(
   b: FinancialBaseline,
   f: CfpData,
 ): string {
+  // The drawdown series is ~40 rows x 4 numbers per curve and exists purely to
+  // plot 资金耐久曲线 in the PDF. Sending it would bloat the prompt and invite
+  // the model to quote JSON field names back into the narrative — the failure
+  // d20030a already had to fix once. The scalar summary (depletion_age,
+  // survives_to_85/100) carries everything the narrative needs.
+  // max_age goes too: the assumptions list already tells the reader the stress
+  // test runs to 100, so the model has no use for the field name.
+  const {
+    drawdown_baseline: _b,
+    drawdown_optimized: _o,
+    drawdown_max_age: _m,
+    ...detForPrompt
+  } = det;
   const context = {
     age: b.age,
     employment_status: f.client.employment_status,
     dependents: b.dependents,
     monthly_surplus: Math.round(b.annual_surplus / 12),
-    retirement: det,
-    budget_context: sectionBudgetContext(b, "retirement"),
+    retirement: detForPrompt,
+    budget_context: sectionBudgetContext(b, BUDGET_LINE.retirement_planning),
   };
   return [
     "You are the analysis assistant of a licensed financial advisor in Malaysia,",
@@ -133,8 +179,20 @@ export function buildRetirementPrompt(
     "Tone: professional, plain English, written so a layperson feels the",
     "real-world stakes. This is a draft the advisor will edit.",
     "",
+    "",
+    "RETIREMENT VISION (`vision`) — the report sets the two definitions of",
+    "retirement side by side on one page and asks the client to choose. Write",
+    "the prose for each; the report prints capital_needed_depletion and",
+    "capital_needed beside them, so state NO amounts here:",
+    "- depletion_body: 2 sentences on 资金耗尽式 — living off the capital until",
+    "  it reaches zero at life expectancy. Cheaper to reach; nothing is left.",
+    "- passive_body: 2 sentences on 被动收入式 — the yield alone covers the cost",
+    "  of living and the principal is never touched, so it passes on intact.",
+    "Neither may be presented as the correct answer. This is the client's call.",
+    ...solutionInstructionLines("retirement funding"),
+    ...severityInstructionLines(),
     "Client retirement JSON (sole source of numbers):",
-    JSON.stringify(context),
+    promptJson(context),
   ].join("\n");
 }
 

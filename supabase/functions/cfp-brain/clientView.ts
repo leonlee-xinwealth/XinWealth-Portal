@@ -5,6 +5,7 @@
 // never computed.
 
 import { callGeminiJson } from "../_shared/llm/gemini.ts";
+import { promptJson } from "./promptSafety.ts";
 
 export interface GenericClientView {
   version: 1;
@@ -107,7 +108,7 @@ export function buildGenericClientViewPrompt(
     "   estimates.",
     "",
     "Section analysis JSON (sole source of facts and numbers):",
-    JSON.stringify(payload),
+    promptJson(payload),
   ].join("\n");
 }
 

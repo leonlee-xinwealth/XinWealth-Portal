@@ -4,8 +4,10 @@
 // no names, institutions or account details ever reach the LLM.
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
-import { budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
+import { BUDGET_LINE, budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
 import { type CashflowDet, computeCashflow } from "./calc.ts";
+import { promptJson } from "../../promptSafety.ts";
+import { severityInstructionLines, severitySchema, type Severity } from "../../narrativeBlocks.ts";
 
 export interface CashflowNarrative {
   executive_summary: {
@@ -13,6 +15,9 @@ export interface CashflowNarrative {
     action_plan: string;
     expected_completion_date: string;
     remarks: string;
+    /** status dot on the report's executive-summary page; absent on sections
+     *  generated before the slot existed, which render without a dot */
+    severity?: Severity;
   };
   budget_commentary: string;
   emergency_fund_plan: string;
@@ -36,12 +41,14 @@ const RESPONSE_SCHEMA = {
         action_plan: { type: "STRING" },
         expected_completion_date: { type: "STRING" },
         remarks: { type: "STRING" },
+        severity: severitySchema(),
       },
       required: [
         "findings",
         "action_plan",
         "expected_completion_date",
         "remarks",
+        "severity",
       ],
     },
     budget_commentary: { type: "STRING" },
@@ -77,7 +84,7 @@ export function buildCashflowPrompt(
     dependents: b.dependents,
     monthly_debt_service: b.monthly_debt_service,
     cashflow: det,
-    budget_context: sectionBudgetContext(b, "emergency"),
+    budget_context: sectionBudgetContext(b, BUDGET_LINE.cashflow_planning),
   };
   return [
     "You are the analysis assistant of a licensed financial advisor in Malaysia,",
@@ -120,8 +127,9 @@ export function buildCashflowPrompt(
     "Tone: professional, plain English, written so a layperson feels the",
     "real-world stakes. This is a draft the advisor will edit.",
     "",
+    ...severityInstructionLines(),
     "Client cashflow JSON (sole source of numbers):",
-    JSON.stringify(context),
+    promptJson(context),
   ].join("\n");
 }
 

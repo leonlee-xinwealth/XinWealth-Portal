@@ -12,6 +12,26 @@ import {
   budgetInstructionLines,
   type SectionBudgetContext,
 } from "../../budgetContext.ts";
+import { promptJson } from "../../promptSafety.ts";
+import {
+  consequenceInstructionLines,
+  consequenceSchema,
+  severityInstructionLines,
+  severitySchema,
+  solutionInstructionLines,
+  solutionSchema,
+} from "../../narrativeBlocks.ts";
+
+/**
+ * The CNA's own gap keys — NOT COVERAGE_CATEGORIES, which are the four review
+ * categories the narrative writes commentary for. The consequence card's
+ * headline_key is used to look a GAP up in cna.gaps, so it has to be drawn from
+ * that list: "critical_illness" would be a perfectly valid coverage category
+ * and a lookup miss, printing a headline with no figure beside it.
+ * See CnaGap in _shared/insurance/cna.ts, and the PDF's mirror in
+ * pdf/cfpReport/select/insurance.ts.
+ */
+export const CNA_GAP_KEYS = ["life", "ci", "medical"] as const;
 
 const COVERAGE_CATEGORIES = [
   "life",
@@ -30,8 +50,15 @@ export const SECTION_RESPONSE_SCHEMA = {
         action_plan: { type: "STRING" },
         expected_completion_date: { type: "STRING" },
         remarks: { type: "STRING" },
+        severity: severitySchema(),
       },
-      required: ["findings", "action_plan", "expected_completion_date", "remarks"],
+      required: [
+        "findings",
+        "action_plan",
+        "expected_completion_date",
+        "remarks",
+        "severity",
+      ],
     },
     coverage_review: {
       type: "ARRAY",
@@ -49,6 +76,18 @@ export const SECTION_RESPONSE_SCHEMA = {
       },
     },
     gap_analysis: { type: "STRING" },
+    // Joint reports only — omitted by the model on individual plans.
+    household_review: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          role: { type: "STRING", enum: ["primary", "partner"] },
+          commentary: { type: "STRING" },
+        },
+        required: ["role", "commentary"],
+      },
+    },
     recommendations: {
       type: "ARRAY",
       items: {
@@ -61,6 +100,8 @@ export const SECTION_RESPONSE_SCHEMA = {
         required: ["title", "detail", "priority"],
       },
     },
+    consequences: consequenceSchema([...CNA_GAP_KEYS]),
+    solution: solutionSchema(),
     scenarios: {
       type: "ARRAY",
       items: {
@@ -81,23 +122,36 @@ export const SECTION_RESPONSE_SCHEMA = {
     "gap_analysis",
     "recommendations",
     "scenarios",
+    "consequences",
+    "solution",
   ],
 };
 
 /** Builds the LLM prompt. PII rule: only the whitelisted, non-identifying
  * fields below may appear — no name/NRIC/email/phone/DOB/provider/
  * policy_number/free-text labels. Enforced by section.test.ts sentinels. */
+/** Joint report: one CNA per spouse. Roles only — never names (PII rule). */
+export interface HouseholdCnaContext {
+  per_person: Array<{ role: "primary" | "partner"; cna: CnaResult }>;
+}
+
 export function buildSectionPrompt(
   cna: CnaResult,
   financials: CfpFinancials,
   budgetContext: SectionBudgetContext | null = null,
+  household: HouseholdCnaContext | null = null,
+  /**
+   * The client's age, from the baseline.
+   *
+   * This used to be derived here from financials.client.date_of_birth, which
+   * meant a birth date — an identity document field, and one of the strongest
+   * identifiers a client has — crossed into the module that talks to the LLM
+   * purely so it could be divided by 365.25. The prompt only ever needed the
+   * age, and computeBaseline already has it. Passing the answer instead of the
+   * raw fact also removes a second, independently-drifting age calculation.
+   */
+  age: number | null = null,
 ): string {
-  const age = financials.client.date_of_birth
-    ? Math.floor(
-      (Date.now() - new Date(financials.client.date_of_birth).getTime()) /
-        (365.25 * 24 * 3600 * 1000),
-    )
-    : null;
   const clientContext = {
     age,
     occupation: financials.client.occupation,
@@ -188,19 +242,44 @@ export function buildSectionPrompt(
     "   Ground every scenario in the client context and CNA numbers; never invent",
     "   assets or amounts that are not in the data.",
     "",
+    ...consequenceInstructionLines("protection gap", [...CNA_GAP_KEYS]),
+    ...solutionInstructionLines("protection"),
+    ...severityInstructionLines(),
+    "",
     ...budgetInstructionLines("protection top-up"),
     "- Protection sits FIRST in the priority order: downside risk is secured",
     "  before any upside planning, so lead your recommendations with the",
     "  allocated protection budget as the plan's first call on surplus.",
     "",
+    ...(household
+      ? [
+        "",
+        "THIS IS A JOINT PLAN FOR A MARRIED COUPLE. Refer to them as",
+        '"the client" (primary) and "the spouse" (partner) — never invent names.',
+        "The client context above (income, assets, liabilities, dependants) is the",
+        "COMBINED household position. Protection need, however, is per life: the",
+        "household CNA JSON below holds a separate CNA for each of them, each",
+        "computed against their OWN income and OWN policies but the SAME household",
+        "liabilities and dependants.",
+        "6) household_review — exactly one entry per role (primary, partner),",
+        "   commentary ≤ 100 words, citing that person's own CNA need/covered/gap",
+        "   figures. State plainly whose protection is the weaker of the two.",
+        "   coverage_review, gap_analysis, recommendations and scenarios must cover",
+        "   the household as a whole and make clear which spouse each gap belongs to.",
+        "",
+        "Household CNA JSON (per-life, sole source of per-person numbers):",
+        promptJson(household.per_person),
+      ]
+      : []),
+    "",
     "Tone: professional and objective, but written so a layperson feels the",
     "real-world stakes. Plain English. This is a draft the advisor will edit.",
     "",
     "Client context JSON:",
-    JSON.stringify({ ...clientContext, budget_context: budgetContext }),
+    promptJson({ ...clientContext, budget_context: budgetContext }),
     "",
     "CNA JSON (sole source of numbers):",
-    JSON.stringify(cna),
+    promptJson(cna),
   ].join("\n");
 }
 

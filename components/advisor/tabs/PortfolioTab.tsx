@@ -348,14 +348,18 @@ const Modal = ({ title, onClose, children }: any) => (
   </div>
 );
 const Fr = ({ label, children }: any) => <div className="mb-3"><label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>{children}</div>;
-const Inp = ({ value, onChange, type = 'text', placeholder }: any) => (
-  <input type={type} value={value} onChange={(e: any) => onChange(e.target.value)} placeholder={placeholder}
+const Inp = ({ value, onChange, type = 'text', placeholder }: {
+  value: string; onChange: (value: string) => void; type?: string; placeholder?: string;
+}) => (
+  <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold" />
 );
-const Sel = ({ value, onChange, opts }: any) => (
-  <select value={value} onChange={(e: any) => onChange(e.target.value)}
+const Sel = ({ value, onChange, opts }: {
+  value: string; onChange: (value: string) => void; opts: Array<[string, string]>;
+}) => (
+  <select value={value} onChange={e => onChange(e.target.value)}
     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold bg-white">
-    {opts.map(([v, l]: any) => <option key={v} value={v}>{l}</option>)}
+    {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
   </select>
 );
 const BtnRow = ({ onSave, onCancel, saving, t }: any) => (

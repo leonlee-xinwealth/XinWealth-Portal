@@ -297,11 +297,12 @@ const Cashflow: React.FC = () => {
           })).filter(d => d.value > 0);
 
           const tValue = pData.reduce((sum, item) => sum + item.value, 0);
+          const isLumpSum = pData.length === 1 && pData[0].name === 'Lump Sum';
 
-          return { pieData: pData, categoryMap: catMap, totalValue: tValue };
+          return { pieData: pData, categoryMap: catMap, totalValue: tValue, isLumpSum };
       } catch (err) {
           console.error("Error in useMemo for Cashflow:", err);
-          return { pieData: [], categoryMap: new Map(), totalValue: 0 };
+          return { pieData: [], categoryMap: new Map(), totalValue: 0, isLumpSum: false };
       }
   }, [activeTab, incomes, expenses, viewMode, selectedYear, selectedMonth]);
 
@@ -309,6 +310,23 @@ const Cashflow: React.FC = () => {
       const pieData = dataValues?.pieData || [];
       const categoryMap = dataValues?.categoryMap || new Map<string, { value: number, items: RecordItem[] }>();
       const totalValue = dataValues?.totalValue || 0;
+      const isLumpSum = dataValues?.isLumpSum || false;
+
+      if (isLumpSum) {
+          return (
+              <div className="flex items-center justify-center py-10">
+                  <div className="bg-white rounded-3xl p-10 border border-slate-100 shadow-sm text-center max-w-sm w-full">
+                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">
+                          {activeTab === 'inflow' ? 'Total Cash Inflow' : 'Total Cash Outflow'}
+                      </p>
+                      <p className={`text-5xl font-black ${activeTab === 'inflow' ? 'text-emerald-500' : 'text-rose-500'}`}>
+                          {formatCurrency(totalValue)}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-5">Recorded as lump sum</p>
+                  </div>
+              </div>
+          );
+      }
 
       return (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

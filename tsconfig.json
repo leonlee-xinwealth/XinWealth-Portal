@@ -17,5 +17,10 @@
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client"]
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  // supabase/functions is Deno, not browser code: it uses the Deno global and
+  // https:/jsr: import specifiers, which this project's compiler cannot
+  // resolve. It is type-checked on its own terms with `deno check`, and tested
+  // with `deno test` (see the test:deno script).
+  "exclude": ["node_modules", "dist", "supabase/functions", ".claude/worktrees"]
 }

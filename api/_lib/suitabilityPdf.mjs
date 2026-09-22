@@ -714,7 +714,9 @@ async function renderSuitabilityPdf(data) {
   }
   registerFonts(fontPath);
   Font2.registerHyphenationCallback(splitForCjkWrap);
-  return renderToBuffer(React.createElement(SuitabilityReportPdf, { data }));
+  return renderToBuffer(
+    React.createElement(SuitabilityReportPdf, { data })
+  );
 }
 export {
   fontCandidates,

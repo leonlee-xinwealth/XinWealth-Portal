@@ -4,6 +4,15 @@
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
 import { computeTax, type TaxDet } from "./calc.ts";
+import { promptJson } from "../../promptSafety.ts";
+import {
+  severityInstructionLines,
+  severitySchema,
+  solutionInstructionLines,
+  solutionSchema,
+  type NarrativeCard,
+  type Severity,
+} from "../../narrativeBlocks.ts";
 
 export interface TaxNarrative {
   executive_summary: {
@@ -11,10 +20,15 @@ export interface TaxNarrative {
     action_plan: string;
     expected_completion_date: string;
     remarks: string;
+    /** status dot on the report's executive-summary page; absent on sections
+     *  generated before the slot existed, which render without a dot */
+    severity?: Severity;
   };
   tax_position: string;
   optimization: string;
   recommendations: Array<{ title: string; detail: string; priority: number }>;
+  /** P26 税务优化方案 */
+  solution?: NarrativeCard;
 }
 
 export interface TaxSectionContent extends TaxNarrative, TaxDet {
@@ -38,16 +52,19 @@ const RESPONSE_SCHEMA = {
         action_plan: { type: "STRING" },
         expected_completion_date: { type: "STRING" },
         remarks: { type: "STRING" },
+        severity: severitySchema(),
       },
       required: [
         "findings",
         "action_plan",
         "expected_completion_date",
         "remarks",
+        "severity",
       ],
     },
     tax_position: { type: "STRING" },
     optimization: { type: "STRING" },
+    solution: solutionSchema(),
     recommendations: {
       type: "ARRAY",
       items: {
@@ -66,6 +83,7 @@ const RESPONSE_SCHEMA = {
     "tax_position",
     "optimization",
     "recommendations",
+    "solution",
   ],
 };
 
@@ -134,8 +152,10 @@ export function buildTaxPrompt(
     "Tone: professional, plain English, written so a layperson feels the",
     "real-world stakes. This is a draft the advisor will edit.",
     "",
+    ...solutionInstructionLines("tax optimisation"),
+    ...severityInstructionLines(),
     "Client tax JSON (sole source of numbers):",
-    JSON.stringify(context),
+    promptJson(context),
   ].join("\n");
 }
 

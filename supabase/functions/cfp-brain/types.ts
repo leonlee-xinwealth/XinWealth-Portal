@@ -48,6 +48,9 @@ export interface CashflowRow {
   amount: number;
   frequency: string;
   category: string | null;
+  /** YYYY-MM-DD — the month this figure belongs to. A row records THAT MONTH'S
+   *  actual amount, not a standing monthly commitment. */
+  period_month: string;
   /** non-null = transfer to/from the client's own asset (小会计: not a true
    * expense/income — e.g. savings → investment account) */
   linked_asset_id?: string | null;
@@ -83,23 +86,51 @@ export interface HoldingRow {
   cost_basis: number | null;
 }
 
+export interface CfpClient {
+  id: string;
+  date_of_birth: string | null;
+  marital_status: string | null;
+  number_of_dependants: number;
+  employment_status: string | null;
+  occupation: string | null;
+  tax_residency: string | null;
+  risk_profile: string | null;
+  retirement_age: number | null;
+  has_epf_account: boolean;
+  has_prs_account: boolean;
+}
+
+/** One spouse's own figures, kept alongside the merged household view for the
+ * modules that must analyse each life separately (insurance CNA) and for the
+ * PDF's per-owner attribution. */
+export interface PersonSlice {
+  role: "primary" | "partner";
+  client: CfpClient;
+  cashflow: CashflowRow[];
+  assets: AssetRow[];
+  liabilities: LiabilityRow[];
+  policies: CfpFinancials["policies"];
+}
+
+/** A row present on both spouses with identical type+amount — almost always the
+ * same jointly-owned asset entered twice. Surfaced as a warning; the engine
+ * never silently drops it (advisor decides). */
+export interface DuplicateHolding {
+  kind: "asset" | "liability";
+  type: string;
+  amount: number;
+}
+
 /** Full, PII-free financial picture for one client. `policies` reuses the
- * insurance CfpFinancials shape so _shared/insurance code plugs in directly. */
+ * insurance CfpFinancials shape so _shared/insurance code plugs in directly.
+ *
+ * JOINT REPORTS: the top-level fields hold the MERGED household figures, so
+ * every module's calculator keeps working unchanged; `household` carries the
+ * per-spouse breakdown for the few that need it. See household.ts. */
 export interface CfpData {
-  client: {
-    id: string;
-    date_of_birth: string | null;
-    marital_status: string | null;
-    number_of_dependants: number;
-    employment_status: string | null;
-    occupation: string | null;
-    tax_residency: string | null;
-    risk_profile: string | null;
-    retirement_age: number | null;
-    has_epf_account: boolean;
-    has_prs_account: boolean;
-  };
-  /** latest period_month, recurring only, both directions */
+  client: CfpClient;
+  /** every recurring row, across every month — the planning basis is chosen
+   *  in the calculation layer, never at the fetch (see db.ts) */
   cashflow: CashflowRow[];
   assets: AssetRow[];
   liabilities: LiabilityRow[];
@@ -108,6 +139,12 @@ export interface CfpData {
   /** latest snapshot_month only */
   holdings: HoldingRow[];
   goals: ClientGoalRow[];
+  /** present only on joint household reports */
+  household?: {
+    primary: PersonSlice;
+    partner: PersonSlice;
+    duplicates: DuplicateHolding[];
+  };
 }
 
 // ------------------------------------------------------------ planning inputs
@@ -128,6 +165,9 @@ export interface PlanningInputs {
     bankruptcy_risk?: boolean;
   };
   assumption_overrides?: Partial<BaselineAssumptions>;
+  /** Which months of actuals the plan is annualised from. Absent = derive it
+   *  from whatever the client has recorded (see defaultBasis). */
+  cashflow_basis?: { year: number; from_month: number; to_month: number };
 }
 
 // ---------------------------------------------------------------- baseline
@@ -153,6 +193,13 @@ export interface BaselineAssumptions {
 export interface FinancialBaseline {
   version: 1;
   // cashflow
+  /** the months of actuals every income and expense figure below is built on —
+   *  printed on the report so the client can see the assumption */
+  cashflow_basis: { year: number; from_month: number; to_month: number } | null;
+  /** months the basis spans, vs the ones that actually hold data. When these
+   *  differ the advisor has a gap in the record, which no arithmetic can fix. */
+  cashflow_basis_months: number;
+  cashflow_months_with_data: number[];
   annual_income: number;
   annual_expenses: number;
   monthly_income: number;
@@ -179,6 +226,11 @@ export interface FinancialBaseline {
   years_to_retirement: number | null;
   dependents: number;
   marital_status: string | null;
+  /** joint household report — every figure above is the couple's combined
+   * position, and age/retirement_age are the PRIMARY client's */
+  household_mode?: boolean;
+  partner_age?: number | null;
+  partner_retirement_age?: number | null;
   // unified economic assumptions
   assumptions: BaselineAssumptions;
   // filled back by earlier modules for later ones

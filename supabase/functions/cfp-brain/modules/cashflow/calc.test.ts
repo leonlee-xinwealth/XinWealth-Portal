@@ -50,12 +50,26 @@ Deno.test("no recurring income flags insufficient_data without throwing", () => 
 Deno.test("asset transfers surface separately, never inside expense breakdown", () => {
   const d = det({
     cashflow: [
-      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
-      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household" },
-      { direction: "outflow", amount: 2000, frequency: "monthly", category: "invest_transfer", linked_asset_id: "a-1" },
+      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 2000, frequency: "monthly", category: "unit_trust_contribution", period_month: "2026-06-01" },
     ],
   });
   assertEquals(d.monthly_expenses, 6000);
   assertEquals(d.asset_transfers_monthly, 2000);
-  assertEquals(d.expense_breakdown.some((e) => e.category === "invest_transfer"), false);
+  assertEquals(d.expense_breakdown.some((e) => e.category === "unit_trust_contribution"), false);
+});
+
+Deno.test("the expense breakdown adds up to the total even when months hold different items", () => {
+  const d = det({
+    cashflow: [
+      { direction: "inflow", amount: 5000, frequency: "monthly", category: "salary_basic", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 1000, frequency: "monthly", category: "groceries", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 200, frequency: "monthly", category: "utilities", period_month: "2026-07-01" },
+    ],
+  });
+  const sum = d.expense_breakdown.reduce((s, e) => s + e.monthly_amount, 0);
+  assertEquals(sum, d.monthly_expenses);
+  const shares = d.expense_breakdown.reduce((s, e) => s + (e.share ?? 0), 0);
+  assert(shares <= 1.0001, `shares add to ${shares}`);
 });

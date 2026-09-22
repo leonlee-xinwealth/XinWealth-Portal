@@ -7,6 +7,16 @@ export const safeNumber = (v: any): number => {
   return 0;
 };
 
+/**
+ * @deprecated for cashflow_entries. A row there records ONE MONTH'S actual
+ * amount, so converting it to a "monthly rate" and summing across rows treats
+ * June's and July's figures as two concurrent commitments — the mistake that
+ * made a real client's RM 1,548 of spending read as RM 128. Use
+ * `annualizeCashflow` from supabase/functions/_shared/cashflow/periods.ts.
+ *
+ * Still correct for genuinely recurring commitments held elsewhere, such as an
+ * insurance premium with its own frequency.
+ */
 export const toMonthly = (amount: number, frequency?: string | null): number => {
   const f = (frequency || 'monthly').toLowerCase();
   const map: Record<string, number> = {

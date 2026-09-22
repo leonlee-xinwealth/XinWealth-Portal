@@ -5,6 +5,7 @@
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
 import { fvMonthly } from "../goals/calc.ts";
+import { allocationBucketOf, type AllocationBucket as TaxonomyBucket } from "../../../_shared/taxonomy/balance.ts";
 
 export type AllocationBucket = "equity" | "bond" | "cash" | "alternatives";
 
@@ -77,17 +78,15 @@ export function computeInvestment(
   const riskBandDefaulted = !riskProfile || !MODEL_PORTFOLIOS[riskProfile];
   const band = !riskBandDefaulted ? riskProfile! : "balanced";
 
-  const equity = f.assets
-    .filter((a) => a.asset_type === "stock" || a.asset_type === "etf" || a.asset_type === "unit_trust")
-    .reduce((s, a) => s + (a.current_value ?? 0), 0) +
+  const sumBucket = (bucket: TaxonomyBucket) =>
+    f.assets
+      .filter((a) => allocationBucketOf(a.asset_type) === bucket)
+      .reduce((s, a) => s + (a.current_value ?? 0), 0);
+  const equity = sumBucket("equity") +
     f.holdings.reduce((s, h) => s + (h.market_value ?? 0), 0);
-  const bond = f.assets
-    .filter((a) => a.asset_type === "bond")
-    .reduce((s, a) => s + (a.current_value ?? 0), 0);
+  const bond = sumBucket("bond");
   const cash = b.liquid_assets_after_emergency;
-  const alternatives = f.assets
-    .filter((a) => a.asset_type === "business")
-    .reduce((s, a) => s + (a.current_value ?? 0), 0);
+  const alternatives = sumBucket("alternatives");
 
   const amounts: Record<AllocationBucket, number> = { equity, bond, cash, alternatives };
   const investableTotal = BUCKETS.reduce((s, k) => s + amounts[k], 0);

@@ -4,7 +4,7 @@
 // back into the content by code AFTER the LLM call.
 
 import type { CfpData, CfpModule, FinancialBaseline } from "../../types.ts";
-import { budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
+import { BUDGET_LINE, budgetInstructionLines, sectionBudgetContext } from "../../budgetContext.ts";
 import { computeGoals, type GoalsDet } from "./calc.ts";
 
 export interface GoalsNarrative {
@@ -13,13 +13,27 @@ export interface GoalsNarrative {
     action_plan: string;
     expected_completion_date: string;
     remarks: string;
+    /** status dot on the report's executive-summary page; absent on sections
+     *  generated before the slot existed, which render without a dot */
+    severity?: Severity;
   };
   overview: string;
   goal_commentaries: Array<{ index: number; commentary: string }>;
   recommendations: Array<{ title: string; detail: string; priority: number }>;
+  /** P28 目标资金方案 */
+  solution?: NarrativeCard;
 }
 
 import type { GoalDet } from "./calc.ts";
+import { promptJson } from "../../promptSafety.ts";
+import {
+  severityInstructionLines,
+  severitySchema,
+  solutionInstructionLines,
+  solutionSchema,
+  type NarrativeCard,
+  type Severity,
+} from "../../narrativeBlocks.ts";
 
 export interface GoalsSectionContent extends GoalsDet {
   version: 1;
@@ -43,15 +57,18 @@ const RESPONSE_SCHEMA = {
         action_plan: { type: "STRING" },
         expected_completion_date: { type: "STRING" },
         remarks: { type: "STRING" },
+        severity: severitySchema(),
       },
       required: [
         "findings",
         "action_plan",
         "expected_completion_date",
         "remarks",
+        "severity",
       ],
     },
     overview: { type: "STRING" },
+    solution: solutionSchema(),
     goal_commentaries: {
       type: "ARRAY",
       items: {
@@ -81,6 +98,7 @@ const RESPONSE_SCHEMA = {
     "overview",
     "goal_commentaries",
     "recommendations",
+    "solution",
   ],
 };
 
@@ -108,7 +126,7 @@ export function buildGoalsPrompt(det: GoalsDet, b: FinancialBaseline): string {
       on_track: g.on_track,
     })),
     total_required_monthly: det.total_required_monthly,
-    budget_context: sectionBudgetContext(b, "goals"),
+    budget_context: sectionBudgetContext(b, BUDGET_LINE.goals_planning),
   };
   return [
     "You are the analysis assistant of a licensed financial advisor in Malaysia,",
@@ -145,8 +163,10 @@ export function buildGoalsPrompt(det: GoalsDet, b: FinancialBaseline): string {
     "",
     "Tone: professional, plain English, human. Draft for the advisor to edit.",
     "",
+    ...solutionInstructionLines("goal funding"),
+    ...severityInstructionLines(),
     "Goals JSON (sole source of numbers):",
-    JSON.stringify(context),
+    promptJson(context),
   ].join("\n");
 }
 

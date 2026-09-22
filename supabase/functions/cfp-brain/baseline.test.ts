@@ -18,9 +18,9 @@ export function makeCfpData(overrides: Partial<CfpData> = {}): CfpData {
       has_prs_account: false,
     },
     cashflow: [
-      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
-      { direction: "inflow", amount: 12000, frequency: "annual", category: "bonus" },
-      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household" },
+      { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+      { direction: "inflow", amount: 12000, frequency: "annual", category: "bonus", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 6000, frequency: "monthly", category: "household", period_month: "2026-06-01" },
     ],
     assets: [
       { asset_type: "savings", current_value: 30000, cost_value: null, ownership_type: null },
@@ -138,14 +138,14 @@ Deno.test("asset transfers are excluded from income and expenses (小会计口�
   const b = computeBaseline(
     makeCfpData({
       cashflow: [
-        { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary" },
-        { direction: "outflow", amount: 6000, frequency: "monthly", category: "household" },
-        // transfer into own investment account — savings, not spending
-        { direction: "outflow", amount: 2000, frequency: "monthly", category: "invest", linked_asset_id: "a-1" },
-        // transfer from FD back to checking — not income
-        { direction: "inflow", amount: 5000, frequency: "monthly", category: "fd_out", linked_asset_id: "a-2" },
-        // loan repayment stays a true expense
-        { direction: "outflow", amount: 1500, frequency: "monthly", category: "mortgage", linked_liability_id: "l-1" },
+        { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+        { direction: "outflow", amount: 6000, frequency: "monthly", category: "household", period_month: "2026-06-01" },
+        // saving into a fund — a transfer by category, not spending
+        { direction: "outflow", amount: 2000, frequency: "monthly", category: "unit_trust_contribution", period_month: "2026-06-01" },
+        // drawing on an FD — a transfer by category, not income
+        { direction: "inflow", amount: 5000, frequency: "monthly", category: "savings_withdrawal", period_month: "2026-06-01" },
+        // the mortgage installment is 'split' and still counts as spending (P1)
+        { direction: "outflow", amount: 1500, frequency: "monthly", category: "mortgage_installment", linked_liability_id: "l-1", period_month: "2026-06-01" },
       ],
     }),
     {},
@@ -154,4 +154,83 @@ Deno.test("asset transfers are excluded from income and expenses (小会计口�
   assertEquals(b.annual_income, 120000);
   assertEquals(b.annual_expenses, (6000 + 1500) * 12);
   assert(b.baseline_notes.some((n) => n.includes("资产转移")));
+});
+
+// ---------------------------------------------------------------------------
+// 现金流基准 — which months of actuals the whole plan is annualised from.
+//
+// A row records ONE MONTH'S actual amount. Turning a set of months into an
+// annual run-rate is the single assumption every ratio in the report rests on,
+// so it is chosen explicitly and stated in the notes.
+// ---------------------------------------------------------------------------
+
+/** Lee Wei Qi as recorded: five expenses in June, one more added in July. */
+const TWO_MONTHS = makeCfpData({
+  cashflow: [
+    { direction: "inflow", amount: 2577, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+    { direction: "outflow", amount: 580, frequency: "monthly", category: "personal", period_month: "2026-06-01" },
+    { direction: "outflow", amount: 340, frequency: "monthly", category: "transportation", period_month: "2026-06-01" },
+    { direction: "outflow", amount: 200, frequency: "monthly", category: "personal", period_month: "2026-06-01" },
+    { direction: "outflow", amount: 200, frequency: "monthly", category: "miscellaneous", period_month: "2026-06-01" },
+    { direction: "outflow", amount: 100, frequency: "monthly", category: "personal", period_month: "2026-06-01" },
+    { direction: "outflow", amount: 128, frequency: "monthly", category: "household", period_month: "2026-07-01" },
+  ],
+});
+
+Deno.test("no basis chosen: every recorded month of the latest year", () => {
+  const b = computeBaseline(TWO_MONTHS, {}, NOW);
+  assertEquals(b.cashflow_basis, { year: 2026, from_month: 6, to_month: 7 });
+  // (1420 + 128) / 2 months
+  assertEquals(b.monthly_essential_expenses, 774);
+});
+
+Deno.test("the advisor can narrow the basis to the month that is complete", () => {
+  // June holds five expense rows and July one. No formula can tell a lean month
+  // from a half-entered one, so this is a decision, not a calculation.
+  const b = computeBaseline(TWO_MONTHS, {
+    cashflow_basis: { year: 2026, from_month: 6, to_month: 6 },
+  }, NOW);
+  assertEquals(b.monthly_essential_expenses, 1420);
+  assertEquals(b.annual_expenses, 17040);
+  assertEquals(b.monthly_income, 2577);
+});
+
+Deno.test("the basis is stated in the notes, because every ratio rests on it", () => {
+  const b = computeBaseline(TWO_MONTHS, {
+    cashflow_basis: { year: 2026, from_month: 1, to_month: 12 },
+  }, NOW);
+  assert(b.baseline_notes.some((n) => n.includes("2026 年 1–12 月")), b.baseline_notes.join(" | "));
+  // A twelve-month window holding two months of data is a gap in the record.
+  // Saying so is the only honest option — dividing by twelve would report
+  // RM 129 of monthly spending against a real RM 1,548 across two months.
+  assert(
+    b.baseline_notes.some((n) => n.includes("仅 2 个月有记录")),
+    b.baseline_notes.join(" | "),
+  );
+  assertEquals(b.cashflow_basis_months, 12);
+  assertEquals(b.cashflow_months_with_data, [6, 7]);
+  assertEquals(b.monthly_essential_expenses, 774);
+});
+
+Deno.test("an annual bonus is counted once, not folded into the monthly average", () => {
+  // Lim Wei Jian's RM 18,400 bonus sits in March with frequency 'annual'. It is
+  // real 2026 income against a June–July basis, and averaging it into a month
+  // then multiplying by twelve would invent RM 220,800.
+  const f = makeCfpData({
+    cashflow: [
+      { direction: "inflow", amount: 18400, frequency: "annual", category: "bonus", period_month: "2026-03-01" },
+      { direction: "inflow", amount: 6000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+      { direction: "inflow", amount: 4000, frequency: "monthly", category: "salary", period_month: "2026-07-01" },
+    ],
+  });
+  const b = computeBaseline(f, { cashflow_basis: { year: 2026, from_month: 6, to_month: 7 } }, NOW);
+  assertEquals(b.annual_income, 78400); // 5,000 avg x 12 + 18,400
+});
+
+Deno.test("a client with no cashflow at all says so rather than reporting zero silently", () => {
+  const b = computeBaseline(makeCfpData({ cashflow: [] }), {}, NOW);
+  assertEquals(b.cashflow_basis, null);
+  assertEquals(b.annual_income, 0);
+  assertEquals(b.annual_expenses, 0);
+  assert(b.baseline_notes.some((n) => n.includes("未录得任何月份")), b.baseline_notes.join(" | "));
 });
