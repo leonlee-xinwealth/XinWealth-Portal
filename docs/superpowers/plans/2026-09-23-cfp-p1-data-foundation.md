@@ -1132,7 +1132,7 @@ const OUTFLOW_NOTE_RULES: readonly NoteRule[] = [
   { to: "tuition_enrichment", pattern: /upgrading class|tuition|enrichment|补习/i },
   { to: "parents_allowance", pattern: /parent|mother|father|\bmum\b|\bdad\b|senior living|父母/i },
   { to: "other_dependants", pattern: /dependant/i },
-  { to: "pet_care", pattern: /\bpet/i },
+  { to: "pet_care", pattern: /\bpets?\b|宠物/i },
   { to: "fitness", pattern: /gym|fitness|sport|健身/i },
   { to: "dining_out", pattern: /dining|restaurant|food delivery|foodpanda|外食/i },
   { to: "entertainment", pattern: /entertain|movie|cinema|karaoke|娱乐/i },
