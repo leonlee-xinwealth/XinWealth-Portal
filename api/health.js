@@ -1,4 +1,6 @@
 import { applyCors, configError, getAuthUser, supabaseAdmin } from './_lib/supabase.js';
+import { assetCategory, cashflowLabel } from './_lib/portalLabels.js';
+import { categoryLabel, isTransferCategory } from './_lib/taxonomy.mjs';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -24,33 +26,6 @@ const toMs = (dateStr) => {
 };
 
 const record = (id, fields) => ({ id, record_id: id, fields });
-
-const assetCategory = (assetType) => {
-  switch (assetType) {
-    case 'savings': return 'Savings/Current Account';
-    case 'fixed_deposit': return 'Fixed Deposit';
-    case 'money_market': return 'Money Market Fund For Savings';
-    case 'epf_account_1': return 'EPF Account 1 (Akaun Persaraan)';
-    case 'epf_account_2': return 'EPF Account 2 (Akaun Sejahtera)';
-    case 'epf_account_3': return 'EPF Account 3 (Akaun Fleksibel)';
-    default: return assetType || 'Other';
-  }
-};
-
-const cashflowLabel = (direction, category) => {
-  const c = String(category || '').toLowerCase();
-  if (direction === 'inflow') {
-    if (c.includes('bonus')) return 'Annual Bonus';
-    if (c.includes('rental')) return 'Rental Income';
-    if (c.includes('dividend')) return 'Dividend Income';
-    if (c.includes('salary')) return 'Salary';
-    return category || 'Income';
-  }
-  if (c.includes('tax')) return 'Income Tax Expense';
-  if (c.includes('travel') || c.includes('vacation')) return 'Vacation/ Travel';
-  if (c.includes('loan')) return 'Loan Repayment';
-  return category || 'Expense';
-};
 
 export default async function handler(req, res) {
   applyCors(res);
@@ -139,7 +114,9 @@ export default async function handler(req, res) {
   });
 
   const incomeRecords = (cashflows || [])
-    .filter((c) => c.direction === 'inflow')
+    // transfers (selling an asset, drawing on savings, a loan drawdown) are the
+    // client's own money changing form — not income (spec 2026-09-22 §1)
+    .filter((c) => c.direction === 'inflow' && !isTransferCategory(c.category, 'inflow'))
     .map((c) => {
       const date = c.period_month || c.created_at;
       const cat = cashflowLabel('inflow', c.category);
@@ -154,12 +131,13 @@ export default async function handler(req, res) {
     });
 
   const expenseRecords = (cashflows || [])
-    .filter((c) => c.direction === 'outflow')
+    // saving and investing is not spending
+    .filter((c) => c.direction === 'outflow' && !isTransferCategory(c.category, 'outflow'))
     .map((c) => {
       const date = c.period_month || c.created_at;
       const type = cashflowLabel('outflow', c.category);
       return record(c.id, {
-        'Category': c.category || '',
+        'Category': categoryLabel(c.category, 'en'),
         'Type': type,
         'Description': c.source_note || '',
         'Amount': Number(c.amount || 0),

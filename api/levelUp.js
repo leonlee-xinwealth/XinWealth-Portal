@@ -1,4 +1,7 @@
 import { applyCors, configError, getAuthUser, supabaseAdmin } from './_lib/supabase.js';
+import {
+  assetTypeMeta, classifyCashflowRow, levelUpAsset, levelUpLiabilityType, liquidityLevel,
+} from './_lib/taxonomy.mjs';
 
 const parseAmount = (val) => {
   if (val == null || val === '') return 0;
@@ -12,31 +15,6 @@ const periodMonth = (targetMonth, targetYear) => {
   const month = Number.isFinite(m) && m >= 0 && m <= 11 ? m : new Date().getMonth();
   const year = Number.isFinite(y) ? y : new Date().getFullYear();
   return new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
-};
-
-const assetTypeFromCategory = (cat) => {
-  const c = String(cat || '').toLowerCase();
-  if (c.includes('fixed')) return 'fixed_deposit';
-  if (c.includes('money market')) return 'money_market';
-  if (c.includes('cash') || c.includes('savings')) return 'savings';
-  if (c.includes('epf')) return 'epf_account_1';
-  if (c.includes('property')) return 'property';
-  if (c.includes('vehicle')) return 'vehicle';
-  if (c.includes('etf')) return 'etf';
-  if (c.includes('stock')) return 'stock';
-  if (c.includes('unit trust')) return 'unit_trust';
-  if (c.includes('bond')) return 'bond';
-  return 'other';
-};
-
-const liabilityTypeFromCategory = (cat) => {
-  const c = String(cat || '').toLowerCase();
-  if (c.includes('mortgage') || c.includes('property')) return 'mortgage';
-  if (c.includes('vehicle') || c.includes('car')) return 'car_loan';
-  if (c.includes('study')) return 'study_loan';
-  if (c.includes('personal')) return 'personal_loan';
-  if (c.includes('renovation')) return 'renovation_loan';
-  return 'other';
 };
 
 export default async function handler(req, res) {
@@ -79,39 +57,35 @@ export default async function handler(req, res) {
   const monthDate = periodMonth(targetMonth, targetYear);
   const clientId = clientRow.id;
 
-  const cashflowRows = [];
-  for (const i of incomes || []) {
-    cashflowRows.push({
-      client_id: clientId,
-      direction: 'inflow',
-      amount: parseAmount(i.amount),
-      currency: 'MYR',
-      period_month: monthDate,
-      is_recurring: true,
-      frequency: 'monthly',
-      category: i.category || 'Income',
-      source_note: i.description || null
+  // The form's option labels ('Household', 'Salary', …) are read into the chart
+  // of accounts; writing them raw failed the cashflow_categories foreign key.
+  // cashflow_entries.amount is CHECK (amount > 0), so empty lines are dropped.
+  const cashRow = (direction, label, description, amount) => {
+    const placed = classifyCashflowRow({
+      direction, category: label, source_note: description || null,
+      frequency: 'monthly', is_recurring: true,
     });
-  }
-  for (const e of expenses || []) {
-    cashflowRows.push({
-      client_id: clientId,
-      direction: 'outflow',
-      amount: parseAmount(e.amount),
-      currency: 'MYR',
-      period_month: monthDate,
-      is_recurring: true,
-      frequency: 'monthly',
-      category: e.type || e.category || 'Expense',
-      source_note: e.description || null
-    });
-  }
+    return {
+      client_id: clientId, direction, amount, currency: 'MYR', period_month: monthDate,
+      is_recurring: placed.is_recurring ?? true, frequency: placed.frequency || 'monthly',
+      category: placed.code, source_note: description || null,
+      needs_review: placed.needs_review, review_reason: placed.review_reason,
+    };
+  };
+  const cashflowRows = [
+    ...(incomes || []).map((i) => cashRow('inflow', i.category || 'Other', i.description, parseAmount(i.amount))),
+    ...(expenses || []).map((e) => cashRow('outflow', e.type || e.category || 'Other Expenses', e.description, parseAmount(e.amount))),
+  ].filter((r) => r.amount > 0);
 
   const assetRows = [];
   for (const a of assets || []) {
+    const placed = levelUpAsset(a.category, a.description);
     assetRows.push({
       client_id: clientId,
-      asset_type: assetTypeFromCategory(a.category),
+      asset_type: placed.asset_type,
+      purpose: assetTypeMeta(placed.asset_type)?.default_purpose ?? null,
+      needs_review: placed.needs_review,
+      review_reason: placed.review_reason,
       name: a.description || a.category || 'Asset',
       institution: null,
       account_number: null,
@@ -121,14 +95,18 @@ export default async function handler(req, res) {
       currency: 'MYR',
       valuation_date: monthDate,
       acquired_at: null,
-      liquidity: 'medium',
+      liquidity: liquidityLevel(placed.asset_type),
       metadata: { source: 'level_up', category_label: a.category || null }
     });
   }
   for (const inv of investments || []) {
+    const placed = levelUpAsset(inv.category, inv.description);
     assetRows.push({
       client_id: clientId,
-      asset_type: assetTypeFromCategory(inv.category),
+      asset_type: placed.asset_type,
+      purpose: assetTypeMeta(placed.asset_type)?.default_purpose ?? null,
+      needs_review: placed.needs_review,
+      review_reason: placed.review_reason,
       name: inv.description || inv.category || 'Investment',
       institution: null,
       account_number: null,
@@ -138,7 +116,7 @@ export default async function handler(req, res) {
       currency: 'MYR',
       valuation_date: monthDate,
       acquired_at: null,
-      liquidity: 'medium',
+      liquidity: liquidityLevel(placed.asset_type),
       metadata: { source: 'level_up', category_label: inv.category || null, is_investment: true }
     });
   }
@@ -147,7 +125,7 @@ export default async function handler(req, res) {
   for (const l of liabilities || []) {
     liabilityRows.push({
       client_id: clientId,
-      liability_type: liabilityTypeFromCategory(l.category),
+      liability_type: levelUpLiabilityType(l.category),
       name: l.description || l.category || 'Liability',
       lender: null,
       original_principal: null,
