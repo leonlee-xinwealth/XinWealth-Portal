@@ -70,7 +70,7 @@
 | `recurrence` | `recurring` / `irregular` / `one_off` | irregular = 每年固定会发生但不是每月（路税、旅游）；one_off = 不计入经常性月均和比例 |
 | `fixed_variable` | `fixed` / `variable` | 仅 outflow |
 | `need_want` | `need` / `want` | 仅生活开销（O4–O8） |
-| `link_to` | `asset` / `liability` / `policy` / `none` | 必须或建议关联的对象 |
+| `link_to` | `asset` / `liability` / `policy` / `none` | 必须或建议关联的对象。只表示关联对象，**不决定**是否转移；是否转移只看分类的 `wealth_effect` |
 | `auto_generated` | bool | 由负债、保单或薪水自动生成，不允许手动新增 |
 
 **每一组都有一个 `<group>_other` 兜底分类**（例如 `housing_other`），用来接住无法细分的旧数据和少见项目。
@@ -222,9 +222,11 @@ income_tax 所得税 PCB/CP500（fixed）· socso_eis SOCSO/EIS（fixed，auto_g
 | 大类 | type |
 |---|---|
 | **A 流动资产**（算入紧急基金） | cash_on_hand 现金 · savings 储蓄/往来户口 · fixed_deposit 定期 · money_market 货币市场基金 · ewallet 电子钱包 · foreign_currency 外币存款 |
-| **B 退休专户**（锁定） | epf_persaraan（原 epf_account_1）· epf_sejahtera（原 epf_account_2）· epf_fleksibel（原 epf_account_3）· prs |
-| **C 投资资产** | stock 股票（`market` 标签：bursa/us/hk/other）· etf · unit_trust 单位信托 · bond_sukuk 债券/伊斯兰债券 · reit · asnb ASB/ASM · tabung_haji · gold 黄金/贵金属 · crypto · forex · investment_property 投资房产 · land 土地 · business_equity 企业股权 · receivable 借出的钱 · sspn · investment_asset_other |
+| **B 退休专户**（锁定） | epf_account_1 退休户口（Persaraan）· epf_account_2 福利户口（Sejahtera）· epf_account_3 灵活户口（Fleksibel）· prs |
+| **C 投资资产** | stock 股票（`market` 标签：bursa/us/hk/other）· etf · unit_trust 单位信托 · bond 债券/伊斯兰债券 · reit · asnb ASB/ASM · tabung_haji · gold 黄金/贵金属 · crypto · forex · investment_property 投资房产 · land 土地 · business 企业股权 · receivable 借出的钱 · sspn · other 其他投资资产 |
 | **D 自用资产** | own_residence 自住房 · vehicle 车 · jewelry 珠宝 · collectibles 收藏品 · personal_asset_other |
+
+**code 沿用线上 enum 现有拼写**：`epf_account_1/2/3`、`bond`、`business`、`other` 只改显示名称，不改 code。原因：Postgres enum 改名会让所有已部署的读取方同时失效，而边缘函数和 Vercel 是分开部署的。`property` 只保留给旧数据（显示为"房产（待确认用途）"，按自用资产计），新数据用 `own_residence` / `investment_property`。
 
 - `purpose`：`personal_use` / `income_producing` / `investment`，每个 type 都有默认值，可以覆盖。例如 vehicle 默认 personal_use，跑 Grab 的车改为 income_producing。
 - 共同字段：当前价值、成本、估值日期、`ownership_pct`（夫妻共有，默认 100）、关联负债、关联现金流。
@@ -302,7 +304,7 @@ A 类流动资产和 B 类退休专户不贴标签（它们的收益在利息或
 
 **5.4 退休充足度**
 - 沿用 `supabase/functions/cfp-brain/modules/retirement/calc.ts`。
-- 退休资金来源只算 B 类和 C 类。
+- 退休资金来源 = B 类 + C 类中可提取变现的金融资产（股票、ETF、单位信托、REIT、债券、ASNB、朝圣基金、黄金、加密货币、外汇）。投资房以净租金计入退休收入流；土地、企业股权、借出款、SSPN（教育专用）、未识别的"其他"不计入本金。
 - 投资房默认把净租金当作退休收入流；除非标记为"计划出售"，否则不把房价计入退休资金。
 - D 类不计入。
 
@@ -333,7 +335,7 @@ A 类流动资产和 B 类退休专户不贴标签（它们的收益在利息或
 | 阶段 | 内容 |
 |---|---|
 | P0 | 本文件 + 给开发者的分类清单页面 |
-| P1 数据地基 | 补齐线上表的建表 migration；按第 3 节重建 `cashflow_categories`（增加属性字段）；扩充 asset/liability enum，加上 `purpose`、`ownership_pct`、`has_epf`；流动性只保留一个函数；按附录 A 映射旧数据；修正 KYC/LevelUp 写入路径 |
+| P1 数据地基 | 线上核心表结构参考快照 `supabase/schema/live-core-tables.sql`（可重放的 migration 链另立项）；按第 3 节重建 `cashflow_categories`（增加属性字段）；扩充 asset/liability enum，加上 `purpose`、`ownership_pct`、`has_epf`；流动性只保留一个函数；按附录 A 映射旧数据；修正 KYC/LevelUp 写入路径 |
 | P2 单一数据源联动 | 常设项目的频率和生效日期、版本机制；负债/保单/薪水自动生成行（D1、D2）；资产持有成本关联；关联选择器；消除重复计算 |
 | P3 资产表现 & 投资组合 | 资产质量 2×2；三套投资存储合并为一套；持仓视图，对照 suitability 风险等级 |
 | P4 复检与监控 | 季度/年度复检流程，`asset_valuations`，计划 vs 实际，对账，监控面板和提醒 |
@@ -371,7 +373,7 @@ A 类流动资产和 B 类退休专户不贴标签（它们的收益在利息或
 - 匹配不到、或一行含两种性质的（例如"车贷+油费"），进入顾问的"待分类"清单，不自动猜测。
 - 现有 `salary` 行不知道是税前还是实拿：迁移后先当作实拿，`has_epf = null`（待确认），下一次复检由顾问确认。
 
-**现金流**（线上 `cashflow_categories` 的 21 个 code）。KYC 子项目存在 `source_note` 里，能匹配就用它细分，否则落进该组的兜底分类。
+**现金流**（线上 `cashflow_categories` 的 20 个 code）。KYC 子项目存在 `source_note` 里，能匹配就用它细分，否则落进该组的兜底分类。
 
 | 旧 code | 新 code |
 |---|---|
@@ -396,7 +398,7 @@ A 类流动资产和 B 类退休专户不贴标签（它们的收益在利息或
 | miscellaneous | 按 note：Medical Cost→health_medical · 其余→other_expense |
 | other_expense | 按 note：Loan Repayment→同 loan_repayment 规则 · 其余→other_expense |
 
-**资产**：epf_account_1/2/3 → epf_persaraan/sejahtera/fleksibel · bond → bond_sukuk · business → business_equity · property → 按 KYC 来源（"own stay"→own_residence，"investment purpose"→investment_property），无法判断的标记"待顾问确认" · other → 按名称关键词（gold/黄金、crypto、forex、ASB/ASNB、Tabung Haji）细分，其余→investment_asset_other · 其余 type 不变。
+**资产**：epf_account_1/2/3、bond、business 保持 code 不变（只改显示名称） · property → 按 KYC 来源（"own stay"→own_residence，"investment purpose"→investment_property），无法判断的标记"待顾问确认" · other → 按名称关键词（gold/黄金、crypto、forex、ASB/ASNB、Tabung Haji）细分，其余保持 other 并标记待确认 · 其余 type 不变。
 
 **负债**：现有 8 个 type 全部保留，新增第 3.4 节所列的 type。
 
