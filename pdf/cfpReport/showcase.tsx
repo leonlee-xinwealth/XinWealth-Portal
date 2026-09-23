@@ -79,6 +79,13 @@ const CASHFLOW = {
     need_low: 36_000, need_high: 72_000, actual: 96_000,
     months_covered: 8, shortfall: 0, status: "sufficient",
   },
+  // P6 决策 4 (one_off_items) is exercised by the selector's own unit tests
+  // (__tests__/cashflow.test.ts) rather than here — CashflowDetail is
+  // already dense enough with the two derived items below that one more
+  // line (even at the compact row weight) tips the fixed 29-page template
+  // onto an extra physical sheet. Not worth a knife's-edge fit that could
+  // flip on font-metric differences between environments.
+  one_off_items: [],
 };
 
 const INSURANCE = {
@@ -105,6 +112,23 @@ const INSURANCE = {
       { key: "ci", label: "重疾保障", need: 432_000, covered: 150_000, gap: 282_000 },
       { key: "medical", label: "医疗保障", flag_only: true, has_cover: true },
     ],
+    // P5 决策 1: the six-category breakdown alongside the legacy `gaps`
+    // above — RM 100,000 of the life cover is a group policy, so
+    // excluding_group differs and the report gets a callout line.
+    death: { need: 2_511_500, cover: 300_000, gap: 2_211_500, notes: ["含团保，离职即失效 / Includes group-employer cover, which lapses once employment ends"] },
+    tpd: { need: 2_511_500, cover: 300_000, gap: 2_211_500, notes: ["假设寿险含 TPD，保单未单独列明全残保障 / Assumes the life plan's sum assured also covers TPD (no separate TPD benefit on file)"] },
+    ci: { need: 432_000, cover: 150_000, gap: 282_000, notes: [] },
+    ci_early_cover: { cover: 0, notes: ["系统未单独记录早期/晚期重疾赔付比例，如保单含此项请人工核对 / Early-stage critical illness payout isn't tracked separately — verify manually if the policy includes one"] },
+    medical: { cover: 0, notes: [], has_cover: true, annual_limit: 500_000, low_limit: true, limit_unknown: false },
+    pa: { cover: 0, notes: [] },
+    excluding_group: {
+      death: { need: 2_511_500, cover: 200_000, gap: 2_311_500, notes: [] },
+      tpd: { need: 2_511_500, cover: 200_000, gap: 2_311_500, notes: [] },
+      ci: { need: 432_000, cover: 150_000, gap: 282_000, notes: [] },
+      ci_early_cover: { cover: 0, notes: [] },
+      medical: { cover: 0, notes: [], has_cover: true, annual_limit: 500_000, low_limit: true, limit_unknown: false },
+      pa: { cover: 0, notes: [] },
+    },
   },
 };
 
@@ -237,6 +261,47 @@ const DATA: CfpReportData = {
     solvency_ratio: 0.2742,
     savings_ratio: 0.3103,
     debt_service_ratio: 0.2840,
+    // P2b 决策 1/6 — the plan basis, statutory EPF/SOCSO-EIS and the
+    // installments/premiums/statutory items cfp-brain folded in automatically.
+    cashflow_source: "items",
+    items_as_of: "2026-08-01",
+    monthly_employee_epf: 1_760,
+    monthly_employer_epf: 2_080,
+    monthly_socso_eis: 112,
+    annual_disposable_surplus: 32_880,
+    monthly_principal: 1_150,
+    derived_items: [
+      {
+        key: "liability:mortgage-1", source_type: "liability", source_id: "mortgage-1",
+        source_name: "住宅房贷", category: "mortgage_installment", direction: "outflow",
+        monthly_amount: 4_200, interest_monthly: 3_050, principal_monthly: 1_150,
+        estimated: [], warnings: [],
+      },
+      {
+        key: "statutory:epf_employee", source_type: "statutory", source_id: null,
+        source_name: "EPF（雇员）", category: "epf_employee", direction: "outflow",
+        monthly_amount: 1_760, interest_monthly: 0, principal_monthly: 0,
+        estimated: ["statutory_rate"], warnings: ["按法定比例估算"],
+      },
+    ],
+    // P3 决策 3 — per-asset 2×2 (自住房产 alone gets a labeled quadrant; the
+    // other assets are class A/B, which never get one).
+    asset_quality: {
+      assets: [
+        {
+          asset_id: "asset-property-1", asset_class: "D", quadrant: "appreciating_cash_consuming",
+          net_cash_flow_monthly: -4_200, linked_items: [], linked_liabilities: [],
+          value_change_annual: 15_000, value_change_source: "history", total_return_annual: -35_400,
+          return_pct: -0.0708, notes: [],
+        },
+      ],
+      by_quadrant: {
+        productive: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+        yielding_depreciating: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+        appreciating_cash_consuming: { count: 1, value: 500_000, net_cash_flow_monthly: -4_200 },
+        consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+      },
+    },
   },
   sections: [
     { section_type: "retirement_planning", status: "approved", content: RETIREMENT },
@@ -253,7 +318,7 @@ const DATA: CfpReportData = {
     { asset_type: "epf_account_1", name: "EPF 户口一", current_value: 320_000 },
     { asset_type: "stock", name: "股票组合", current_value: 87_000 },
     { asset_type: "unit_trust", name: "信托基金", current_value: 60_000 },
-    { asset_type: "property", name: "自住房产", current_value: 500_000 },
+    { asset_type: "property", name: "自住房产", current_value: 500_000, id: "asset-property-1" },
   ],
   suitability: SUITABILITY,
   liabilities: [

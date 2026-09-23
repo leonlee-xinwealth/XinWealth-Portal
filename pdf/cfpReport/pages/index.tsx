@@ -14,7 +14,7 @@ import {
 } from "../layout/chrome";
 import { RatioDial, zonesFor } from "../viz/Speedometer";
 import { DepletionLineChart, CurveLegend } from "../viz/LineChart";
-import { DataTable, money, compactMoneyAccounting } from "../viz/DataTable";
+import { DataTable, money, compactMoneyAccounting, type TableRow } from "../viz/DataTable";
 import { ConsequenceCard, SolutionCard } from "../viz/callouts";
 import { Donut, DonutLegend, foldTail } from "../viz/Donut";
 import { compactMoney } from "../viz/primitives";
@@ -28,9 +28,13 @@ import { selectRetirementCurves, selectRetirementTargets } from "../select/retir
 import {
   consequenceOf, retirementVisionOf, severityOf, solutionOf, swotOf,
 } from "../select/narrative";
-import { assetRows, liabilityRows, netWorthRows, selectBalanceTotals } from "../select/balanceSheet";
+import {
+  assetRows, liabilityRows, netWorthRows, selectBalanceTotals,
+  quadrantSummaryRows, selectAssetQuality,
+} from "../select/balanceSheet";
 import {
   selectCashflow, cashflowWaterfall, cashflowRows, expenseSlices,
+  autoItemRows, oneOffRows,
 } from "../select/cashflow";
 import {
   selectInsurance, needsRows, policyRows, premiumBurden, INSURANCE_GAP_KEYS,
@@ -530,6 +534,7 @@ export function Toc({ data }: CfpPageProps) {
 // --------------------------------------------------------------------------
 export function AssetsDetail({ data }: CfpPageProps) {
   const t = selectBalanceTotals(data);
+  const quality = selectAssetQuality(data);
   return (
     <PageFrame
       pageNumber={pageNumberOf("assets-detail")}
@@ -541,7 +546,11 @@ export function AssetsDetail({ data }: CfpPageProps) {
         headline={{ label: "资产总额", value: money(t.assets) }}
         columns={{ label: "项目", meta: "类别 / 占比", value: "金额" }}
         rows={assetRows(data)}
-        note="流动资产为可即时动用的现金与等价物，是紧急预备金的来源；退休资产（EPF / PRS）在法定年龄前无法自由支取，不计入流动性。"
+        note={
+          quality.hasData
+            ? "流动资产为可即时动用的现金与等价物，是紧急预备金的来源；退休资产（EPF / PRS）在法定年龄前无法自由支取，不计入流动性。投资/自用资产的类别栏另标注其现金流×增值象限（生财资产 / 收益但贬值 / 增值但吃现金 / 消耗型资产），详见下一页的资产象限盘点。"
+            : "流动资产为可即时动用的现金与等价物，是紧急预备金的来源；退休资产（EPF / PRS）在法定年龄前无法自由支取，不计入流动性。"
+        }
       />
     </PageFrame>
   );
@@ -620,14 +629,35 @@ export function CashflowOverview({ data }: CfpPageProps) {
       <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: SPACE.md }}>
         「资产转移」为从储蓄转入投资等自有资产的资金，不属于支出，故单列一步 —— 这也是月结余与银行户口变动不一致的原因。
       </Text>
-      {/* The annualisation basis is an assumption the client is entitled to
-          see: "RM 1,420 a month" means something different drawn from one
-          recorded month than from twelve. */}
-      {v.basisLabel && (
+      {/* The plan basis is an assumption the client is entitled to see: "RM
+          1,420 a month" means something different drawn from a standing plan
+          than from one recorded month of actuals. Prefer the new uniform
+          sentence; fall back to the old actuals-only wording for a baseline
+          written before cashflow_source existed. */}
+      {v.planBasisLine ? (
+        <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 3 }}>
+          {v.planBasisLine}
+        </Text>
+      ) : v.basisLabel && (
         <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 3 }}>
           {`本页收支按${v.basisLabel}的实际记录年化${
             v.basisHasGap ? "；该区间内部分月份无记录，月均按有记录的月份计算。" : "。"
           }`}
+        </Text>
+      )}
+
+      {/* P2b 决策 6: compact micro-text, not a padded panel — this page is
+          already tight (waterfall + donut), and these are footnote-weight
+          facts, not headline ones. */}
+      {v.employeeEpfMonthly > 0 && (
+        <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 3 }}>
+          {`雇员 EPF 供款 ${money(v.employeeEpfMonthly)}/月已计入储蓄（非支出，已从月支出中剔除）`}
+          {v.employerEpfMonthly > 0 ? `；雇主另计 ${money(v.employerEpfMonthly)}/月，不进入现金流，仅供净资产对账。` : "。"}
+        </Text>
+      )}
+      {v.disposableSurplusAnnual != null && (
+        <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 2 }}>
+          {`可支配年结余（扣除强制 EPF 储蓄后）${money(v.disposableSurplusAnnual)} —— 预算与目标规划真正可动用的部分。`}
         </Text>
       )}
     </PageFrame>
@@ -637,8 +667,30 @@ export function CashflowOverview({ data }: CfpPageProps) {
 // --------------------------------------------------------------------------
 // P7 现金流明细
 // --------------------------------------------------------------------------
+/** P7 附注: a single auto-included or one-off line, well below the full
+ *  DataTable's row weight — the main table above already runs the page close
+ *  to full, so this reuses the row DATA (`autoItemRows`/`oneOffRows`) without
+ *  the DataTable component's own padding/column-header overhead. */
+function CompactItemLine({ row }: { row: TableRow }) {
+  // Label and meta share ONE line (not stacked) — this block sits under an
+  // already page-filling table, so every extra line of height matters.
+  return (
+    <View style={{ flexDirection: "row", marginBottom: 1 }}>
+      <Text style={{ flex: 1, fontFamily: FONT.body, fontSize: TYPE.micro, color: T.text }}>
+        {row.label}
+        {row.meta ? <Text style={{ fontFamily: FONT.sans, color: T.faint }}>{`  ·  ${row.meta}`}</Text> : null}
+      </Text>
+      <Text style={{ fontFamily: FONT.serif, fontWeight: WEIGHT.medium, fontSize: TYPE.micro, color: T.blue }}>
+        {row.value}
+      </Text>
+    </View>
+  );
+}
+
 export function CashflowDetail({ data }: CfpPageProps) {
   const v = selectCashflow(data);
+  const autoRows = autoItemRows(v);
+  const oneOff = oneOffRows(v);
   return (
     <PageFrame
       pageNumber={pageNumberOf("cashflow-detail")}
@@ -653,6 +705,24 @@ export function CashflowDetail({ data }: CfpPageProps) {
         metaWidth={54}
         note="占比以各自分组的合计为基数。所有金额为月度口径；年度数字为月度乘以十二，不含一次性收支。"
       />
+
+      {autoRows.length > 0 && (
+        <View style={{ marginTop: 5 }}>
+          <Text style={{ fontFamily: FONT.sans, fontWeight: WEIGHT.bold, fontSize: TYPE.micro, color: T.blue, marginBottom: 1 }}>
+            自动计入项目
+          </Text>
+          {autoRows.map((r, i) => <CompactItemLine key={i} row={r} />)}
+        </View>
+      )}
+
+      {oneOff.length > 0 && (
+        <View style={{ marginTop: 5 }}>
+          <Text style={{ fontFamily: FONT.sans, fontWeight: WEIGHT.bold, fontSize: TYPE.micro, color: T.blue, marginBottom: 1 }}>
+            一次性收支（未计入以上数字）
+          </Text>
+          {oneOff.map((r, i) => <CompactItemLine key={i} row={r} />)}
+        </View>
+      )}
     </PageFrame>
   );
 }
@@ -664,6 +734,7 @@ export function BalanceOverview({ data }: CfpPageProps) {
   const t = selectBalanceTotals(data);
   const slices = t.assetGroups.map((g) => ({ label: g.zh, value: g.total }));
   const scale = Math.max(t.assets, t.liabilities) || 1;
+  const quadrantRows = quadrantSummaryRows(data);
   return (
     <PageFrame
       pageNumber={pageNumberOf("balance-overview")}
@@ -698,6 +769,18 @@ export function BalanceOverview({ data }: CfpPageProps) {
           <DonutLegend slices={slices} format={money} />
         </View>
       </View>
+
+      {quadrantRows.length > 0 && (
+        <View style={{ marginTop: SPACE.md }}>
+          <H2>资产象限盘点</H2>
+          <DataTable
+            columns={{ label: "象限", meta: "资产数 / 月净现金流", value: "资产总值" }}
+            rows={quadrantRows}
+            metaWidth={150}
+            note="现金流×增值两轴划出四象限：生财资产（现金流、价值双正）、收益但贬值（现金流为正、价值下滑，如出租的旧车）、增值但吃现金（价值上升但需持续投入，如未出租的房产）、消耗型资产（两者皆负）。流动与退休资产不参与此划分。"
+          />
+        </View>
+      )}
     </PageFrame>
   );
 }
@@ -803,18 +886,69 @@ export function InsuranceGap({ data }: CfpPageProps) {
     >
       <PageTitle zh="保障缺口与后果" en="Coverage Gap & Consequences" moduleNo={4} />
 
-      {v.gaps.map((g) => (
-        <CoverageGapBar
-          key={g.key}
-          label={g.label}
-          need={g.need}
-          covered={g.covered}
-          gap={g.gap}
-          flagOnly={g.flagOnly}
-          hasCover={g.hasCover}
-          format={money}
-        />
-      ))}
+      {v.categories ? (
+        <>
+          {/* P5 决策 1: 身故/TPD/重疾 carry an actual need figure. */}
+          <CoverageGapBar label={v.categories.death.label} need={v.categories.death.need} covered={v.categories.death.cover} gap={v.categories.death.gap} format={money} />
+          <CoverageGapBar label={v.categories.tpd.label} need={v.categories.tpd.need} covered={v.categories.tpd.cover} gap={v.categories.tpd.gap} format={money} />
+          <CoverageGapBar label={v.categories.ci.label} need={v.categories.ci.need} covered={v.categories.ci.cover} gap={v.categories.ci.gap} format={money} />
+
+          {/* 早期重疾/医药/意外 are cover-only — a compact strip of badges
+              rather than three more full-width bars. */}
+          <View style={{ flexDirection: "row", marginTop: SPACE.xs, marginBottom: SPACE.sm }}>
+            {[
+              { label: v.categories.ciEarlyCover.label, hasCover: v.categories.ciEarlyCover.cover > 0 },
+              {
+                label: v.categories.medical.label,
+                hasCover: v.categories.medical.hasCover,
+                sub: v.categories.medical.hasCover
+                  ? (v.categories.medical.lowLimit
+                    ? `年限额 ${money(v.categories.medical.annualLimit)}（偏低）`
+                    : v.categories.medical.limitUnknown
+                    ? "年限额未记录"
+                    : `年限额 ${money(v.categories.medical.annualLimit)}`)
+                  : undefined,
+                warn: v.categories.medical.hasCover && (v.categories.medical.lowLimit || v.categories.medical.limitUnknown),
+              },
+              { label: v.categories.pa.label, hasCover: v.categories.pa.cover > 0 },
+            ].map((b, i) => (
+              <View key={i} style={{ flex: 1, marginRight: i < 2 ? SPACE.sm : 0, backgroundColor: T.white, borderWidth: 0.75, borderColor: T.hairline, borderRadius: 6, padding: SPACE.sm }}>
+                <Text style={{ fontFamily: FONT.sans, fontWeight: WEIGHT.bold, fontSize: TYPE.micro, color: T.blue, marginBottom: 3 }}>
+                  {b.label}
+                </Text>
+                <Text style={{ fontFamily: FONT.sans, fontWeight: WEIGHT.medium, fontSize: TYPE.micro, color: b.warn ? STATUS.warn.fg : b.hasCover ? STATUS.good.fg : STATUS.bad.fg }}>
+                  {b.hasCover ? "已投保" : "未投保"}
+                </Text>
+                {b.sub && (
+                  <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 1 }}>
+                    {b.sub}
+                  </Text>
+                )}
+              </View>
+            ))}
+          </View>
+
+          {v.hasGroupCover && v.excludingGroup && (
+            <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginBottom: SPACE.sm }}>
+              {`不含团保（离职即失效）时：身故缺口 ${money(Math.max(0, (v.excludingGroup.death.need ?? 0) - v.excludingGroup.death.cover))}，`
+                + `重疾缺口 ${money(Math.max(0, (v.excludingGroup.ci.need ?? 0) - v.excludingGroup.ci.cover))}。`}
+            </Text>
+          )}
+        </>
+      ) : (
+        v.gaps.map((g) => (
+          <CoverageGapBar
+            key={g.key}
+            label={g.label}
+            need={g.need}
+            covered={g.covered}
+            gap={g.gap}
+            flagOnly={g.flagOnly}
+            hasCover={g.hasCover}
+            format={money}
+          />
+        ))
+      )}
 
       <View style={{ backgroundColor: T.white, borderWidth: 0.75, borderColor: T.hairline, borderRadius: 6, padding: SPACE.md, marginTop: SPACE.sm }}>
         <Text style={{ fontFamily: FONT.sans, fontWeight: WEIGHT.bold, fontSize: TYPE.caption, color: T.blue, marginBottom: SPACE.sm }}>
@@ -877,7 +1011,11 @@ export function InsurancePlan({ data }: CfpPageProps) {
         columns={{ label: "承保公司", meta: "险种", value: "保额" }}
         rows={policyRows(v)}
         metaWidth={86}
-        note="保额为身故/重疾赔付上限；医疗卡为实报实销，无固定保额，故不列示金额。"
+        note={
+          v.categories?.medical.hasCover
+            ? `保额为身故/重疾赔付上限；医疗卡为实报实销，无固定保额，故不列示金额。现有医疗卡年限额 ${money(v.categories.medical.annualLimit)}${v.categories.medical.lowLimit ? "（偏低，建议提升至 RM1,000,000 以上）" : v.categories.medical.limitUnknown ? "（未记录，建议核实）" : ""}。`
+            : "保额为身故/重疾赔付上限；医疗卡为实报实销，无固定保额，故不列示金额。"
+        }
       />
 
       {solution && (

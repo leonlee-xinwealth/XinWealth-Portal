@@ -27,6 +27,12 @@ export interface CfpReportAsset {
   current_value: number;
   /** joint reports only — which spouse the row belongs to */
   owner?: string;
+  /** P3: `assets.id` — matches this row against
+   *  `baseline.asset_quality.assets[].asset_id` for the per-asset 2×2
+   *  quadrant label. Optional: absent whenever the caller's query doesn't
+   *  select it, in which case the quadrant label simply doesn't print for
+   *  that row (no id, nothing to match). */
+  id?: string;
 }
 
 export interface CfpReportLiability {

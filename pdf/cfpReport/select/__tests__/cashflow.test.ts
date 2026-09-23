@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   selectCashflow, cashflowWaterfall, cashflowRows, expenseSlices,
+  autoItemRows, oneOffRows,
 } from "../cashflow";
 import { foldTail } from "../../viz/Donut";
 import type { CfpReportData } from "../../types";
@@ -12,6 +13,18 @@ function payload(content: Record<string, unknown> | null): CfpReportData {
     sections: content ? [{ section_type: "cashflow_planning", status: "approved", content }] : [],
     assets: [], liabilities: [],
   };
+}
+
+function payloadWithBaseline(
+  content: Record<string, unknown> | null,
+  baseline: Record<string, unknown> | null,
+): CfpReportData {
+  return {
+    clientName: "T", advisorName: "A", period: "2026", generatedDate: "x",
+    language: "zh", hasUnapproved: false, client: {}, baseline,
+    sections: content ? [{ section_type: "cashflow_planning", status: "approved", content }] : [],
+    assets: [], liabilities: [],
+  } as unknown as CfpReportData;
 }
 
 const CONTENT = {
@@ -217,5 +230,162 @@ describe("the annualisation basis reaches the page", () => {
     const v = selectCashflow(withBasis({ year: "nonsense" }));
     expect(v.basisLabel).toBeNull();
     expect(v.basisHasGap).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2b 决策 1/4/6 — the plan basis line, statutory EPF/SOCSO-EIS, disposable
+// surplus, auto-included installments/premiums/statutory items, and one_off
+// items. Everything here lives on `financial_reports.baseline`
+// (FinancialBaseline), not the section content — see baseline.ts and
+// derived.ts in supabase/functions/cfp-brain.
+// ---------------------------------------------------------------------------
+
+const DERIVED_ITEMS = [
+  {
+    key: "liability:mortgage-1", source_type: "liability", source_id: "mortgage-1",
+    source_name: "住宅房贷", category: "mortgage_installment", direction: "outflow",
+    monthly_amount: 4_200, interest_monthly: 3_050, principal_monthly: 1_150,
+    estimated: [], warnings: [],
+  },
+  {
+    key: "policy:ge-life", source_type: "policy", source_id: "policy-1",
+    source_name: "Great Eastern 终身寿险", category: "life_takaful", direction: "outflow",
+    monthly_amount: 400, interest_monthly: 0, principal_monthly: 0,
+    estimated: [], warnings: [],
+  },
+  {
+    key: "statutory:epf_employee", source_type: "statutory", source_id: null,
+    source_name: "EPF（雇员）", category: "epf_employee", direction: "outflow",
+    monthly_amount: 1_760, interest_monthly: 0, principal_monthly: 0,
+    estimated: ["statutory_rate"], warnings: ["按法定比例估算"],
+  },
+];
+
+describe("plan basis line", () => {
+  it("reads the items-path sentence with the as-of month", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, {
+      cashflow_source: "items", items_as_of: "2026-08-01",
+    }));
+    expect(v.cashflowSource).toBe("items");
+    expect(v.planBasisLine).toBe("依据：常设项目（截至 2026-08）");
+  });
+
+  it("reads the actuals-path sentence from the same basis the old basisLabel uses", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, {
+      cashflow_source: "actuals",
+      cashflow_basis: { year: 2026, from_month: 6, to_month: 7 },
+      cashflow_basis_months: 2,
+      cashflow_months_with_data: [6, 7],
+    }));
+    expect(v.cashflowSource).toBe("actuals");
+    expect(v.planBasisLine).toBe("依据：实际记录年化（2026 年 6–7 月）");
+  });
+
+  it("says nothing on a baseline written before cashflow_source existed", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, { net_worth: 100 }));
+    expect(v.cashflowSource).toBeNull();
+    expect(v.planBasisLine).toBeNull();
+  });
+
+  it("says nothing at all without a baseline", () => {
+    const v = selectCashflow(payload(CONTENT));
+    expect(v.cashflowSource).toBeNull();
+    expect(v.planBasisLine).toBeNull();
+  });
+});
+
+describe("statutory EPF/SOCSO-EIS and disposable surplus", () => {
+  it("reads the statutory figures and disposable surplus off the baseline", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, {
+      monthly_employee_epf: 1_760, monthly_employer_epf: 2_080,
+      monthly_socso_eis: 112, annual_disposable_surplus: 32_880,
+    }));
+    expect(v.employeeEpfMonthly).toBe(1_760);
+    expect(v.employerEpfMonthly).toBe(2_080);
+    expect(v.socsoEisMonthly).toBe(112);
+    expect(v.disposableSurplusAnnual).toBe(32_880);
+  });
+
+  it("defaults to 0/null rather than throwing without a baseline", () => {
+    const v = selectCashflow(payload(CONTENT));
+    expect(v.employeeEpfMonthly).toBe(0);
+    expect(v.employerEpfMonthly).toBe(0);
+    expect(v.socsoEisMonthly).toBe(0);
+    expect(v.disposableSurplusAnnual).toBeNull();
+  });
+});
+
+describe("auto-included items", () => {
+  it("carries every derived item with its category label and estimated flag", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, { derived_items: DERIVED_ITEMS }));
+    expect(v.autoItems).toHaveLength(3);
+    const loan = v.autoItems.find((a) => a.sourceType === "liability")!;
+    expect(loan.sourceName).toBe("住宅房贷");
+    expect(loan.categoryLabel).toBe("房贷月供");
+    expect(loan.principalMonthly).toBe(1_150);
+    expect(loan.interestMonthly).toBe(3_050);
+    expect(loan.estimated).toBe(false);
+
+    const statutory = v.autoItems.find((a) => a.sourceType === "statutory")!;
+    expect(statutory.estimated).toBe(true);
+    expect(statutory.principalMonthly).toBeNull();
+
+    const premium = v.autoItems.find((a) => a.sourceType === "policy")!;
+    expect(premium.principalMonthly).toBeNull();
+    expect(premium.interestMonthly).toBeNull();
+  });
+
+  it("is empty on a baseline with no derived_items", () => {
+    expect(selectCashflow(payloadWithBaseline(CONTENT, {})).autoItems).toEqual([]);
+    expect(selectCashflow(payload(CONTENT)).autoItems).toEqual([]);
+  });
+
+  it("builds a table row per item, tagging estimated ones and splitting loan 本金/利息", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, { derived_items: DERIVED_ITEMS }));
+    const rows = autoItemRows(v);
+    expect(rows).toHaveLength(3);
+    const loanRow = rows.find((r) => r.label === "住宅房贷")!;
+    expect(loanRow.meta).toContain("本金");
+    expect(loanRow.meta).toContain("利息");
+    expect(loanRow.meta).not.toContain("估算");
+    const statutoryRow = rows.find((r) => r.label === "EPF（雇员）")!;
+    expect(statutoryRow.meta).toContain("估算");
+  });
+
+  it("returns nothing to render when there are no auto items", () => {
+    expect(autoItemRows(selectCashflow(payload(CONTENT)))).toEqual([]);
+  });
+});
+
+describe("one-off items", () => {
+  const CONTENT_WITH_ONE_OFF = {
+    ...CONTENT,
+    one_off_items: [
+      { category: "asset_purchase", name: "家庭装修", amount: 15_000, direction: "outflow", effective_from: "2026-09-01" },
+    ],
+  };
+
+  it("reads one_off_items off the section content", () => {
+    const v = selectCashflow(payload(CONTENT_WITH_ONE_OFF));
+    expect(v.oneOffItems).toHaveLength(1);
+    expect(v.oneOffItems[0]).toMatchObject({ name: "家庭装修", amount: 15_000, direction: "outflow", month: "2026-09" });
+  });
+
+  it("prints an outflow as a negative and an inflow as a positive", () => {
+    const rows = oneOffRows(selectCashflow(payload(CONTENT_WITH_ONE_OFF)));
+    expect(rows[0].value).toBe("(RM 15,000)");
+
+    const inflowContent = {
+      ...CONTENT,
+      one_off_items: [{ category: "other_income", name: "退税", amount: 2_000, direction: "inflow", effective_from: "2026-05-01" }],
+    };
+    const inflowRows = oneOffRows(selectCashflow(payload(inflowContent)));
+    expect(inflowRows[0].value).toBe("RM 2,000");
+  });
+
+  it("is empty when the content has none", () => {
+    expect(selectCashflow(payload(CONTENT)).oneOffItems).toEqual([]);
+    expect(oneOffRows(selectCashflow(payload(CONTENT)))).toEqual([]);
   });
 });

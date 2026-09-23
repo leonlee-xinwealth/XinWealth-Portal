@@ -29,6 +29,36 @@ export interface CoverageGap {
   hasCover: boolean;
 }
 
+/**
+ * P5 决策 1: one of the CNA's six categories — `computeCna`'s `CnaLineItem`
+ * shape (see supabase/functions/_shared/insurance/cna.ts), read as-is. `need`/
+ * `gap` are null for the cover-only categories (早期重疾/医药/意外).
+ */
+export interface CnaCategoryLine {
+  key: "death" | "tpd" | "ci" | "ci_early_cover" | "medical" | "pa";
+  label: string;
+  need: number | null;
+  cover: number;
+  gap: number | null;
+  notes: string[];
+}
+
+export interface CnaMedicalLine extends CnaCategoryLine {
+  hasCover: boolean;
+  annualLimit: number;
+  lowLimit: boolean;
+  limitUnknown: boolean;
+}
+
+export interface CnaCategories {
+  death: CnaCategoryLine;
+  tpd: CnaCategoryLine;
+  ci: CnaCategoryLine;
+  ciEarlyCover: CnaCategoryLine;
+  medical: CnaMedicalLine;
+  pa: CnaCategoryLine;
+}
+
 export interface InsuranceView {
   hasData: boolean;
   /** true when income is unknown, so the CNA figures mean nothing */
@@ -36,6 +66,19 @@ export interface InsuranceView {
   needs: { incomeReplacement: number; liabilities: number; education: number; totalLife: number; ci: number } | null;
   resources: { lifeCover: number; ciCover: number; liquidAssets: number } | null;
   gaps: CoverageGap[];
+  /**
+   * P5 决策 1: the six-category breakdown (身故/TPD/重疾/早期重疾/医药/意外).
+   * Null on a report generated before this field shipped — `content.cna` is a
+   * frozen snapshot, so an old saved report's JSON simply lacks these keys;
+   * the page falls back to `gaps`/`needs`/`resources` above in that case.
+   */
+  categories: CnaCategories | null;
+  /** Same six categories with every group-employer policy excluded — null
+   *  under the same legacy-content rule as `categories`. */
+  excludingGroup: CnaCategories | null;
+  /** true when excluding group cover actually changes a category's cover —
+   *  i.e. the client holds at least one group policy worth mentioning. */
+  hasGroupCover: boolean;
   policies: Array<{
     provider: string;
     type: string;
@@ -50,11 +93,68 @@ export interface InsuranceView {
 const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
 
+const CATEGORY_LABELS: Record<CnaCategoryLine["key"], string> = {
+  death: "身故",
+  tpd: "全残（TPD）",
+  ci: "重疾",
+  ci_early_cover: "早期重疾（保障）",
+  medical: "医药",
+  pa: "意外（保障）",
+};
+
+function categoryLine(key: CnaCategoryLine["key"], raw: unknown): CnaCategoryLine {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return {
+    key,
+    label: CATEGORY_LABELS[key],
+    need: num(r.need),
+    cover: num(r.cover) ?? 0,
+    gap: num(r.gap),
+    notes: Array.isArray(r.notes) ? r.notes.map(String) : [],
+  };
+}
+
+function medicalLine(raw: unknown): CnaMedicalLine {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  return {
+    ...categoryLine("medical", raw),
+    hasCover: r.has_cover === true,
+    annualLimit: num(r.annual_limit) ?? 0,
+    lowLimit: r.low_limit === true,
+    limitUnknown: r.limit_unknown === true,
+  };
+}
+
+function categoriesOf(raw: Record<string, unknown> | null | undefined): CnaCategories | null {
+  // `death` is the anchor: computeCna always emits every one of the six keys
+  // together (buildProtectionSet), so its presence (as an object) is exactly
+  // the signal that this content was generated after P5 shipped.
+  if (!raw || typeof raw.death !== "object" || raw.death === null) return null;
+  return {
+    death: categoryLine("death", raw.death),
+    tpd: categoryLine("tpd", raw.tpd),
+    ci: categoryLine("ci", raw.ci),
+    ciEarlyCover: categoryLine("ci_early_cover", raw.ci_early_cover),
+    medical: medicalLine(raw.medical),
+    pa: categoryLine("pa", raw.pa),
+  };
+}
+
+/** True when at least one category's cover actually changes once group
+ *  policies are excluded — the client has a group policy worth calling out,
+ *  rather than merely having an (identical) excluding_group set present. */
+function groupCoverMatters(main: CnaCategories, exGroup: CnaCategories): boolean {
+  const keys: Array<keyof CnaCategories> = ["death", "tpd", "ci", "ciEarlyCover", "pa"];
+  if (keys.some((k) => main[k].cover !== exGroup[k].cover)) return true;
+  return main.medical.annualLimit !== exGroup.medical.annualLimit;
+}
+
 export function selectInsurance(data: CfpReportData): InsuranceView {
   const c = data.sections?.find((s) => s.section_type === "insurance_planning")?.content ?? null;
   const empty: InsuranceView = {
     hasData: false, insufficient: false, needs: null, resources: null,
-    gaps: [], policies: [], annualPremiumTotal: 0, assumptions: [],
+    gaps: [], categories: null, excludingGroup: null, hasGroupCover: false,
+    policies: [], annualPremiumTotal: 0, assumptions: [],
   };
   if (!c) return empty;
 
@@ -71,9 +171,18 @@ export function selectInsurance(data: CfpReportData): InsuranceView {
       }))
     : [];
 
+  const categories = categoriesOf(cna);
+  const excludingGroup = categories ? categoriesOf(cna?.excluding_group) ?? categories : null;
+  const hasGroupCover = categories != null && excludingGroup != null
+    ? groupCoverMatters(categories, excludingGroup)
+    : false;
+
   return {
     hasData: true,
     insufficient: cna?.insufficient === true,
+    categories,
+    excludingGroup,
+    hasGroupCover,
     needs: cna?.needs
       ? {
           incomeReplacement: num(cna.needs.income_replacement) ?? 0,

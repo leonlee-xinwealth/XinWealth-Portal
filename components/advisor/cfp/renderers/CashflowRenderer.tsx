@@ -64,6 +64,30 @@ export default function CashflowRenderer({ c, setDraft, readOnly, t }: RendererP
         </div>
       </div>
 
+      {/* One-off items (P2b 决策 4) — near-"now" one_off standing items,
+          listed separately so they never distort the monthly figures above.
+          `c.one_off_items` mirrors baseline.one_off_items verbatim (empty on
+          the actuals path / a pre-P2b report), so this degrades to nothing
+          rather than an empty heading. */}
+      {!!(c.one_off_items || []).length && (
+        <div>
+          <SectionHeading hint={t('near "now" — excluded from the monthly figures above', '临近当前月份——不计入以上月度数字')}>
+            {t('One-off Items', '一次性收支')}
+          </SectionHeading>
+          <div className="space-y-1">
+            {c.one_off_items.map((it: any, i: number) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                <span className="flex-1 text-xs text-slate-600 truncate">{it.name || it.category}</span>
+                <span className="w-20 text-right text-[11px] text-slate-400">{it.effective_from ? String(it.effective_from).slice(0, 7) : '—'}</span>
+                <span className={`w-24 text-right text-xs ${it.direction === 'inflow' ? 'text-emerald-600' : 'text-slate-700'}`}>
+                  {it.direction === 'inflow' ? '+' : '−'}{fmtRM(it.amount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Emergency fund verdict */}
       <div>
         <SectionHeading>{t('Emergency Fund', '紧急预备金')}</SectionHeading>

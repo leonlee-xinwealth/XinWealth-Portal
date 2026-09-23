@@ -304,9 +304,95 @@ export default function InsuranceRenderer({ c, setDraft, readOnly, t }: Renderer
   );
 }
 
-// The three deterministic CNA gap cards. Rendered once on an individual report,
+// The deterministic CNA gap cards. Rendered once on an individual report,
 // once per spouse on a joint one.
+//
+// P5 决策 1: `cna.death` (and its siblings tpd/ci/ci_early_cover/medical/pa)
+// is the new six-category breakdown computeCna emits alongside the legacy
+// `gaps` array — see supabase/functions/_shared/insurance/cna.ts. A report
+// generated before P5 shipped has `cna.death` undefined (content.cna is a
+// frozen snapshot of whatever computeCna returned at generation time), so
+// that presence check is exactly the legacy-vs-new signal; the old `gaps`
+// rendering stays untouched as the fallback.
+const CATEGORY_LABELS: Record<string, [string, string]> = {
+  death: ['Death', '身故'],
+  tpd: ['TPD', '全残（TPD）'],
+  ci: ['Critical Illness', '重疾'],
+  ci_early_cover: ['Early-stage CI', '早期重疾（保障）'],
+  medical: ['Medical', '医药'],
+  pa: ['Personal Accident', '意外（保障）'],
+};
+
+function needCoverGapCard(key: string, line: any, t: (en: string, zh: string) => string) {
+  const [en, zh] = CATEGORY_LABELS[key];
+  const gap = typeof line?.gap === 'number' ? line.gap : 0;
+  return (
+    <div key={key} className="border border-slate-100 rounded-xl p-3">
+      <div className="text-xs text-slate-500 mb-1">{t(en, zh)}</div>
+      <div className="text-xs text-slate-400">{t('Need', '需求')} {fmtRM(line?.need)}</div>
+      <div className="text-xs text-slate-400">{t('Covered', '已覆盖')} {fmtRM(line?.cover)}</div>
+      <div className={`text-sm font-bold mt-1 ${gap > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+        {gap > 0 ? `${t('Gap', '缺口')} ${fmtRM(gap)}` : `✓ ${t('Sufficient', '已足够')}`}
+      </div>
+    </div>
+  );
+}
+
+function coverOnlyCard(key: string, line: any, hasCover: boolean, sub: string | null, t: (en: string, zh: string) => string) {
+  const [en, zh] = CATEGORY_LABELS[key];
+  return (
+    <div key={key} className="border border-slate-100 rounded-xl p-3">
+      <div className="text-xs text-slate-500 mb-1">{t(en, zh)}</div>
+      <div className={`text-sm font-bold mt-1 ${hasCover ? 'text-emerald-600' : 'text-red-600'}`}>
+        {hasCover ? `✓ ${t('Has cover', '已有保障')}` : t('No cover found', '未见保障')}
+      </div>
+      {sub && <div className="text-[11px] text-amber-600 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
 function CnaGapCards({ cna, t }: { cna: any; t: (en: string, zh: string) => string }) {
+  if (cna?.death && typeof cna.death === 'object') {
+    const ex = cna.excluding_group;
+    // Only worth a callout when excluding group cover actually moves a
+    // number — a client with no group policy has an identical excluding_group
+    // set, and repeating the same figures would just be noise.
+    const groupMatters = ex && (
+      ['death', 'tpd', 'ci', 'ci_early_cover', 'pa'].some((k) => cna[k]?.cover !== ex[k]?.cover)
+      || cna.medical?.annual_limit !== ex.medical?.annual_limit
+    );
+    const medicalSub = cna.medical?.has_cover
+      ? (cna.medical.low_limit
+        ? `${t('Annual limit', '年限额')} ${fmtRM(cna.medical.annual_limit)} (${t('low', '偏低')})`
+        : cna.medical.limit_unknown
+          ? t('Annual limit not on file', '年限额未记录')
+          : `${t('Annual limit', '年限额')} ${fmtRM(cna.medical.annual_limit)}`)
+      : null;
+    return (
+      <div className="space-y-3">
+        <div className="grid sm:grid-cols-3 gap-3">
+          {needCoverGapCard('death', cna.death, t)}
+          {needCoverGapCard('tpd', cna.tpd, t)}
+          {needCoverGapCard('ci', cna.ci, t)}
+        </div>
+        <div className="grid sm:grid-cols-3 gap-3">
+          {coverOnlyCard('ci_early_cover', cna.ci_early_cover, (cna.ci_early_cover?.cover ?? 0) > 0, null, t)}
+          {coverOnlyCard('medical', cna.medical, cna.medical?.has_cover === true, medicalSub, t)}
+          {coverOnlyCard('pa', cna.pa, (cna.pa?.cover ?? 0) > 0, null, t)}
+        </div>
+        {groupMatters && (
+          <p className="text-[11px] text-slate-500">
+            {t(
+              `Excluding group cover (lapses on leaving employment): death gap ${fmtRM(Math.max(0, (ex.death?.need ?? 0) - (ex.death?.cover ?? 0)))}, CI gap ${fmtRM(Math.max(0, (ex.ci?.need ?? 0) - (ex.ci?.cover ?? 0)))}.`,
+              `不含团保（离职即失效）时：身故缺口 ${fmtRM(Math.max(0, (ex.death?.need ?? 0) - (ex.death?.cover ?? 0)))}，重疾缺口 ${fmtRM(Math.max(0, (ex.ci?.need ?? 0) - (ex.ci?.cover ?? 0)))}。`,
+            )}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // Legacy content (generated before P5): fall back to the three-category `gaps` array.
   return (
     <div className="grid sm:grid-cols-3 gap-3">
       {(cna?.gaps || []).filter((g: any) => !g.flag_only).map((g: any) => (
