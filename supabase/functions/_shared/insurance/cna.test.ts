@@ -151,10 +151,12 @@ Deno.test("computeCna: no `coverage` supplied still populates death/tpd/ci/medic
   assert(r.ci_early_cover.notes.length > 0);
   assertEquals(r.medical.has_cover, true);
   assertEquals(r.medical.annual_limit, 0);
-  // No per-policy detail was supplied, so the annual limit defaults to 0 —
-  // genuinely unknown, but the flag is a pure "< RM1,000,000" comparison
-  // (decision 1), so it still fires and nudges the advisor to fill it in.
-  assertEquals(r.medical.low_limit, true);
+  // No per-policy detail was supplied, so the annual limit is simply unknown
+  // (0 means "nothing on file", not a genuine RM0 limit) — low_limit only
+  // fires for a KNOWN figure under RM1,000,000 (决策 1 correction).
+  assertEquals(r.medical.low_limit, false);
+  assertEquals(r.medical.limit_unknown, true);
+  assert(r.medical.notes.some((n) => n.includes("未记录年限额")));
   assertEquals(r.pa.cover, 0);
   // No group data at all -> excluding_group is identical to the main set.
   assertEquals(r.excluding_group.death, r.death);
@@ -210,6 +212,29 @@ Deno.test("computeCna: MRTA/MLTA offset nets the covered liability balance out o
   );
   assert(withOffset.death.notes.some((n) => n.includes("MRTA")));
   assert(withOffset.tpd.notes.some((n) => n.includes("MRTA")));
+});
+
+Deno.test("computeCna: a dedicated TPD cover (tpd_assumed_from_life=false) carries no 'assumed from life' note", () => {
+  const r = computeCna({
+    annual_income: 100000,
+    liabilities_total: 0,
+    liquid_assets: 0,
+    life_cover: 500000,
+    ci_cover: 0,
+    has_medical: false,
+    dependents: 0,
+    coverage: {
+      death_cover: 500000, death_has_group: false,
+      tpd_cover: 200000, tpd_has_group: false, tpd_assumed_from_life: false,
+      ci_cover: 0, ci_has_group: false,
+      ci_early_cover: 0, ci_early_has_group: false,
+      has_medical: false, medical_annual_limit: 0, medical_has_group: false,
+      pa_cover: 0, pa_has_group: false,
+      liabilities_covered_by_policy: 0,
+    },
+  });
+  assertEquals(r.tpd.cover, 200000);
+  assert(!r.tpd.notes.some((n) => n.includes("TPD")));
 });
 
 Deno.test("computeCna: group-employer cover is included in the main breakdown (with a lapse-on-exit note) but excluded from `excluding_group`", () => {
@@ -276,12 +301,31 @@ Deno.test("computeCna: medical annual_limit below RM1,000,000 is flagged low_lim
     },
   });
   assertEquals(lowLimit.medical.low_limit, true);
+  assertEquals(lowLimit.medical.limit_unknown, false);
   assert(lowLimit.medical.notes.some((n) => n.includes("偏低")));
 
   const noCover = computeCna(base);
   assertEquals(noCover.medical.has_cover, false);
   assertEquals(noCover.medical.low_limit, false);
+  assertEquals(noCover.medical.limit_unknown, false); // no cover at all is its own note, not "unknown limit"
   assert(noCover.medical.notes.some((n) => n.includes("未见医疗卡")));
+
+  const unknownLimit = computeCna({
+    ...base,
+    has_medical: true,
+    coverage: {
+      death_cover: 0, death_has_group: false,
+      tpd_cover: 0, tpd_has_group: false, tpd_assumed_from_life: true,
+      ci_cover: 0, ci_has_group: false,
+      ci_early_cover: 0, ci_early_has_group: false,
+      has_medical: true, medical_annual_limit: 0, medical_has_group: false,
+      pa_cover: 0, pa_has_group: false,
+      liabilities_covered_by_policy: 0,
+    },
+  });
+  assertEquals(unknownLimit.medical.low_limit, false);
+  assertEquals(unknownLimit.medical.limit_unknown, true);
+  assert(unknownLimit.medical.notes.some((n) => n.includes("未记录年限额")));
 });
 
 Deno.test("computeCna education override replaces the per-child constant", () => {

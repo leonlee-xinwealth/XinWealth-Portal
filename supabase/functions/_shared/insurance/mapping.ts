@@ -135,6 +135,12 @@ export interface CfpFinancials {
     is_group_employer?: boolean | null;
     covers_liability_id?: string | null;
     nomination_type?: string | null;
+    // P5 决策 1 correction: a standalone medical policy_type='medical' row's
+    // own annual limit — insurance_policies has no dedicated column for this
+    // (it lives in the row's `metadata` jsonb on some rows), so the caller
+    // (db.ts) is responsible for lifting it out into this plain field before
+    // building CnaInput; absent/null just means "not recorded".
+    annual_limit?: number | null;
     // Per-policy riders — each carries its own coverage category + amount.
     // Non-identifying fields only (no rider/product names) so they can safely
     // feed the LLM prompt.
@@ -180,9 +186,14 @@ function buildCoverageDetail(
   );
 
   let deathCover = 0, deathHasGroup = false;
-  let disabilityRiderCover = 0, disabilityHasGroup = false;
+  // TPD's OWN cover — policy_type='disability' base plans + 'disability'
+  // riders (live-data correction: the schema DOES carry this, on both the
+  // base plan and as a rider category — the earlier "always assume TPD rides
+  // on the life sum assured" was wrong).
+  let disabilityCover = 0, disabilityHasGroup = false;
   let ciCover = 0, ciHasGroup = false;
   let hasMedical = false, medicalHasGroup = false, medicalAnnualLimit = 0;
+  // PA — policy_type='accident' base plans + 'accident' riders.
   let paCover = 0, paHasGroup = false;
   const mrtaLiabilityIds = new Set<string>();
 
@@ -198,9 +209,21 @@ function buildCoverageDetail(
       ciCover += baseSum;
       if (baseSum > 0 && isGroup) ciHasGroup = true;
     }
+    if (p.policy_type === "disability") {
+      disabilityCover += baseSum;
+      if (baseSum > 0 && isGroup) disabilityHasGroup = true;
+    }
+    if (p.policy_type === "accident") {
+      paCover += baseSum;
+      if (baseSum > 0 && isGroup) paHasGroup = true;
+    }
     if (p.policy_type === "medical") {
       hasMedical = true;
       if (isGroup) medicalHasGroup = true;
+      // The column lives on `annual_limit` (mapped in by db.ts, possibly out
+      // of the row's `metadata` — see the CfpFinancials.policies comment).
+      const limit = p.annual_limit ?? 0;
+      if (limit > medicalAnnualLimit) medicalAnnualLimit = limit;
     }
     if (p.covers_liability_id) mrtaLiabilityIds.add(p.covers_liability_id);
 
@@ -210,7 +233,7 @@ function buildCoverageDetail(
         deathCover += riderSum;
         if (riderSum > 0 && isGroup) deathHasGroup = true;
       } else if (r.category === "disability") {
-        disabilityRiderCover += riderSum;
+        disabilityCover += riderSum;
         if (riderSum > 0 && isGroup) disabilityHasGroup = true;
       } else if (CI_RIDER_CATEGORIES.includes(r.category)) {
         ciCover += riderSum;
@@ -232,14 +255,17 @@ function buildCoverageDetail(
     return sum + (l?.outstanding_balance ?? 0);
   }, 0);
 
+  // TPD: use its own dedicated cover when there is any; ONLY fall back to
+  // assuming the life plan's sum assured also covers TPD when there is none
+  // on file at all (决策 1 correction).
+  const hasOwnTpdCover = disabilityCover > 0;
+
   return {
     death_cover: deathCover,
     death_has_group: deathHasGroup,
-    tpd_cover: deathCover + disabilityRiderCover,
-    tpd_has_group: deathHasGroup || disabilityHasGroup,
-    // The schema has no distinct TPD item — every base life/ILP plan's own
-    // sum assured is assumed to already include TPD (决策 1).
-    tpd_assumed_from_life: true,
+    tpd_cover: hasOwnTpdCover ? disabilityCover : deathCover,
+    tpd_has_group: hasOwnTpdCover ? disabilityHasGroup : deathHasGroup,
+    tpd_assumed_from_life: !hasOwnTpdCover,
     ci_cover: ciCover,
     ci_has_group: ciHasGroup,
     // No policy_riders category distinguishes early/advance-stage CI payouts

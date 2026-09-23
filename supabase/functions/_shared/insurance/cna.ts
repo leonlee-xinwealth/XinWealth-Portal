@@ -102,8 +102,13 @@ export interface CnaLineItem {
 export interface CnaMedicalItem extends CnaLineItem {
   has_cover: boolean;
   annual_limit: number;
-  /** annual_limit < RM1,000,000 while has_cover is true — decision 1 */
+  /** true ONLY when a limit is actually on file (annual_limit > 0) and it's
+   *  below RM1,000,000 — decision 1, corrected against live rider/policy
+   *  data. Never true merely because no limit was recorded. */
   low_limit: boolean;
+  /** true when has_cover but no annual_limit was recorded anywhere (rider or
+   *  policy) — distinct from low_limit, which requires a KNOWN low figure. */
+  limit_unknown: boolean;
 }
 
 export interface CnaProtectionSet {
@@ -172,6 +177,8 @@ const NOTE_MEDICAL_LOW_LIMIT =
   "医疗卡年限额偏低（低于 RM1,000,000） / Medical card annual limit is low (below RM1,000,000)";
 const NOTE_MEDICAL_NO_COVER =
   "未见医疗卡保障 / No medical card cover on file";
+const NOTE_MEDICAL_LIMIT_UNKNOWN =
+  "未记录年限额 / No annual limit recorded on file";
 const NOTE_CI_EARLY_NOT_TRACKED =
   "系统未单独记录早期/晚期重疾赔付比例，如保单含此项请人工核对 / Early-stage critical illness payout isn't tracked separately — verify manually if the policy includes one";
 const noteMrtaOffset = (amount: number) =>
@@ -259,9 +266,14 @@ function buildProtectionSet(
   const ciEarlyNotes: string[] = [NOTE_CI_EARLY_NOT_TRACKED];
   if (cov.ci_early_has_group) ciEarlyNotes.push(NOTE_GROUP_COVER);
 
-  const lowLimit = cov.has_medical && cov.medical_annual_limit < 1_000_000;
+  // A limit is only "known" once some rider/policy actually recorded one —
+  // 0 means "nothing on file", never a genuine RM0 annual limit.
+  const limitKnown = cov.medical_annual_limit > 0;
+  const lowLimit = cov.has_medical && limitKnown && cov.medical_annual_limit < 1_000_000;
+  const limitUnknown = cov.has_medical && !limitKnown;
   const medicalNotes: string[] = [];
   if (!cov.has_medical) medicalNotes.push(NOTE_MEDICAL_NO_COVER);
+  if (limitUnknown) medicalNotes.push(NOTE_MEDICAL_LIMIT_UNKNOWN);
   if (lowLimit) medicalNotes.push(NOTE_MEDICAL_LOW_LIMIT);
   if (cov.medical_has_group) medicalNotes.push(NOTE_GROUP_COVER);
 
@@ -278,6 +290,7 @@ function buildProtectionSet(
       has_cover: cov.has_medical,
       annual_limit: round(cov.medical_annual_limit),
       low_limit: lowLimit,
+      limit_unknown: limitUnknown,
     },
     pa: lineItem(undefined, cov.pa_cover, paNotes),
   };

@@ -1741,6 +1741,7 @@ var NOTE_GROUP_COVER = "\u542B\u56E2\u4FDD\uFF0C\u79BB\u804C\u5373\u5931\u6548 /
 var NOTE_TPD_ASSUMED = "\u5047\u8BBE\u5BFF\u9669\u542B TPD\uFF0C\u4FDD\u5355\u672A\u5355\u72EC\u5217\u660E\u5168\u6B8B\u4FDD\u969C / Assumes the life plan's sum assured also covers TPD (no separate TPD benefit on file)";
 var NOTE_MEDICAL_LOW_LIMIT = "\u533B\u7597\u5361\u5E74\u9650\u989D\u504F\u4F4E\uFF08\u4F4E\u4E8E RM1,000,000\uFF09 / Medical card annual limit is low (below RM1,000,000)";
 var NOTE_MEDICAL_NO_COVER = "\u672A\u89C1\u533B\u7597\u5361\u4FDD\u969C / No medical card cover on file";
+var NOTE_MEDICAL_LIMIT_UNKNOWN = "\u672A\u8BB0\u5F55\u5E74\u9650\u989D / No annual limit recorded on file";
 var NOTE_CI_EARLY_NOT_TRACKED = "\u7CFB\u7EDF\u672A\u5355\u72EC\u8BB0\u5F55\u65E9\u671F/\u665A\u671F\u91CD\u75BE\u8D54\u4ED8\u6BD4\u4F8B\uFF0C\u5982\u4FDD\u5355\u542B\u6B64\u9879\u8BF7\u4EBA\u5DE5\u6838\u5BF9 / Early-stage critical illness payout isn't tracked separately \u2014 verify manually if the policy includes one";
 var noteMrtaOffset = (amount) => `\u5DF2\u6263\u9664 MRTA/MLTA \u4FDD\u5355\u8986\u76D6\u7684\u623F\u8D37\u4F59\u989D RM${amount.toLocaleString()} / Excludes RM${amount.toLocaleString()} of mortgage balance already covered by an MRTA/MLTA policy`;
 function defaultCoverageDetail(input) {
@@ -1796,10 +1797,14 @@ function buildProtectionSet(cov, needBasis) {
   const ciEarlyNotes = [NOTE_CI_EARLY_NOT_TRACKED];
   if (cov.ci_early_has_group)
     ciEarlyNotes.push(NOTE_GROUP_COVER);
-  const lowLimit = cov.has_medical && cov.medical_annual_limit < 1e6;
+  const limitKnown = cov.medical_annual_limit > 0;
+  const lowLimit = cov.has_medical && limitKnown && cov.medical_annual_limit < 1e6;
+  const limitUnknown = cov.has_medical && !limitKnown;
   const medicalNotes = [];
   if (!cov.has_medical)
     medicalNotes.push(NOTE_MEDICAL_NO_COVER);
+  if (limitUnknown)
+    medicalNotes.push(NOTE_MEDICAL_LIMIT_UNKNOWN);
   if (lowLimit)
     medicalNotes.push(NOTE_MEDICAL_LOW_LIMIT);
   if (cov.medical_has_group)
@@ -1816,7 +1821,8 @@ function buildProtectionSet(cov, needBasis) {
       ...lineItem(void 0, cov.medical_annual_limit, medicalNotes),
       has_cover: cov.has_medical,
       annual_limit: round(cov.medical_annual_limit),
-      low_limit: lowLimit
+      low_limit: lowLimit,
+      limit_unknown: limitUnknown
     },
     pa: lineItem(void 0, cov.pa_cover, paNotes)
   };
@@ -1983,7 +1989,7 @@ function buildCoverageDetail(policies, liabilities, excludeGroup) {
     (p) => isCoverageCounted(p) && (!excludeGroup || p.is_group_employer !== true)
   );
   let deathCover = 0, deathHasGroup = false;
-  let disabilityRiderCover = 0, disabilityHasGroup = false;
+  let disabilityCover = 0, disabilityHasGroup = false;
   let ciCover = 0, ciHasGroup = false;
   let hasMedical = false, medicalHasGroup = false, medicalAnnualLimit = 0;
   let paCover = 0, paHasGroup = false;
@@ -2001,10 +2007,23 @@ function buildCoverageDetail(policies, liabilities, excludeGroup) {
       if (baseSum > 0 && isGroup)
         ciHasGroup = true;
     }
+    if (p.policy_type === "disability") {
+      disabilityCover += baseSum;
+      if (baseSum > 0 && isGroup)
+        disabilityHasGroup = true;
+    }
+    if (p.policy_type === "accident") {
+      paCover += baseSum;
+      if (baseSum > 0 && isGroup)
+        paHasGroup = true;
+    }
     if (p.policy_type === "medical") {
       hasMedical = true;
       if (isGroup)
         medicalHasGroup = true;
+      const limit = p.annual_limit ?? 0;
+      if (limit > medicalAnnualLimit)
+        medicalAnnualLimit = limit;
     }
     if (p.covers_liability_id)
       mrtaLiabilityIds.add(p.covers_liability_id);
@@ -2015,7 +2034,7 @@ function buildCoverageDetail(policies, liabilities, excludeGroup) {
         if (riderSum > 0 && isGroup)
           deathHasGroup = true;
       } else if (r.category === "disability") {
-        disabilityRiderCover += riderSum;
+        disabilityCover += riderSum;
         if (riderSum > 0 && isGroup)
           disabilityHasGroup = true;
       } else if (CI_RIDER_CATEGORIES.includes(r.category)) {
@@ -2040,14 +2059,13 @@ function buildCoverageDetail(policies, liabilities, excludeGroup) {
     const l = liabilities.find((x) => x.id === id);
     return sum + (l?.outstanding_balance ?? 0);
   }, 0);
+  const hasOwnTpdCover = disabilityCover > 0;
   return {
     death_cover: deathCover,
     death_has_group: deathHasGroup,
-    tpd_cover: deathCover + disabilityRiderCover,
-    tpd_has_group: deathHasGroup || disabilityHasGroup,
-    // The schema has no distinct TPD item — every base life/ILP plan's own
-    // sum assured is assumed to already include TPD (决策 1).
-    tpd_assumed_from_life: true,
+    tpd_cover: hasOwnTpdCover ? disabilityCover : deathCover,
+    tpd_has_group: hasOwnTpdCover ? disabilityHasGroup : deathHasGroup,
+    tpd_assumed_from_life: !hasOwnTpdCover,
     ci_cover: ciCover,
     ci_has_group: ciHasGroup,
     // No policy_riders category distinguishes early/advance-stage CI payouts

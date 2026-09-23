@@ -223,7 +223,7 @@ Deno.test("buildCfpCnaInput: a lapsed MRTA policy does not offset the liability 
   assertEquals(input.coverage?.liabilities_covered_by_policy, 0);
 });
 
-Deno.test("buildCfpCnaInput: disability riders add to TPD cover on top of the base death/TPD sum", () => {
+Deno.test("buildCfpCnaInput: a disability rider is TPD's OWN cover — it does NOT add to death_cover, and turns off the 'assumed from life' flag", () => {
   const input = buildCfpCnaInput({
     ...cfpFixture,
     policies: [
@@ -235,7 +235,25 @@ Deno.test("buildCfpCnaInput: disability riders add to TPD cover on top of the ba
     ],
   });
   assertEquals(input.coverage?.death_cover, 400000);
-  assertEquals(input.coverage?.tpd_cover, 500000);
+  assertEquals(input.coverage?.tpd_cover, 100000); // disability rider only, NOT death_cover + disability
+  assertEquals(input.coverage?.tpd_assumed_from_life, false);
+});
+
+Deno.test("buildCfpCnaInput: a policy_type='disability' base plan also counts as TPD's own cover", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      cfpFixture.policies[0],
+      { ...cfpFixture.policies[1], policy_type: "disability", sum_assured: 300000 },
+    ],
+  });
+  assertEquals(input.coverage?.tpd_cover, 300000);
+  assertEquals(input.coverage?.tpd_assumed_from_life, false);
+});
+
+Deno.test("buildCfpCnaInput: no disability rider/policy anywhere falls back to assuming TPD rides on the life sum assured", () => {
+  const input = buildCfpCnaInput(cfpFixture); // life=400000, no disability data at all
+  assertEquals(input.coverage?.tpd_cover, 400000);
   assertEquals(input.coverage?.tpd_assumed_from_life, true);
 });
 
@@ -256,6 +274,46 @@ Deno.test("buildCfpCnaInput: medical rider annual_limit and accident rider (PA) 
   assertEquals(input.coverage?.has_medical, true);
   assertEquals(input.coverage?.medical_annual_limit, 500000);
   assertEquals(input.coverage?.pa_cover, 250000);
+});
+
+Deno.test("buildCfpCnaInput: a policy_type='accident' base plan also counts toward PA cover", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      cfpFixture.policies[0],
+      { ...cfpFixture.policies[1], policy_type: "accident", sum_assured: 150000 },
+    ],
+  });
+  assertEquals(input.coverage?.pa_cover, 150000);
+});
+
+Deno.test("buildCfpCnaInput: a standalone medical policy's own `annual_limit` field feeds medical_annual_limit (e.g. lifted from metadata by the caller)", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      cfpFixture.policies[0],
+      { ...cfpFixture.policies[1], policy_type: "medical", sum_assured: null, annual_limit: 800000 },
+    ],
+  });
+  assertEquals(input.coverage?.has_medical, true);
+  assertEquals(input.coverage?.medical_annual_limit, 800000);
+});
+
+Deno.test("buildCfpCnaInput: medical_annual_limit takes the larger of a base policy's own limit and any rider limit", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      cfpFixture.policies[0],
+      {
+        ...cfpFixture.policies[1],
+        policy_type: "medical",
+        sum_assured: null,
+        annual_limit: 300000,
+        policy_riders: [{ category: "medical", sum_assured: null, annual_limit: 600000 }],
+      },
+    ],
+  });
+  assertEquals(input.coverage?.medical_annual_limit, 600000);
 });
 
 Deno.test("buildCfpCnaInput: no coverage detail at all still returns a fully-populated (zeroed) coverage set", () => {
