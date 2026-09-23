@@ -3,16 +3,30 @@ import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Plus, X, Pencil, Trash2 } from 'lucide-react';
 import InsuranceGapPanel from '../components/InsuranceGapPanel';
+import {
+  beneficiaryFromRecord, emptyBeneficiary, toBeneficiaryRecords, validateBeneficiaries,
+  type BeneficiaryForm,
+} from '../insurance/beneficiaries';
 
 const TYPES: [string,string][] = [['life','Life / 人寿'],['medical','Medical / 医疗'],['critical_illness','Critical Illness / 重疾'],['disability','Disability / 残障'],['investment_linked','Investment-Linked / 投资联结'],['accident','Accident / 意外'],['property','Property / 财产'],['other','Other / 其他']];
 // Curated subset offered when picking a NEW base plan's type — every plan carries a base
 // death/TPD life benefit, so the choice here is really "what kind of base plan is this".
 const BASE_TYPES: [string,string][] = [['investment_linked','Investment-Linked (ILP) / 投资连结'],['life','Traditional / Term Life / 传统人寿'],['medical','Standalone Medical Card / 独立医疗卡'],['other','Other / 其他']];
 const FREQ: [string,string][] = [['monthly','Monthly'],['quarterly','Quarterly'],['semi_annual','Semi-annual'],['annual','Annual'],['single_premium','Single Premium']];
+// P5 (2026-09-26-cfp-p5-insurance-design.md 决策 2): lifecycle status — only
+// in_force (or unset — every pre-P5 row) counts toward coverage/premiums
+// (_shared/insurance/{cna,mapping}.ts, _shared/finance/derived.ts).
+const STATUS: [string,string][] = [['in_force','In Force / 有效'],['lapsed','Lapsed / 已失效'],['paid_up','Paid-up / 已缴清'],['surrendered','Surrendered / 已退保'],['matured','Matured / 已满期']];
+const STATUS_LABELS: Record<string,[string,string]> = { in_force:['In Force','有效'], lapsed:['Lapsed','已失效'], paid_up:['Paid-up','已缴清'], surrendered:['Surrendered','已退保'], matured:['Matured','已满期'] };
+const NOMINATION: [string,string][] = [['','—'],['trust','Trust / 信托'],['hibah','Hibah / Hibah 指定'],['conditional','Conditional / 有条件指定'],['none','None / 未指定']];
+const NOMINATION_LABELS: Record<string,[string,string]> = { trust:['Trust','信托'], hibah:['Hibah','Hibah 指定'], conditional:['Conditional','有条件指定'], none:['None','未指定'] };
+// Beneficiary relationship is free text in practice but a short pick-list keeps
+// data consistent; the input still accepts anything typed.
+const RELATIONSHIPS: [string,string][] = [['spouse','Spouse / 配偶'],['child','Child / 子女'],['parent','Parent / 父母'],['sibling','Sibling / 兄弟姐妹'],['other','Other / 其他']];
 // Malaysian policies separate the premium PAYMENT term (how long you pay) from the
 // COVERAGE term (how long you're covered) — e.g. pay 20 years but covered to age 80.
 const TERM_UNITS: [string,string][] = [['years','Years / 年'],['to_age','To Age / 到岁数']];
-const EMPTY = { policy_type:'', provider:'', plan_name:'', plan_id:'', policy_holder:'', policy_number:'', sum_assured:'', cash_value:'', premium:'', premium_frequency:'annual', insured_person:'', start_date:'', end_date:'', premium_term_value:'', premium_term_unit:'', coverage_term_value:'', coverage_term_unit:'', riders: [] as RiderForm[] };
+const EMPTY = { policy_type:'', provider:'', plan_name:'', plan_id:'', policy_holder:'', policy_number:'', sum_assured:'', cash_value:'', premium:'', premium_frequency:'annual', insured_person:'', start_date:'', end_date:'', premium_term_value:'', premium_term_unit:'', coverage_term_value:'', coverage_term_unit:'', riders: [] as RiderForm[], status:'in_force', nomination_type:'', is_group_employer:false, covers_liability_id:'', beneficiaries: [] as BeneficiaryForm[] };
 
 const TYPE_COLORS: Record<string,string> = { life:'bg-blue-50 text-blue-700', medical:'bg-teal-50 text-teal-700', critical_illness:'bg-red-50 text-red-700', disability:'bg-purple-50 text-purple-700', investment_linked:'bg-amber-50 text-amber-700', accident:'bg-orange-50 text-orange-700', property:'bg-green-50 text-green-700', other:'bg-slate-100 text-slate-600' };
 
@@ -68,6 +82,9 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
   const [catalogRiders, setCatalogRiders] = useState<any[]>([]);
   const [planRiders, setPlanRiders] = useState<any[]>([]);
   const [riderTiersCache, setRiderTiersCache] = useState<Record<string, any[]>>({});
+  // P5 决策 2: MRTA/MLTA covers a specific mortgage — the picker only offers
+  // this client's mortgage liabilities.
+  const [mortgages, setMortgages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -82,6 +99,13 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
     setPolicies(data || []); setLoading(false);
   }
   useEffect(() => { load(); }, [clientId]);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from('liabilities').select('id, name, liability_type, outstanding_balance').eq('client_id', clientId).eq('liability_type', 'mortgage');
+      setMortgages(data || []);
+    })();
+  }, [clientId]);
 
   // Load the insurance catalog once (public-read) to power the company + plan + rider pickers.
   useEffect(() => {
@@ -182,6 +206,9 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
       premium_term_value: s(p.premium_term_value), premium_term_unit: s(p.premium_term_unit),
       coverage_term_value: s(p.coverage_term_value), coverage_term_unit: s(p.coverage_term_unit),
       riders: (p.policy_riders || []).map(riderFromRow),
+      status: s(p.status) || 'in_force', nomination_type: s(p.nomination_type),
+      is_group_employer: !!p.is_group_employer, covers_liability_id: s(p.covers_liability_id),
+      beneficiaries: (p.beneficiaries || []).map(beneficiaryFromRecord),
     });
     setSaveErr(''); setShowForm(true);
     // Preload tiers so the medical tier dropdown is populated when editing.
@@ -217,9 +244,16 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
 
   async function handleSave() {
     if (!form.provider) return;
+    // P5 施工单 §B: shares must total 100% when any beneficiary is entered —
+    // block save with an inline error instead of writing a partial split.
+    const bv = validateBeneficiaries(form.beneficiaries);
+    if (!bv.valid) {
+      setSaveErr(t(`Beneficiary shares must total 100% (currently ${bv.total}%).`, `受益人比例合计须为 100%（目前 ${bv.total}%）。`));
+      return;
+    }
     setSaving(true); setSaveErr('');
     await ensureInsurer(form.provider);
-    const payload = { policy_type: form.policy_type||'other', provider: form.provider, plan_name: form.plan_name||null, plan_id: form.plan_id||null, policy_holder: form.policy_holder||null, policy_number: form.policy_number||null, sum_assured: form.sum_assured?parseFloat(form.sum_assured):null, cash_value: form.cash_value?parseFloat(form.cash_value):null, premium: form.premium?parseFloat(form.premium):null, premium_frequency: form.premium_frequency||null, insured_person: form.insured_person||null, start_date: form.start_date||null, end_date: form.end_date||null, premium_term_value: form.premium_term_value?parseFloat(form.premium_term_value):null, premium_term_unit: form.premium_term_unit||null, coverage_term_value: form.coverage_term_value?parseFloat(form.coverage_term_value):null, coverage_term_unit: form.coverage_term_unit||null };
+    const payload = { policy_type: form.policy_type||'other', provider: form.provider, plan_name: form.plan_name||null, plan_id: form.plan_id||null, policy_holder: form.policy_holder||null, policy_number: form.policy_number||null, sum_assured: form.sum_assured?parseFloat(form.sum_assured):null, cash_value: form.cash_value?parseFloat(form.cash_value):null, premium: form.premium?parseFloat(form.premium):null, premium_frequency: form.premium_frequency||null, insured_person: form.insured_person||null, start_date: form.start_date||null, end_date: form.end_date||null, premium_term_value: form.premium_term_value?parseFloat(form.premium_term_value):null, premium_term_unit: form.premium_term_unit||null, coverage_term_value: form.coverage_term_value?parseFloat(form.coverage_term_value):null, coverage_term_unit: form.coverage_term_unit||null, status: form.status||'in_force', nomination_type: form.nomination_type||null, is_group_employer: !!form.is_group_employer, covers_liability_id: form.covers_liability_id||null, beneficiaries: toBeneficiaryRecords(form.beneficiaries) };
     // Keep any rider that carries content, even without a name (advisor may only know
     // "it's CI, 500k"). rider_name is optional; blank displays as its category label.
     const filled = form.riders.filter(r => r.rider_name || r.category || r.sum_assured);
@@ -251,6 +285,12 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
   const totalAP = policies.reduce((acc,p) => { if (!p.premium) return acc; const m: any={monthly:12,quarterly:4,semi_annual:2,annual:1,single_premium:0}; return acc+p.premium*(m[p.premium_frequency||'annual']??1); }, 0);
   const typeLabel = (type: string) => TYPES.find(([v]) => v===type)?.[1]||type;
   const freqLabel = (f: string) => FREQ.find(([v]) => v===f)?.[1]||f;
+  // P5 决策 2/3: only in_force (or unset — every pre-P5 row) counts toward
+  // coverage; the list must say so, matching _shared/insurance/mapping.ts's
+  // isCoverageCounted.
+  const isInForce = (p: any) => !p.status || p.status === 'in_force';
+  const statusLabel = (status: string) => { const l = STATUS_LABELS[status || 'in_force']; return l ? (language === 'zh' ? l[1] : l[0]) : (status || ''); };
+  const nominationLabel = (nom: string) => { const l = NOMINATION_LABELS[nom]; return l ? (language === 'zh' ? l[1] : l[0]) : nom; };
 
   if (loading) return <Loader />;
 
@@ -282,7 +322,14 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
                 <button onClick={() => openEdit(p)} className="text-slate-400 hover:text-xin-blue transition-colors" title={t('Edit','编辑')}><Pencil size={14} /></button>
                 <button onClick={() => handleDelete(p.id)} className="text-slate-400 hover:text-red-500 transition-colors" title={t('Delete','删除')}><Trash2 size={14} /></button>
               </div>
-              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${TYPE_COLORS[p.policy_type]||TYPE_COLORS.other}`}>{typeLabel(p.policy_type)}</span>
+              <div className="flex items-center gap-1.5 flex-wrap pr-12">
+                <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${TYPE_COLORS[p.policy_type]||TYPE_COLORS.other}`}>{typeLabel(p.policy_type)}</span>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${isInForce(p) ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                  {statusLabel(p.status)}{!isInForce(p) ? ` · ${t('excluded from coverage','不计入保障')}` : ''}
+                </span>
+                {p.is_group_employer && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">{t('Group · lapses on resignation','团保 · 离职即失效')}</span>}
+                {p.nomination_type && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{nominationLabel(p.nomination_type)}</span>}
+              </div>
               <div className="mt-3 mb-1 font-bold text-xin-blue text-base">{p.provider}</div>
               {p.plan_name && <div className="text-sm text-slate-600 -mt-0.5 mb-1">{p.plan_name}</div>}
               {p.policy_number && <div className="text-xs text-slate-400 mb-3">#{p.policy_number}</div>}
@@ -291,11 +338,16 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
               <div className="grid grid-cols-2 gap-y-2 gap-x-3 mt-2">
                 {p.sum_assured && <Kv label="Death/TPD Sum Assured" val={`RM ${fmt(p.sum_assured)}`} />}
                 {p.premium && <Kv label="Premium" val={`RM ${fmt(p.premium)} / ${freqLabel(p.premium_frequency||'annual')}`} />}
-                {p.cash_value && <Kv label="Cash Value" val={`RM ${fmt(p.cash_value)}`} />}
+                {p.cash_value ? <Kv label={t('Cash Value (reference · not counted in net worth)','现金价值（参考 · 未计入净资产）')} val={`RM ${fmt(p.cash_value)}`} /> : null}
                 {p.start_date && <Kv label="Start" val={p.start_date} />}
                 {p.end_date && <Kv label="Maturity" val={p.end_date} />}
               </div>
               {termSummary(p) && <div className="text-[11px] text-slate-400 mt-2">{termSummary(p)}</div>}
+              {(p.status === 'surrendered' || p.status === 'matured') && (
+                <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5">
+                  {t('Record the surrender/maturity proceeds as a one-off income (Cash Flow → Standing Items → One-off).', '请把退保/满期所得记为一次性收入（现金流 → 常设项目 → 一次性）。')}
+                </div>
+              )}
               {p.policy_riders && p.policy_riders.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
                   {p.policy_riders.map((r: any) => (
@@ -343,7 +395,50 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
               <Fr label={t('End Date','到期')}><Inp type="date" value={form.end_date} onChange={v => set('end_date',v)} /></Fr>
             </div>
 
-            <div className="mt-4 pt-4 border-t border-slate-100">
+            <div className="mt-2 pt-3 border-t border-slate-100">
+              <div className="grid grid-cols-2 gap-3">
+                <Fr label={t('Status','状态')}><Sel value={form.status} onChange={v => set('status',v)} opts={STATUS} /></Fr>
+                <Fr label={t('Nomination','提名类型')}><Sel value={form.nomination_type} onChange={v => set('nomination_type',v)} opts={NOMINATION} /></Fr>
+              </div>
+              {(form.status === 'surrendered' || form.status === 'matured') && (
+                <div className="-mt-1 mb-3 text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2.5 py-1.5">
+                  {t('Record the surrender/maturity proceeds as a one-off income (Cash Flow → Standing Items → One-off).', '请把退保/满期所得记为一次性收入（现金流 → 常设项目 → 一次性）。')}
+                </div>
+              )}
+              <label className="flex items-center gap-2 mb-3 text-sm text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={form.is_group_employer} onChange={e => setForm(p => ({ ...p, is_group_employer: e.target.checked }))} className="rounded border-slate-300" />
+                {t('Employer group cover (lapses on resignation)','公司团保（离职即失效）')}
+              </label>
+              {form.policy_type === 'life' && (
+                <Fr label={t('Covers Mortgage (MRTA/MLTA)','覆盖的房贷（MRTA/MLTA）')}>
+                  <Sel value={form.covers_liability_id} onChange={v => set('covers_liability_id',v)} opts={[['', t('None','—')], ...mortgages.map((m): [string,string] => [m.id, `${m.name} (RM ${fmt(m.outstanding_balance)})`])]} />
+                </Fr>
+              )}
+            </div>
+
+            <div className="mt-2 pt-4 border-t border-slate-100">
+              <div className="flex items-center justify-between mb-2">
+                <h4 className="text-xs font-semibold text-slate-500">{t('Beneficiaries','受益人')}</h4>
+                <button type="button" onClick={() => setForm(p => ({ ...p, beneficiaries: [...p.beneficiaries, emptyBeneficiary()] }))} className="text-xs font-semibold text-purple-600 hover:text-purple-700 flex items-center gap-1"><Plus size={12} />{t('Add Beneficiary','添加受益人')}</button>
+              </div>
+              {form.beneficiaries.length === 0 && <div className="text-xs text-slate-400 mb-2">{t('No beneficiaries recorded.','未记录受益人。')}</div>}
+              {form.beneficiaries.map((b, idx) => (
+                <div key={b.key} className="grid grid-cols-[1.3fr_1fr_0.7fr_auto] gap-1.5 mb-2 items-center">
+                  <Inp value={b.name} onChange={(v: string) => setForm(p => ({ ...p, beneficiaries: p.beneficiaries.map((x,i) => i===idx ? { ...x, name: v } : x) }))} placeholder={t('Name','姓名')} />
+                  <Combo value={b.relationship} onChange={(v: string) => setForm(p => ({ ...p, beneficiaries: p.beneficiaries.map((x,i) => i===idx ? { ...x, relationship: v } : x) }))} list={`relationship-list-${idx}`} opts={RELATIONSHIPS.map(([,label]) => label)} placeholder={t('Relation','关系')} />
+                  <Inp type="number" value={b.share_pct} onChange={(v: string) => setForm(p => ({ ...p, beneficiaries: p.beneficiaries.map((x,i) => i===idx ? { ...x, share_pct: v } : x) }))} placeholder="%" />
+                  <button type="button" onClick={() => setForm(p => ({ ...p, beneficiaries: p.beneficiaries.filter((_,i) => i!==idx) }))} className="text-slate-300 hover:text-red-400 shrink-0"><X size={14} /></button>
+                </div>
+              ))}
+              {(() => {
+                const bv = validateBeneficiaries(form.beneficiaries);
+                return !bv.valid ? (
+                  <div className="text-xs text-red-500 mb-2">{t(`Shares must total 100% (currently ${bv.total}%).`, `比例合计须为 100%（目前 ${bv.total}%）。`)}</div>
+                ) : null;
+              })()}
+            </div>
+
+            <div className="mt-2 pt-4 border-t border-slate-100">
               <div className="flex items-center justify-between mb-2">
                 <h4 className="text-xs font-semibold text-slate-500">{t('Riders','附加险')}</h4>
                 <button type="button" onClick={addRider} className="text-xs font-semibold text-purple-600 hover:text-purple-700 flex items-center gap-1"><Plus size={12} />{t('Add Rider','添加附加险')}</button>

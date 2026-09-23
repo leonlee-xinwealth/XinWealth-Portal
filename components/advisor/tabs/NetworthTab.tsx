@@ -42,10 +42,13 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   const [liabilities, setLiabilities] = useState<any[]>([]);
   const [items, setItems] = useState<StandingItem[]>([]);
   const [valuations, setValuations] = useState<any[]>([]);
+  // P5 (2026-09-26-cfp-p5-insurance-design.md 决策 2): a policy_loan liability
+  // can link back to the policy it's borrowed against.
+  const [policies, setPolicies] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'asset'|'liability'|null>(null);
   const [aForm, setAForm] = useState({ asset_type:'', name:'', institution:'', current_value:'', cost_value:'', ownership_type:'sole', purpose:'', ownership_pct:'100' });
-  const [lForm, setLForm] = useState({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'' });
+  const [lForm, setLForm] = useState({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'', linked_policy_id:'' });
   const [saving, setSaving] = useState(false);
 
   const [editing, setEditing] = useState<{ table: 'assets'|'liabilities'; id: string } | null>(null);
@@ -54,12 +57,13 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   const [ok, setOk] = useState(false);
 
   async function load() {
-    const [{ data: a }, { data: l }, { data: it }] = await Promise.all([
+    const [{ data: a }, { data: l }, { data: it }, { data: pol }] = await Promise.all([
       supabase.from('assets').select('*').eq('client_id', clientId).order('asset_type'),
       supabase.from('liabilities').select('*').eq('client_id', clientId).order('liability_type'),
       supabase.from('cashflow_items').select('*').eq('client_id', clientId),
+      supabase.from('insurance_policies').select('id, plan_name, provider, policy_type, policy_number').eq('client_id', clientId),
     ]);
-    setAssets(a || []); setLiabilities(l || []); setItems((it || []) as StandingItem[]);
+    setAssets(a || []); setLiabilities(l || []); setItems((it || []) as StandingItem[]); setPolicies(pol || []);
     // asset_valuations may not exist yet in every environment (P3 migration) —
     // degrade to "no history" rather than failing the whole tab.
     try {
@@ -103,8 +107,8 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   async function addLiability() {
     if (!lForm.name || !lForm.outstanding_balance) return;
     setSaving(true);
-    await supabase.from('liabilities').insert({ client_id: clientId, liability_type: lForm.liability_type||'other', name: lForm.name, lender: lForm.lender||null, outstanding_balance: parseFloat(lForm.outstanding_balance), monthly_payment: lForm.monthly_payment?parseFloat(lForm.monthly_payment):null, interest_rate: lForm.interest_rate?parseFloat(lForm.interest_rate):null, start_date: lForm.start_date||null, end_date: lForm.end_date||null, remaining_months: lForm.remaining_months?parseInt(lForm.remaining_months,10):null, rate_type: lForm.rate_type||null });
-    setSaving(false); setModal(null); setLForm({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'' }); load();
+    await supabase.from('liabilities').insert({ client_id: clientId, liability_type: lForm.liability_type||'other', name: lForm.name, lender: lForm.lender||null, outstanding_balance: parseFloat(lForm.outstanding_balance), monthly_payment: lForm.monthly_payment?parseFloat(lForm.monthly_payment):null, interest_rate: lForm.interest_rate?parseFloat(lForm.interest_rate):null, start_date: lForm.start_date||null, end_date: lForm.end_date||null, remaining_months: lForm.remaining_months?parseInt(lForm.remaining_months,10):null, rate_type: lForm.rate_type||null, linked_policy_id: lForm.liability_type==='policy_loan' ? (lForm.linked_policy_id||null) : null });
+    setSaving(false); setModal(null); setLForm({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'', linked_policy_id:'' }); load();
   }
   async function del(table: string, id: string) {
     if (!confirm(t('Delete?','确定删除？'))) return;
@@ -117,7 +121,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   }
   function startEditLiability(l: any) {
     setEditing({ table: 'liabilities', id: l.id });
-    setEditForm({ liability_type: l.liability_type, name: l.name, lender: l.lender||'', outstanding_balance: String(l.outstanding_balance), monthly_payment: l.monthly_payment!=null?String(l.monthly_payment):'', interest_rate: l.interest_rate!=null?String(l.interest_rate):'', start_date: l.start_date||'', end_date: l.end_date||'', remaining_months: l.remaining_months!=null?String(l.remaining_months):'', rate_type: l.rate_type||'' });
+    setEditForm({ liability_type: l.liability_type, name: l.name, lender: l.lender||'', outstanding_balance: String(l.outstanding_balance), monthly_payment: l.monthly_payment!=null?String(l.monthly_payment):'', interest_rate: l.interest_rate!=null?String(l.interest_rate):'', start_date: l.start_date||'', end_date: l.end_date||'', remaining_months: l.remaining_months!=null?String(l.remaining_months):'', rate_type: l.rate_type||'', linked_policy_id: l.linked_policy_id||'' });
   }
   function cancelEdit() {
     setEditing(null); setEditForm({});
@@ -137,7 +141,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
           ownership_pct: parseFloat(editForm.ownership_pct) || 100,
           needs_review: false, review_reason: null,
         }
-      : { liability_type: editForm.liability_type||'other', name: editForm.name, lender: editForm.lender||null, outstanding_balance: parseFloat(editForm.outstanding_balance), monthly_payment: editForm.monthly_payment?parseFloat(editForm.monthly_payment):null, interest_rate: editForm.interest_rate?parseFloat(editForm.interest_rate):null, start_date: editForm.start_date||null, end_date: editForm.end_date||null, remaining_months: editForm.remaining_months?parseInt(editForm.remaining_months,10):null, rate_type: editForm.rate_type||null };
+      : { liability_type: editForm.liability_type||'other', name: editForm.name, lender: editForm.lender||null, outstanding_balance: parseFloat(editForm.outstanding_balance), monthly_payment: editForm.monthly_payment?parseFloat(editForm.monthly_payment):null, interest_rate: editForm.interest_rate?parseFloat(editForm.interest_rate):null, start_date: editForm.start_date||null, end_date: editForm.end_date||null, remaining_months: editForm.remaining_months?parseInt(editForm.remaining_months,10):null, rate_type: editForm.rate_type||null, linked_policy_id: editForm.liability_type==='policy_loan' ? (editForm.linked_policy_id||null) : null };
     await supabase.from(editing.table).update(payload).eq('id', editing.id);
     setSavingEdit(false); setEditing(null);
     setOk(true); setTimeout(() => setOk(false), 3000);
@@ -193,7 +197,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
         <NwTable title={t('Liabilities','负债')} color="text-red-500" addLabel={t('Add Liability','添加负债')} onAdd={() => setModal('liability')}>
           {liabilities.map(l => {
             if (editing?.table==='liabilities' && editing.id===l.id) {
-              return <LiabilityEditRow key={l.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} />;
+              return <LiabilityEditRow key={l.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} policies={policies} />;
             }
             // The estimated monthly payment (D1 estimator, spec 2026-09-24-cfp-p2a
             // decision 2) is what actually drives the client's cash flow and DSR —
@@ -258,6 +262,11 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
             <Fr label={t('Start Date','开始日期')}><Inp type="date" value={lForm.start_date} onChange={v => setLForm(p => ({...p,start_date:v}))} /></Fr>
             <Fr label={t('End Date','到期日期')}><Inp type="date" value={lForm.end_date} onChange={v => setLForm(p => ({...p,end_date:v}))} /></Fr>
           </div>
+          {lForm.liability_type === 'policy_loan' && (
+            <Fr label={t('Linked Policy','关联保单')}>
+              <PolicyLinkSel value={lForm.linked_policy_id} onChange={v => setLForm(p => ({...p,linked_policy_id:v}))} policies={policies} t={t} />
+            </Fr>
+          )}
           <BtnRow onSave={addLiability} onCancel={() => setModal(null)} saving={saving} t={t} />
         </Modal>
       )}
@@ -413,7 +422,7 @@ const AssetEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang }: any)
     </div>
   );
 };
-const LiabilityEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang }: any) => {
+const LiabilityEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang, policies }: any) => {
   const set = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }));
   return (
     <div className="px-5 py-3 border-b border-slate-50 last:border-0 bg-slate-50/60">
@@ -431,6 +440,11 @@ const LiabilityEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang }: 
         <Fr label={t('Start Date','开始日期')}><Inp type="date" value={form.start_date} onChange={v => set('start_date',v)} /></Fr>
         <Fr label={t('End Date','到期日期')}><Inp type="date" value={form.end_date} onChange={v => set('end_date',v)} /></Fr>
       </div>
+      {form.liability_type === 'policy_loan' && (
+        <Fr label={t('Linked Policy','关联保单')}>
+          <PolicyLinkSel value={form.linked_policy_id} onChange={v => set('linked_policy_id',v)} policies={policies} t={t} />
+        </Fr>
+      )}
       <div className="flex gap-2 mt-2">
         <button onClick={onSave} disabled={saving} className="px-4 py-2 bg-xin-blue text-white font-semibold rounded-lg text-sm disabled:opacity-50">{saving?'...':t('Save','保存')}</button>
         <button onClick={onCancel} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm">{t('Cancel','取消')}</button>
@@ -473,6 +487,17 @@ const LiabilityTypeSel = ({ value, onChange, lang, allowEmpty }: { value: string
           <option key={l.code} value={l.code}>{lang === 'zh' ? l.label_zh : l.label_en}</option>
         ))}
       </optgroup>
+    ))}
+  </select>
+);
+
+// P5 决策 2: a policy_loan liability's "关联保单" picker — every policy on
+// this client, labeled by plan/provider so the advisor can tell them apart.
+const PolicyLinkSel = ({ value, onChange, policies, t }: { value: string; onChange: (v: string) => void; policies: any[]; t: (en: string, zh: string) => string }) => (
+  <select value={value} onChange={e => onChange(e.target.value)} className={SEL_CLS}>
+    <option value="">{t('None','—')}</option>
+    {(policies || []).map((p: any) => (
+      <option key={p.id} value={p.id}>{(p.plan_name || p.policy_type) + ' · ' + (p.provider || '') + (p.policy_number ? ` #${p.policy_number}` : '')}</option>
     ))}
   </select>
 );
