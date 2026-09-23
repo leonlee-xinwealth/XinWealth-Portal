@@ -154,6 +154,46 @@ Deno.test("wealth_projection still projects pure contributions when investable_t
   assertEquals(d.wealth_projection, expected);
 });
 
+// ---------------------------------------------------------------------------
+// P3 决策 1 — a holding already folded into an asset (its account has an
+// asset_id) must not also be summed into the investable total.
+// ---------------------------------------------------------------------------
+
+Deno.test("a holding backed by a migrated account is excluded from investable_total", () => {
+  const d = det({
+    assets: [
+      { asset_type: "savings", current_value: 30000, cost_value: null, ownership_type: null },
+      { asset_type: "fixed_deposit", current_value: 20000, cost_value: null, ownership_type: null },
+      { asset_type: "stock", current_value: 10000, cost_value: null, ownership_type: null },
+      { asset_type: "etf", current_value: 5000, cost_value: null, ownership_type: null },
+      { asset_type: "unit_trust", current_value: 5000, cost_value: null, ownership_type: null },
+      { asset_type: "bond", current_value: 8000, cost_value: null, ownership_type: null },
+      { asset_type: "business", current_value: 2000, cost_value: null, ownership_type: null },
+      { asset_type: "property", current_value: 500000, cost_value: null, ownership_type: null },
+    ],
+    investment_accounts: [
+      { id: "acct-1", asset_id: "asset-1", account_type: "unit_trust", prs_sub_account_a: null, prs_sub_account_b: null },
+    ],
+    holdings: [
+      // backed by a migrated account — excluded (its value already lives on asset-1)
+      { account_id: "acct-1", snapshot_month: "2026-07-01", instrument_code: "F1", market_value: 10000, cost_basis: null },
+    ],
+  });
+  // Same fixture as "allocation buckets & pct math with mixed assets and
+  // holdings" above but WITHOUT the 10,000 holding: investable_total is
+  // 45,000 - 10,000 = 35,000, and equity drops to 20,000.
+  assertEquals(d.investable_total, 35000);
+  const equity = d.current_allocation.find((r) => r.bucket === "equity")!;
+  assertEquals(equity.amount, 20000);
+});
+
+Deno.test("portfolio_drift groups the same target_allocation/drift/rebalancing_actions as the flat fields", () => {
+  const d = det();
+  assertEquals(d.portfolio_drift.target_allocation, d.target_allocation);
+  assertEquals(d.portfolio_drift.drift, d.drift);
+  assertEquals(d.portfolio_drift.rebalancing_actions, d.rebalancing_actions);
+});
+
 Deno.test("wealth_projection FV term is zero when monthly surplus is zero", () => {
   const d = det({
     client: { ...makeCfpData().client, risk_profile: null }, // -> balanced band, r=0.06

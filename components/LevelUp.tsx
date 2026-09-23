@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchRawHealthData, getLatestRecords } from '../services/apiService';
+import {
+  fetchRawHealthData, fetchReviewPrefill, submitQuarterlyReview,
+} from '../services/apiService';
 import { getAccessToken } from '../lib/supabase';
 import {
   Loader2, AlertCircle, Check, Save, Plus, Trash2,
   Wallet, Receipt,
-  TrendingUp, Umbrella,
-  Building2, ArrowBigUpDash
+  Building2, Umbrella, ClipboardCheck, Clock, RotateCcw,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import { DebouncedNumberInput, DebouncedTextInput } from './kyc/FormInputs';
+import type { ReviewPrefillAsset, ReviewPrefillData, ReviewPrefillLiability } from '../services/apiService';
 
 const MONTH_NAMES = [
   { value: '0', en: 'January', zh: '1月' },
@@ -43,38 +45,130 @@ const CATEGORY_OPTIONS = {
     { value: 'Personal', en: 'Personal', zh: '个人' },
     { value: 'Miscellaneous', en: 'Miscellaneous', zh: '杂项' },
     { value: 'Other Expenses', en: 'Other Expenses', zh: '其他支出' }
-  ],
-  assets: [
-    { value: 'Cash/Savings', en: 'Cash/Savings', zh: '现金/储蓄' },
-    { value: 'Fixed Deposit', en: 'Fixed Deposit', zh: '定期存款' },
-    { value: 'EPF', en: 'EPF', zh: '公积金 (EPF)' },
-    { value: 'Properties', en: 'Properties', zh: '房产' },
-    { value: 'Vehicles', en: 'Vehicles', zh: '车辆' },
-    { value: 'Other Assets', en: 'Other Assets', zh: '其他资产' }
-  ],
-  investments: [
-    { value: 'ETF', en: 'ETF', zh: '交易所交易基金 (ETF)' },
-    { value: 'Stocks', en: 'Stocks', zh: '股票' },
-    { value: 'Unit Trusts', en: 'Unit Trusts', zh: '信托基金' },
-    { value: 'Bonds', en: 'Bonds', zh: '债券' },
-    { value: 'Forex', en: 'Forex', zh: '外汇' },
-    { value: 'Gold/Precious Metals', en: 'Gold/Precious Metals', zh: '黄金/贵金属' },
-    { value: 'Crypto', en: 'Crypto', zh: '加密货币' },
-    { value: 'Other Investments', en: 'Other Investments', zh: '其他投资' }
-  ],
-  liabilities: [
-    { value: 'Mortgage / Property Loan', en: 'Mortgage', zh: '房贷' },
-    { value: 'Vehicle Loan', en: 'Vehicle Loan', zh: '车贷' },
-    { value: 'Study Loan', en: 'Study Loan', zh: '助学贷款' },
-    { value: 'Personal Loan', en: 'Personal Loan', zh: '个人贷款' },
-    { value: 'Renovation Loan', en: 'Renovation Loan', zh: '装修贷款' },
-    { value: 'Other Loans', en: 'Other Loans', zh: '其他贷款' }
   ]
 };
+
+// ── CFP P4 Task C — quarterly review (client-portal). ──
+// spec docs/superpowers/specs/2026-09-27-cfp-p4-review-monitoring-design.md
+// 决策 1, 2, 5, section C: the client's part is ONLY submitting balances —
+// approval (which is what actually updates assets/liabilities and writes a
+// health snapshot) happens on the advisor side (D5). Editing the values here
+// therefore never touches `assets`/`liabilities` directly; it only stages a
+// `reviews` row for the advisor to review.
+
+interface AssetDraft { value: string; }
+interface LiabilityDraft { balance: string; rate: string; payment: string; }
+
+const toEditableNumber = (n: number | null | undefined): string => (n == null ? '' : String(n));
 
 const LevelUp: React.FC = () => {
   const { t, language } = useLanguage();
   const isZh = language === 'zh';
+
+  // ---- Step 1: quarterly review (required) ----
+  const [reviewLoading, setReviewLoading] = useState(true);
+  const [reviewLoadError, setReviewLoadError] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<ReviewPrefillData | null>(null);
+  const [assetDrafts, setAssetDrafts] = useState<Record<string, AssetDraft>>({});
+  const [liabilityDrafts, setLiabilityDrafts] = useState<Record<string, LiabilityDraft>>({});
+  const [reviewNotes, setReviewNotes] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewSubmitError, setReviewSubmitError] = useState<string | null>(null);
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
+
+  const loadReviewPrefill = async () => {
+    try {
+      setReviewLoading(true);
+      setReviewLoadError(null);
+      const data = await fetchReviewPrefill();
+      setPrefill(data);
+      const nextAssetDrafts: Record<string, AssetDraft> = {};
+      (data.assets || []).forEach((a: ReviewPrefillAsset) => {
+        nextAssetDrafts[a.id] = { value: toEditableNumber(a.current_value) };
+      });
+      setAssetDrafts(nextAssetDrafts);
+      const nextLiabDrafts: Record<string, LiabilityDraft> = {};
+      (data.liabilities || []).forEach((l: ReviewPrefillLiability) => {
+        nextLiabDrafts[l.id] = {
+          balance: toEditableNumber(l.outstanding_balance),
+          rate: toEditableNumber(l.interest_rate),
+          payment: toEditableNumber(l.monthly_payment),
+        };
+      });
+      setLiabilityDrafts(nextLiabDrafts);
+    } catch (err: any) {
+      setReviewLoadError(err.message || 'Failed to load review data');
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadReviewPrefill();
+  }, []);
+
+  const resetAssetToPrefill = (assetId: string) => {
+    const a = (prefill?.assets || []).find((x) => x.id === assetId);
+    if (!a) return;
+    setAssetDrafts((prev) => ({ ...prev, [assetId]: { value: toEditableNumber(a.current_value) } }));
+  };
+  const resetLiabilityToPrefill = (liabilityId: string) => {
+    const l = (prefill?.liabilities || []).find((x) => x.id === liabilityId);
+    if (!l) return;
+    setLiabilityDrafts((prev) => ({
+      ...prev,
+      [liabilityId]: {
+        balance: toEditableNumber(l.outstanding_balance),
+        rate: toEditableNumber(l.interest_rate),
+        payment: toEditableNumber(l.monthly_payment),
+      },
+    }));
+  };
+  const confirmAllUnchanged = () => {
+    (prefill?.assets || []).forEach((a) => resetAssetToPrefill(a.id));
+    (prefill?.liabilities || []).forEach((l) => resetLiabilityToPrefill(l.id));
+  };
+
+  const handleSubmitReview = async () => {
+    if (!prefill) return;
+    setReviewSubmitting(true);
+    setReviewSubmitError(null);
+    try {
+      const assetsPayload = (prefill.assets || []).map((a) => ({
+        asset_id: a.id,
+        value: parseFloat(assetDrafts[a.id]?.value || '0') || 0,
+      }));
+      const liabilitiesPayload = (prefill.liabilities || []).map((l) => {
+        const draft = liabilityDrafts[l.id];
+        return {
+          liability_id: l.id,
+          balance: parseFloat(draft?.balance || '0') || 0,
+          interest_rate: draft?.rate ? parseFloat(draft.rate) : null,
+          monthly_payment: draft?.payment ? parseFloat(draft.payment) : null,
+        };
+      });
+      await submitQuarterlyReview({
+        assets: assetsPayload,
+        liabilities: liabilitiesPayload,
+        notes: reviewNotes.trim() || null,
+      });
+      setReviewSubmitted(true);
+    } catch (err: any) {
+      if (err.message === 'REVIEW_UNAVAILABLE') {
+        setReviewSubmitError(isZh ? '复检功能即将开放，暂时无法提交，请稍后再试。' : 'Review submission isn’t available yet — please try again later.');
+      } else if (err.message === 'REVIEW_ALREADY_PENDING') {
+        setReviewSubmitError(isZh ? '已有一份复检等待审核。' : 'A review is already awaiting approval.');
+        loadReviewPrefill();
+      } else {
+        setReviewSubmitError(err.message || (isZh ? '提交失败' : 'Submission failed'));
+      }
+    } finally {
+      setReviewSubmitting(false);
+    }
+  };
+
+  // ---- Step 2: last month's actual spending (optional, existing flow) ----
+  const [showActuals, setShowActuals] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -86,9 +180,6 @@ const LevelUp: React.FC = () => {
   const [rawHealthData, setRawHealthData] = useState<any>(null);
   const [incomes, setIncomes] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
-  const [assets, setAssets] = useState<any[]>([]);
-  const [investments, setInvestments] = useState<any[]>([]);
-  const [liabilities, setLiabilities] = useState<any[]>([]);
 
   const [inflowMode, setInflowMode] = useState<'detailed' | 'simple'>('detailed');
   const [outflowMode, setOutflowMode] = useState<'detailed' | 'simple'>('detailed');
@@ -137,24 +228,13 @@ const LevelUp: React.FC = () => {
       category: r.fields.Category || r.fields.Type || 'Other',
       description: r.fields.Description || r.fields.Type || '',
       amount: String(r.fields.Value || r.fields.Amount || r.fields["Outstanding Amount"] || '0'),
-      outstandingBalance: r.fields["Outstanding Balance"] || r.fields["Outstanding Amount"] || '0',
-      monthlyInstallment: r.fields["Monthly Installment"] || '0'
     });
 
     const lastIncomes = (rawHealthData.incomes || []).filter(isLastMonth).map((r: any) => mapRecord(r));
     const lastExpenses = (rawHealthData.expenses || []).filter(isLastMonth).map((r: any) => mapRecord(r));
 
-    const getItems = (records: any[]) => {
-      const match = records.filter(isLastMonth);
-      if (match.length > 0) return match.map(r => mapRecord(r));
-      return getLatestRecords(records || []).map(r => mapRecord(r));
-    };
-
     setIncomes(lastIncomes);
     setExpenses(lastExpenses);
-    setAssets(getItems(rawHealthData.assets || []));
-    setInvestments(getItems(rawHealthData.investments || []));
-    setLiabilities(getItems(rawHealthData.liabilities || []));
 
     // Auto-detect simple vs detailed mode from existing data
     const isInflowLumpSum = lastIncomes.length === 1 && lastIncomes[0].category === 'Lump Sum';
@@ -216,7 +296,7 @@ const LevelUp: React.FC = () => {
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmitActuals = async () => {
     const accessToken = await getAccessToken();
     if (!accessToken) {
       setError('Session expired. Please log in again.');
@@ -237,17 +317,13 @@ const LevelUp: React.FC = () => {
           targetYear,
           incomes: incomes.map(i => ({ category: i.category, description: i.description, amount: i.amount })),
           expenses: expenses.map(e => ({ type: e.category, description: e.description, amount: e.amount })),
-          assets: assets.map(a => ({ category: a.category, description: a.description, amount: a.amount })),
-          investments: investments.map(i => ({ category: i.category, description: i.description, amount: i.amount })),
-          liabilities: liabilities.map(l => ({ category: l.category, description: l.description, amount: l.amount }))
         })
       });
 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Submission failed');
 
-      setSuccessMsg(`Successfully leveled up for ${targetYear}!`);
-      setTimeout(() => window.location.reload(), 2000);
+      setSuccessMsg(isZh ? `已成功记录 ${targetYear} 年支出！` : `Successfully recorded spending for ${targetYear}!`);
     } catch (err: any) {
       setError(err.message || 'An error occurred');
     } finally {
@@ -258,10 +334,13 @@ const LevelUp: React.FC = () => {
   const totals = useMemo(() => ({
     inflow: incomes.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0),
     outflow: expenses.reduce((sum, e) => sum + (parseFloat(e.amount) || 0), 0),
-    assets: assets.reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0),
-    investments: investments.reduce((sum, i) => sum + (parseFloat(i.amount) || 0), 0),
-    liabilities: liabilities.reduce((sum, l) => sum + (parseFloat(l.amount) || 0), 0)
-  }), [incomes, expenses, assets, investments, liabilities]);
+  }), [incomes, expenses]);
+
+  const reviewTotals = useMemo(() => {
+    const assetsTotal = Object.values(assetDrafts).reduce((sum, d) => sum + (parseFloat(d.value) || 0), 0);
+    const liabilitiesTotal = Object.values(liabilityDrafts).reduce((sum, d) => sum + (parseFloat(d.balance) || 0), 0);
+    return { assetsTotal, liabilitiesTotal };
+  }, [assetDrafts, liabilityDrafts]);
 
   const ItemSection = ({ title, icon: Icon, items, setter, options, total, type, showModeToggle, mode, onModeChange }: any) => {
     const isSimple = showModeToggle && mode === 'simple';
@@ -277,7 +356,7 @@ const LevelUp: React.FC = () => {
               <h4 className="text-xl font-black text-slate-800 tracking-tight">{isZh ? t(`levelUp.${title.toLowerCase().replace(/\s+/g, '')}`) || title : title}</h4>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{isZh ? '总计' : 'Total'}:</span>
-                <span className={`text-2xl font-black ${type === 'outflow' || type === 'liabilities' ? 'text-rose-500' : 'text-emerald-500'}`}>
+                <span className={`text-2xl font-black ${type === 'outflow' ? 'text-rose-500' : 'text-emerald-500'}`}>
                   RM {total.toLocaleString()}
                 </span>
               </div>
@@ -385,11 +464,46 @@ const LevelUp: React.FC = () => {
     );
   };
 
-  if (loading) {
+  if (reviewLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-24 space-y-4">
         <Loader2 className="w-10 h-10 text-xin-blue animate-spin" />
-        <p className="text-slate-500 font-medium">Synchronizing with Lark Base...</p>
+        <p className="text-slate-500 font-medium">{isZh ? '正在加载...' : 'Loading...'}</p>
+      </div>
+    );
+  }
+
+  if (reviewLoadError) {
+    return (
+      <div className="max-w-2xl mx-auto py-16 text-center space-y-4">
+        <AlertCircle className="w-12 h-12 text-red-500 mx-auto" />
+        <p className="text-slate-600 font-medium">{reviewLoadError}</p>
+      </div>
+    );
+  }
+
+  // A submitted review (from this session, or already on file) replaces the
+  // whole form with a waiting state — spec: "if a submitted review exists
+  // show that state instead of the form".
+  const pendingReview = reviewSubmitted || prefill?.review?.status === 'submitted';
+  if (pendingReview) {
+    const periodEnd = prefill?.review?.period_end;
+    return (
+      <div className="max-w-2xl mx-auto py-20 text-center">
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-xl p-12">
+          <div className="w-20 h-20 bg-xin-blue/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Clock className="text-xin-blue w-10 h-10" />
+          </div>
+          <h2 className="text-2xl font-black text-slate-800 mb-3">
+            {isZh ? '已提交，等待顾问审核' : 'Submitted — awaiting advisor review'}
+          </h2>
+          <p className="text-slate-500">
+            {isZh
+              ? '您的季度复检已提交，顾问审核通过后会更新到您的账户。'
+              : 'Your quarterly review has been submitted. It will take effect once your advisor approves it.'}
+            {periodEnd ? ` (${isZh ? '截止' : 'as of'} ${periodEnd})` : ''}
+          </p>
+        </div>
       </div>
     );
   }
@@ -400,123 +514,283 @@ const LevelUp: React.FC = () => {
       <div className="bg-white rounded-3xl p-8 border border-slate-100 shadow-xl mb-10 relative overflow-hidden">
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-xin-blue to-xin-cyan" />
 
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <div className="bg-xin-blue/10 p-2.5 rounded-2xl text-xin-blue">
-                <ArrowBigUpDash size={32} />
-              </div>
-              <h1 className="text-3xl font-black text-slate-800 tracking-tight">Level Up Portal</h1>
-            </div>
-            <p className="text-slate-500 font-medium max-w-md">Update your monthly financial snapshot and track your progress towards financial freedom.</p>
+        <div className="flex items-center gap-3 mb-2">
+          <div className="bg-xin-blue/10 p-2.5 rounded-2xl text-xin-blue">
+            <ClipboardCheck size={32} />
           </div>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">{isZh ? '季度复检' : 'Quarterly Review'}</h1>
+        </div>
+        <p className="text-slate-500 font-medium max-w-lg">
+          {isZh
+            ? '确认您的资产与负债现值。没有变化的话，一键确认即可。'
+            : 'Confirm your current asset and liability balances. If nothing changed, one click confirms them as-is.'}
+        </p>
+        {prefill?.review_unavailable && (
+          <div className="mt-4 p-3 bg-amber-50 text-amber-700 rounded-xl border border-amber-100 text-sm font-semibold">
+            {isZh ? '复检功能即将开放，暂时仅供预览。' : 'Review submission is coming soon — preview only for now.'}
+          </div>
+        )}
+      </div>
 
-          <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-4 shadow-inner">
-            <div className="flex flex-col">
-              <label className="text-[9px] font-bold text-slate-400 uppercase tracking-widest ml-1 mb-1">{isZh ? '报告月份' : 'Report Period'}</label>
+      {/* Step 1: assets */}
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-md mb-8">
+        <div className="p-6 flex items-center justify-between border-b border-slate-100 bg-slate-50/50 flex-wrap gap-3">
+          <div className="flex items-center gap-4">
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 text-xin-blue shadow-sm">
+              <Building2 size={28} />
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
+              <h4 className="text-xl font-black text-slate-800 tracking-tight">{isZh ? '资产' : 'Assets'}</h4>
               <div className="flex items-center gap-2">
-                <select
-                  value={targetMonth}
-                  onChange={(e) => setTargetMonth(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black text-slate-700 focus:ring-2 focus:ring-xin-blue/10 outline-none cursor-pointer"
-                >
-                  {MONTH_NAMES.map(m => <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>)}
-                </select>
-                <select
-                  value={targetYear}
-                  onChange={(e) => setTargetYear(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black text-slate-700 focus:ring-2 focus:ring-xin-blue/10 outline-none cursor-pointer"
-                >
-                  {[0, -1, -2].map(offset => {
-                    const y = (new Date().getFullYear() + offset).toString();
-                    return <option key={y} value={y}>{y}</option>;
-                  })}
-                </select>
+                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{isZh ? '总计' : 'Total'}:</span>
+                <span className="text-2xl font-black text-emerald-500">RM {reviewTotals.assetsTotal.toLocaleString()}</span>
               </div>
             </div>
           </div>
+          <button
+            onClick={() => (prefill?.assets || []).forEach((a) => resetAssetToPrefill(a.id))}
+            className="flex items-center gap-1.5 text-xs font-bold text-xin-blue bg-xin-blue/10 px-4 py-2 rounded-xl hover:bg-xin-blue/20 transition-colors"
+          >
+            <RotateCcw size={14} /> {isZh ? '没有变化，一键确认' : 'No changes — confirm all'}
+          </button>
         </div>
+        <div className="p-6 space-y-3">
+          {(prefill?.assets || []).length === 0 && (
+            <p className="text-center py-8 text-slate-400 text-sm italic">{isZh ? '暂无资产记录' : 'No assets on file'}</p>
+          )}
+          {(prefill?.assets || []).map((a) => (
+            <div key={a.id} className="grid grid-cols-1 sm:grid-cols-[1fr_180px] items-center gap-3 bg-slate-50/40 p-4 rounded-2xl border border-slate-100">
+              <div>
+                <p className="text-sm font-bold text-slate-700">{a.name}</p>
+                <p className="text-xs text-slate-400">{a.type}</p>
+              </div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-xs font-black text-slate-400">RM</div>
+                <DebouncedNumberInput
+                  className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-3 py-2.5 text-sm font-black text-slate-800 shadow-sm focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none transition-all"
+                  value={assetDrafts[a.id]?.value || ''}
+                  onChange={(val: string) => setAssetDrafts((prev) => ({ ...prev, [a.id]: { value: val } }))}
+                  placeholder="0"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
 
-        {error && (
-          <div className="mt-8 p-4 bg-red-50 text-red-700 rounded-2xl border border-red-100 flex items-center gap-3 animate-shake">
-            <AlertCircle size={20} className="shrink-0" />
-            <span className="font-bold text-sm tracking-tight">{error}</span>
+      {/* Step 1: liabilities */}
+      <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-md mb-8">
+        <div className="p-6 flex items-center justify-between border-b border-slate-100 bg-slate-50/50 flex-wrap gap-3">
+          <div className="flex items-center gap-4">
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 text-xin-blue shadow-sm">
+              <Umbrella size={28} />
+            </div>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-6">
+              <h4 className="text-xl font-black text-slate-800 tracking-tight">{isZh ? '负债' : 'Liabilities'}</h4>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-slate-400 uppercase tracking-widest">{isZh ? '总计' : 'Total'}:</span>
+                <span className="text-2xl font-black text-rose-500">RM {reviewTotals.liabilitiesTotal.toLocaleString()}</span>
+              </div>
+            </div>
           </div>
-        )}
+          <button
+            onClick={() => (prefill?.liabilities || []).forEach((l) => resetLiabilityToPrefill(l.id))}
+            className="flex items-center gap-1.5 text-xs font-bold text-xin-blue bg-xin-blue/10 px-4 py-2 rounded-xl hover:bg-xin-blue/20 transition-colors"
+          >
+            <RotateCcw size={14} /> {isZh ? '没有变化，一键确认' : 'No changes — confirm all'}
+          </button>
+        </div>
+        <div className="p-6 space-y-3">
+          {(prefill?.liabilities || []).length === 0 && (
+            <p className="text-center py-8 text-slate-400 text-sm italic">{isZh ? '暂无负债记录' : 'No liabilities on file'}</p>
+          )}
+          {(prefill?.liabilities || []).map((l) => (
+            <div key={l.id} className="bg-slate-50/40 p-4 rounded-2xl border border-slate-100 space-y-3">
+              <div>
+                <p className="text-sm font-bold text-slate-700">{l.name}</p>
+                <p className="text-xs text-slate-400">{l.type}</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-widest">{isZh ? '余额 (RM)' : 'Balance (RM)'}</label>
+                  <DebouncedNumberInput
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-black text-slate-800 shadow-sm focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none"
+                    value={liabilityDrafts[l.id]?.balance || ''}
+                    onChange={(val: string) => setLiabilityDrafts((prev) => ({ ...prev, [l.id]: { ...prev[l.id], balance: val, rate: prev[l.id]?.rate || '', payment: prev[l.id]?.payment || '' } }))}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-widest">{isZh ? '利率 (%)' : 'Interest rate (%)'}</label>
+                  <DebouncedTextInput
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 shadow-sm focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none"
+                    value={liabilityDrafts[l.id]?.rate || ''}
+                    onChange={(val: string) => setLiabilityDrafts((prev) => ({ ...prev, [l.id]: { ...prev[l.id], rate: val, balance: prev[l.id]?.balance || '', payment: prev[l.id]?.payment || '' } }))}
+                    placeholder="—"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-slate-400 uppercase mb-1 block tracking-widest">{isZh ? '月供 (RM)' : 'Monthly payment (RM)'}</label>
+                  <DebouncedNumberInput
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-800 shadow-sm focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none"
+                    value={liabilityDrafts[l.id]?.payment || ''}
+                    onChange={(val: string) => setLiabilityDrafts((prev) => ({ ...prev, [l.id]: { ...prev[l.id], payment: val, balance: prev[l.id]?.balance || '', rate: prev[l.id]?.rate || '' } }))}
+                    placeholder="—"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
 
-        {successMsg && (
-          <div className="mt-8 p-4 bg-emerald-50 text-emerald-700 rounded-2xl border border-emerald-100 flex items-center gap-3 animate-bounce-in">
-            <Check size={20} className="shrink-0" />
-            <span className="font-bold text-sm tracking-tight">{successMsg}</span>
+      {/* Notes */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-md mb-8 p-6">
+        <label className="text-xs font-black text-slate-400 uppercase mb-2 block tracking-widest">{isZh ? '备注（选填）' : 'Notes (optional)'}</label>
+        <textarea
+          value={reviewNotes}
+          onChange={(e) => setReviewNotes(e.target.value)}
+          rows={3}
+          className="w-full bg-slate-50/40 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-700 focus:ring-2 focus:ring-xin-blue/10 focus:border-xin-blue outline-none transition-all"
+          placeholder={isZh ? '有什么想让顾问知道的吗？' : 'Anything you want your advisor to know?'}
+        />
+      </div>
+
+      {/* Step 2: optional last month's actual spending */}
+      <div className="bg-white rounded-3xl border border-slate-200 shadow-md mb-8 overflow-hidden">
+        <button
+          onClick={() => setShowActuals((v) => !v)}
+          className="w-full p-6 flex items-center justify-between text-left"
+        >
+          <div className="flex items-center gap-4">
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 text-xin-blue shadow-sm">
+              <Wallet size={28} />
+            </div>
+            <div>
+              <h4 className="text-xl font-black text-slate-800 tracking-tight">
+                {isZh ? '上月实际收支（选填）' : "Last Month's Actual Spending (optional)"}
+              </h4>
+              <p className="text-xs text-slate-400 mt-0.5">
+                {isZh ? '与季度复检分开提交，随时可以补充' : 'Submitted separately from the quarterly review — add it any time'}
+              </p>
+            </div>
+          </div>
+          <span className="text-xs font-bold text-xin-blue">{showActuals ? (isZh ? '收起' : 'Hide') : (isZh ? '展开' : 'Show')}</span>
+        </button>
+
+        {showActuals && (
+          <div className="p-6 pt-0 space-y-6 border-t border-slate-100">
+            {loading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="w-8 h-8 text-xin-blue animate-spin" />
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={targetMonth}
+                    onChange={(e) => setTargetMonth(e.target.value)}
+                    className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black text-slate-700 focus:ring-2 focus:ring-xin-blue/10 outline-none cursor-pointer"
+                  >
+                    {MONTH_NAMES.map(m => <option key={m.value} value={m.value}>{isZh ? m.zh : m.en}</option>)}
+                  </select>
+                  <select
+                    value={targetYear}
+                    onChange={(e) => setTargetYear(e.target.value)}
+                    className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-black text-slate-700 focus:ring-2 focus:ring-xin-blue/10 outline-none cursor-pointer"
+                  >
+                    {[0, -1, -2].map(offset => {
+                      const y = (new Date().getFullYear() + offset).toString();
+                      return <option key={y} value={y}>{y}</option>;
+                    })}
+                  </select>
+                </div>
+
+                {error && (
+                  <div className="p-4 bg-red-50 text-red-700 rounded-2xl border border-red-100 flex items-center gap-3">
+                    <AlertCircle size={20} className="shrink-0" />
+                    <span className="font-bold text-sm">{error}</span>
+                  </div>
+                )}
+                {successMsg && (
+                  <div className="p-4 bg-emerald-50 text-emerald-700 rounded-2xl border border-emerald-100 flex items-center gap-3">
+                    <Check size={20} className="shrink-0" />
+                    <span className="font-bold text-sm">{successMsg}</span>
+                  </div>
+                )}
+
+                <ItemSection
+                  title="Cash Inflow"
+                  icon={Wallet}
+                  items={incomes}
+                  setter={setIncomes}
+                  options={CATEGORY_OPTIONS.inflow}
+                  total={totals.inflow}
+                  type="inflow"
+                  showModeToggle
+                  mode={inflowMode}
+                  onModeChange={handleInflowModeChange}
+                />
+                <ItemSection
+                  title="Cash Outflow"
+                  icon={Receipt}
+                  items={expenses}
+                  setter={setExpenses}
+                  options={CATEGORY_OPTIONS.outflow}
+                  total={totals.outflow}
+                  type="outflow"
+                  showModeToggle
+                  mode={outflowMode}
+                  onModeChange={handleOutflowModeChange}
+                />
+
+                <button
+                  onClick={handleSubmitActuals}
+                  disabled={submitting}
+                  className="w-full bg-slate-800 text-white px-8 py-4 rounded-2xl font-black text-sm hover:bg-slate-700 transition-all shadow-md flex items-center justify-center gap-3 disabled:opacity-50"
+                >
+                  {submitting ? <Loader2 size={18} className="animate-spin" /> : <Save size={18} />}
+                  {submitting ? (isZh ? '正在提交...' : 'Submitting...') : (isZh ? '提交上月收支' : "Submit Last Month's Spending")}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
 
-      {/* Main Grid Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-10">
-        <ItemSection
-          title="Cash Inflow"
-          icon={Wallet}
-          items={incomes}
-          setter={setIncomes}
-          options={CATEGORY_OPTIONS.inflow}
-          total={totals.inflow}
-          type="inflow"
-          showModeToggle
-          mode={inflowMode}
-          onModeChange={handleInflowModeChange}
-        />
-        <ItemSection
-          title="Cash Outflow"
-          icon={Receipt}
-          items={expenses}
-          setter={setExpenses}
-          options={CATEGORY_OPTIONS.outflow}
-          total={totals.outflow}
-          type="outflow"
-          showModeToggle
-          mode={outflowMode}
-          onModeChange={handleOutflowModeChange}
-        />
-        <ItemSection title="Assets" icon={Building2} items={assets} setter={setAssets} options={CATEGORY_OPTIONS.assets} total={totals.assets} type="assets" />
-        <ItemSection title="Investments" icon={TrendingUp} items={investments} setter={setInvestments} options={CATEGORY_OPTIONS.investments} total={totals.investments} type="investments" />
-        <div className="lg:col-span-2">
-            <ItemSection title="Liabilities" icon={Umbrella} items={liabilities} setter={setLiabilities} options={CATEGORY_OPTIONS.liabilities} total={totals.liabilities} type="liabilities" />
-        </div>
-      </div>
-
-      {/* Summary Footer */}
+      {/* Submit review footer */}
       <div className="bg-slate-900 text-white rounded-3xl p-10 shadow-2xl relative overflow-hidden border border-slate-800">
         <div className="absolute top-0 right-0 w-96 h-96 bg-xin-blue/5 rounded-full blur-3xl -mr-48 -mt-48" />
 
-        <div className="flex flex-col md:flex-row items-center justify-between gap-10 relative z-10">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-10 w-full md:w-auto">
-            <div>
-              <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '现金流入' : 'Cash Inflow'}</div>
-              <div className="text-2xl font-black text-emerald-400">RM {totals.inflow.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '现金流出' : 'Cash Outflow'}</div>
-              <div className="text-2xl font-black text-white font-sans">RM {totals.outflow.toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '总资产' : 'Total Assets'}</div>
-              <div className="text-2xl font-black text-xin-gold">RM {(totals.assets + totals.investments).toLocaleString()}</div>
-            </div>
-            <div>
-              <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '总负债' : 'Total Liabilities'}</div>
-              <div className="text-2xl font-black text-rose-500">RM {totals.liabilities.toLocaleString()}</div>
+        <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
+          <div>
+            <div className="text-[11px] font-black text-slate-500 uppercase tracking-widest mb-2">{isZh ? '净资产变化' : 'Net Position'}</div>
+            <div className="text-2xl font-black text-xin-gold">
+              RM {(reviewTotals.assetsTotal - reviewTotals.liabilitiesTotal).toLocaleString()}
             </div>
           </div>
 
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="w-full md:w-auto bg-gradient-to-r from-xin-blue to-xin-cyan text-white px-12 py-5 rounded-2xl font-black text-xl hover:scale-[1.05] active:scale-[0.98] transition-all shadow-2xl shadow-xin-blue/30 flex items-center justify-center gap-3 disabled:opacity-50"
-          >
-            {submitting ? <Loader2 size={24} className="animate-spin" /> : <Save size={24} />}
-            {submitting ? (isZh ? '正在上传...' : 'Uploading...') : (isZh ? '确认并上传' : 'Confirm & Upload')}
-          </button>
+          <div className="flex flex-col items-end gap-3">
+            {reviewSubmitError && (
+              <div className="text-sm font-bold text-rose-300 text-right max-w-sm">{reviewSubmitError}</div>
+            )}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={confirmAllUnchanged}
+                className="flex items-center justify-center gap-2 bg-white/10 text-white px-6 py-4 rounded-2xl font-black text-sm hover:bg-white/20 transition-all"
+              >
+                <RotateCcw size={18} /> {isZh ? '全部没有变化' : 'Nothing changed'}
+              </button>
+              <button
+                onClick={handleSubmitReview}
+                disabled={reviewSubmitting}
+                className="bg-gradient-to-r from-xin-blue to-xin-cyan text-white px-10 py-4 rounded-2xl font-black text-lg hover:scale-[1.03] active:scale-[0.98] transition-all shadow-2xl shadow-xin-blue/30 flex items-center justify-center gap-3 disabled:opacity-50"
+              >
+                {reviewSubmitting ? <Loader2 size={22} className="animate-spin" /> : <Save size={22} />}
+                {reviewSubmitting ? (isZh ? '正在提交...' : 'Submitting...') : (isZh ? '提交复检' : 'Submit Review')}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

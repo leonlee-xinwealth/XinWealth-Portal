@@ -5,17 +5,20 @@
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
 import { fvMonthly } from "../goals/calc.ts";
-import { allocationBucketOf, type AllocationBucket as TaxonomyBucket } from "../../../_shared/taxonomy/balance.ts";
+import { legacyHoldings } from "../../baseline.ts";
+import {
+  allocationOf,
+  currentAllocationRows,
+  driftAgainst,
+  MODEL_PORTFOLIOS,
+  type AllocationBucket,
+  type AllocationRow,
+  type DriftRow,
+  type RebalancingAction,
+} from "../../../_shared/finance/allocation.ts";
 
-export type AllocationBucket = "equity" | "bond" | "cash" | "alternatives";
-
-export const MODEL_PORTFOLIOS: Record<string, Record<AllocationBucket, number>> = {
-  conservative: { equity: 20, bond: 55, cash: 20, alternatives: 5 },
-  moderate: { equity: 35, bond: 45, cash: 15, alternatives: 5 },
-  balanced: { equity: 50, bond: 35, cash: 10, alternatives: 5 },
-  growth: { equity: 65, bond: 25, cash: 5, alternatives: 5 },
-  aggressive: { equity: 80, bond: 10, cash: 5, alternatives: 5 },
-};
+export type { AllocationBucket, AllocationRow, DriftRow, RebalancingAction };
+export { MODEL_PORTFOLIOS };
 
 export const EXPECTED_VOL_BY_BAND: Record<string, number> = {
   conservative: 0.05,
@@ -24,27 +27,6 @@ export const EXPECTED_VOL_BY_BAND: Record<string, number> = {
   growth: 0.13,
   aggressive: 0.16,
 };
-
-const BUCKETS: AllocationBucket[] = ["equity", "bond", "cash", "alternatives"];
-
-export interface AllocationRow {
-  bucket: AllocationBucket;
-  amount: number;
-  pct: number | null;
-}
-
-export interface DriftRow {
-  bucket: AllocationBucket;
-  current_pct: number | null;
-  target_pct: number;
-  drift_pp: number | null;
-}
-
-export interface RebalancingAction {
-  bucket: AllocationBucket;
-  action: "increase" | "reduce";
-  amount: number;
-}
 
 export interface WealthProjectionRow {
   year: number;
@@ -66,6 +48,14 @@ export interface InvestmentDet {
   monthly_surplus: number;
   no_investable: boolean;
   wealth_projection: WealthProjectionRow[];
+  /** P3 决策 4: the same target_allocation/drift/rebalancing_actions above,
+   *  grouped under one key for the advisor Portfolio view — additive, the
+   *  flat fields stay for existing callers. */
+  portfolio_drift: {
+    target_allocation: AllocationRow[];
+    drift: DriftRow[];
+    rebalancing_actions: RebalancingAction[];
+  };
 }
 
 const round = (n: number) => Math.round(n);
@@ -78,53 +68,21 @@ export function computeInvestment(
   const riskBandDefaulted = !riskProfile || !MODEL_PORTFOLIOS[riskProfile];
   const band = !riskBandDefaulted ? riskProfile! : "balanced";
 
-  const sumBucket = (bucket: TaxonomyBucket) =>
-    f.assets
-      .filter((a) => allocationBucketOf(a.asset_type) === bucket)
-      .reduce((s, a) => s + (a.current_value ?? 0), 0);
-  const equity = sumBucket("equity") +
-    f.holdings.reduce((s, h) => s + (h.market_value ?? 0), 0);
-  const bond = sumBucket("bond");
-  const cash = b.liquid_assets_after_emergency;
-  const alternatives = sumBucket("alternatives");
-
-  const amounts: Record<AllocationBucket, number> = { equity, bond, cash, alternatives };
-  const investableTotal = BUCKETS.reduce((s, k) => s + amounts[k], 0);
+  // P3 决策 1: a holding already folded into an asset (its account has an
+  // asset_id) must not also be summed here — see legacyHoldings (baseline.ts).
+  const amounts = allocationOf(
+    f.assets,
+    legacyHoldings(f.holdings, f.investment_accounts),
+    b.liquid_assets_after_emergency,
+  );
+  const { investable_total: investableTotal, rows: currentAllocation } = currentAllocationRows(amounts);
   const noInvestable = investableTotal <= 0;
 
-  const currentAllocation: AllocationRow[] = BUCKETS.map((bucket) => ({
-    bucket,
-    amount: round(amounts[bucket]),
-    pct: investableTotal > 0
-      ? Number(((amounts[bucket] / investableTotal) * 100).toFixed(1))
-      : null,
-  }));
-
   const targetPct = MODEL_PORTFOLIOS[band];
-  const targetAllocation: AllocationRow[] = BUCKETS.map((bucket) => ({
-    bucket,
-    amount: round((targetPct[bucket] / 100) * investableTotal),
-    pct: targetPct[bucket],
-  }));
-
-  const drift: DriftRow[] = BUCKETS.map((bucket) => {
-    const currentPct = currentAllocation.find((r) => r.bucket === bucket)!.pct;
-    const target = targetPct[bucket];
-    return {
-      bucket,
-      current_pct: currentPct,
-      target_pct: target,
-      drift_pp: currentPct != null ? Number((currentPct - target).toFixed(1)) : null,
-    };
-  });
-
-  const rebalancingActions: RebalancingAction[] = drift
-    .filter((d) => d.drift_pp != null && Math.abs(d.drift_pp) > 5)
-    .map((d) => ({
-      bucket: d.bucket,
-      action: d.drift_pp! > 0 ? "reduce" : "increase",
-      amount: round((Math.abs(d.drift_pp!) / 100) * investableTotal),
-    }));
+  const { target_allocation: targetAllocation, drift, rebalancing_actions: rebalancingActions } = driftAgainst(
+    targetPct,
+    currentAllocation,
+  );
 
   const r = b.assumptions.client_investment_return;
   const monthlySurplus = Math.max(0, b.annual_surplus / 12);
@@ -148,5 +106,6 @@ export function computeInvestment(
     monthly_surplus: round(b.annual_surplus / 12),
     no_investable: noInvestable,
     wealth_projection: wealthProjection,
+    portfolio_drift: { target_allocation: targetAllocation, drift, rebalancing_actions: rebalancingActions },
   };
 }

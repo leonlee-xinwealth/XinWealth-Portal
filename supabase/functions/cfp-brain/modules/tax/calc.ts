@@ -104,7 +104,14 @@ export function computeTax(
     if (r.auto === "always") {
       auto = r.cap;
     } else if (r.auto === "epf") {
-      auto = f.client.employment_status === "employed"
+      // P2b 决策 6: the actual statutory employee EPF (12 × monthly_employee_epf)
+      // when standing items produced one — still capped like any relief —
+      // rather than the flat 11%-of-income estimate, which doesn't know about
+      // the ≥60 age band or a wage base that differs from total income.
+      const statutoryAnnualEmployeeEpf = 12 * (b.monthly_employee_epf ?? 0);
+      auto = statutoryAnnualEmployeeEpf > 0
+        ? Math.min(r.cap, round(statutoryAnnualEmployeeEpf))
+        : f.client.employment_status === "employed"
         ? Math.min(r.cap, round(0.11 * income))
         : 0;
     } else if (r.auto === "life_premium") {

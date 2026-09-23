@@ -72,6 +72,82 @@ describe("reading the section", () => {
     const v2 = selectInsurance(payload({ ...CONTENT, cna: { ...CONTENT.cna, insufficient: true } }));
     expect(v2.insufficient).toBe(true);
   });
+
+  it("falls back to null categories on legacy content that predates P5", () => {
+    expect(v.categories).toBeNull();
+    expect(v.excludingGroup).toBeNull();
+    expect(v.hasGroupCover).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P5 决策 1 — the six-category breakdown (身故/TPD/重疾/早期重疾/医药/意外),
+// additive alongside the legacy `needs`/`resources`/`gaps` above. See
+// supabase/functions/_shared/insurance/cna.ts's CnaResult/buildProtectionSet.
+// ---------------------------------------------------------------------------
+
+const CONTENT_NEW = {
+  ...CONTENT,
+  cna: {
+    ...CONTENT.cna,
+    death: { need: 2_511_500, cover: 300_000, gap: 2_211_500, notes: ["含团保，离职即失效 / ..."] },
+    tpd: { need: 2_511_500, cover: 300_000, gap: 2_211_500, notes: [] },
+    ci: { need: 432_000, cover: 150_000, gap: 282_000, notes: [] },
+    ci_early_cover: { cover: 0, notes: ["早期重疾未单独记录"] },
+    medical: { cover: 0, notes: [], has_cover: true, annual_limit: 500_000, low_limit: true, limit_unknown: false },
+    pa: { cover: 0, notes: [] },
+    excluding_group: {
+      death: { need: 2_511_500, cover: 200_000, gap: 2_311_500, notes: [] },
+      tpd: { need: 2_511_500, cover: 200_000, gap: 2_311_500, notes: [] },
+      ci: { need: 432_000, cover: 150_000, gap: 282_000, notes: [] },
+      ci_early_cover: { cover: 0, notes: [] },
+      medical: { cover: 0, notes: [], has_cover: true, annual_limit: 500_000, low_limit: true, limit_unknown: false },
+      pa: { cover: 0, notes: [] },
+    },
+  },
+};
+
+describe("the six-category CNA breakdown", () => {
+  const v = selectInsurance(payload(CONTENT_NEW));
+
+  it("maps each category with its Chinese label", () => {
+    expect(v.categories).not.toBeNull();
+    expect(v.categories!.death).toMatchObject({ label: "身故", need: 2_511_500, cover: 300_000, gap: 2_211_500 });
+    expect(v.categories!.tpd.label).toBe("全残（TPD）");
+    expect(v.categories!.ciEarlyCover.label).toBe("早期重疾（保障）");
+    expect(v.categories!.pa.label).toBe("意外（保障）");
+  });
+
+  it("carries the medical category's cover-only fields", () => {
+    const med = v.categories!.medical;
+    expect(med.hasCover).toBe(true);
+    expect(med.annualLimit).toBe(500_000);
+    expect(med.lowLimit).toBe(true);
+    expect(med.limitUnknown).toBe(false);
+    expect(med.need).toBeNull();
+  });
+
+  it("flags group cover when excluding it actually changes a category's cover", () => {
+    expect(v.hasGroupCover).toBe(true);
+    expect(v.excludingGroup!.death.cover).toBe(200_000);
+  });
+
+  it("does not flag group cover when excluding_group is identical to the main set", () => {
+    const noGroup = selectInsurance(payload({
+      ...CONTENT_NEW,
+      cna: { ...CONTENT_NEW.cna, excluding_group: undefined },
+    }));
+    // computeCna's own fallback: excluding_group defaults to the main set
+    // itself when the caller never supplied group-policy detail.
+    expect(noGroup.hasGroupCover).toBe(false);
+    expect(noGroup.excludingGroup).toEqual(noGroup.categories);
+  });
+
+  it("returns null for a section with no cna at all", () => {
+    const e = selectInsurance(payload({ annual_premium_total: 0 }));
+    expect(e.categories).toBeNull();
+    expect(e.hasGroupCover).toBe(false);
+  });
 });
 
 describe("needs table", () => {

@@ -32,6 +32,12 @@ export function kycIncomeEntry(kycKey) {
   return { category: INCOME_CATEGORY_MAP[kycKey], frequency: kycKey === 'bonus' ? 'annual' : 'monthly' };
 }
 
+// P2b 决策: KYC submissions now write STANDING items (cashflow_items), not
+// month rows — kycIncomeItem is an alias kept for symmetry with
+// kycExpenseItem below; the shape (category/frequency) is identical either
+// way, so it simply re-exports kycIncomeEntry rather than duplicating it.
+export const kycIncomeItem = kycIncomeEntry;
+
 export function kycExpenseEntry(groupKey, item) {
   const note = item?.type || item?.description || null;
   const frequency = KYC_YEARLY_ITEMS.has(item?.type) ? 'annual' : 'monthly';
@@ -49,6 +55,17 @@ export function kycExpenseEntry(groupKey, item) {
     needs_review: placed.needs_review,
     review_reason: placed.review_reason,
   };
+}
+
+/**
+ * Same classification as kycExpenseEntry, shaped for a cashflow_items row
+ * instead of a cashflow_entries one: `name` (the item's own display name)
+ * in place of `source_note`. Spec docs/superpowers/specs/
+ * 2026-09-25-cfp-p2b-standing-items-design.md D2: KYC writes standing items.
+ */
+export function kycExpenseItem(groupKey, item) {
+  const { source_note, ...rest } = kycExpenseEntry(groupKey, item);
+  return { ...rest, name: source_note };
 }
 
 export function kycAssetFields(assetType, description) {
@@ -102,4 +119,10 @@ export function assetCashflowEntries({ assetType, name, monthlyIncome, monthlyEx
     });
   }
   return rows;
+}
+
+/** Same rows as assetCashflowEntries, shaped for cashflow_items (`name`
+ *  instead of `source_note`) — spec 2026-09-25-cfp-p2b-standing-items D2. */
+export function assetCashflowItems(m) {
+  return assetCashflowEntries(m).map(({ source_note, ...rest }) => ({ ...rest, name: source_note }));
 }

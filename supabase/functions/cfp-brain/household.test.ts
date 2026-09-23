@@ -1,5 +1,6 @@
 import {
   assert,
+  assertAlmostEquals,
   assertEquals,
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import {
@@ -198,4 +199,65 @@ Deno.test("toPersonSlice carries the client's own rows", () => {
 Deno.test("an individual report has no household block", () => {
   assertEquals(makeCfpData().household, undefined);
   assertEquals(computeBaseline(makeCfpData()).household_mode, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// P2b 决策 6 (household) — SOCSO/EIS's wage ceiling and EPF's employer-rate
+// threshold are PER EMPLOYEE. A joint plan must derive each spouse's
+// statutory deductions from their OWN wage, never a pooled household one.
+// ---------------------------------------------------------------------------
+
+const NOW = new Date("2026-07-16T00:00:00Z");
+
+Deno.test("household: two earners each get statutory EPF/SOCSO/EIS from their OWN wage, not a pooled one", () => {
+  const primary = makeCfpData({
+    client: { ...makeCfpData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { client_id: "c-1", direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  const partner = partnerData({
+    client: { ...partnerData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { client_id: "c-2", direction: "inflow", category: "salary_basic", amount: 4000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+
+  const merged = mergeHousehold(primary, partner);
+  const b = computeBaseline(merged, {}, NOW);
+
+  assertEquals(b.cashflow_source, "items");
+  // c-1 (8,000): employee 880, employer 960 (>5,000 threshold), SOCSO/EIS
+  // capped at 6,000 -> 42. c-2 (4,000): employee 440, employer 520 (<=5,000
+  // threshold), SOCSO/EIS on the uncapped 4,000 -> 28.
+  assertEquals(b.monthly_employee_epf, 880 + 440);
+  assertEquals(b.monthly_employer_epf, 960 + 520);
+  assertAlmostEquals(b.monthly_socso_eis, 42 + 28, 0.01);
+
+  // Pooling both salaries into one 12,000 wage base would cap SOCSO/EIS once
+  // (42) instead of twice (70) — the exact bug the household `clients` map
+  // exists to prevent.
+  assert(b.monthly_socso_eis > 42, "must not be computed off a single pooled wage base");
+
+  assertEquals(b.annual_disposable_surplus, b.annual_surplus - (880 + 440) * 12);
+});
+
+Deno.test("household: merged items keep each spouse's own client_id so per-employee statutory can split them back apart", () => {
+  const primary = makeCfpData({
+    items: [{ client_id: "c-1", direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" }],
+  });
+  const partner = partnerData({
+    items: [{ client_id: "c-2", direction: "inflow", category: "salary_basic", amount: 4000, frequency: "monthly", effective_from: "2026-01-01" }],
+  });
+  const merged = mergeHousehold(primary, partner);
+  assertEquals(merged.items.length, 2);
+  assertEquals(merged.items.map((i) => i.client_id).sort(), ["c-1", "c-2"]);
+  assertEquals(merged.household!.primary.items.length, 1);
+  assertEquals(merged.household!.partner.items.length, 1);
 });

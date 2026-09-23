@@ -4,6 +4,9 @@ import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { getCaseTemplate } from '../cases/caseTemplates';
 import { Users, UserCheck, Target, AlertCircle, Calendar, Gift, ChevronRight } from 'lucide-react';
+import { computeAlerts, type Alert } from '../../../supabase/functions/_shared/finance/alerts';
+
+const ALERT_SEVERITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 export default function Dashboard() {
   const { language } = useLanguage();
@@ -18,6 +21,7 @@ export default function Dashboard() {
   const [incompleteClients, setIncompleteClients] = useState<any[]>([]);
   const [overdueProspects, setOverdueProspects] = useState<any[]>([]);
   const [notContacted, setNotContacted] = useState<any[]>([]);
+  const [clientAlerts, setClientAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const [startingRenewal, setStartingRenewal] = useState<string | null>(null);
 
@@ -40,13 +44,20 @@ export default function Dashboard() {
 
       const clientIds = (cls || []).map((c: any) => c.id);
       if (clientIds.length > 0) {
-        const [{ data: cf }, { data: a }, { data: ip }] = await Promise.all([
+        const [{ data: cf }, { data: ci }, { data: a }, { data: ip }] = await Promise.all([
           supabase.from('cashflow_entries').select('client_id').in('client_id', clientIds),
+          // Standing items (P2b 计划) count as having cash flow too — a client
+          // whose plan lives entirely in cashflow_items should not be flagged
+          // as an incomplete profile just because cashflow_entries is empty.
+          supabase.from('cashflow_items').select('client_id').in('client_id', clientIds),
           supabase.from('assets').select('client_id').in('client_id', clientIds),
           supabase.from('insurance_policies').select('client_id').in('client_id', clientIds),
         ]);
 
-        const hasCashflow = new Set((cf || []).map((r: any) => r.client_id));
+        const hasCashflow = new Set([
+          ...(cf || []).map((r: any) => r.client_id),
+          ...(ci || []).map((r: any) => r.client_id),
+        ]);
         const hasAssets = new Set((a || []).map((r: any) => r.client_id));
         const hasInsurance = new Set((ip || []).map((r: any) => r.client_id));
 
@@ -66,8 +77,74 @@ export default function Dashboard() {
           .map((c: any) => ({ ...c, missingKeys: calcMissing(c) }))
           .filter((c: any) => c.missingKeys.length > 0);
         setIncompleteClients(incompletes);
+
+        // P4 监控提醒 (决策 5/6) — bulk-load snapshots/reviews/liabilities
+        // across every client and compute each client's current alerts
+        // client-side via computeAlerts, merged into one list sorted by
+        // severity. `reviews` may not exist in every environment yet (P4
+        // migration) — degrade to "no review-cadence alerts" rather than
+        // failing the whole dashboard.
+        const [{ data: allSnaps }, { data: allLiabs }] = await Promise.all([
+          supabase.from('health_snapshots')
+            .select('client_id, snapshot_date, net_worth, debt_service_ratio, basic_liquidity_ratio, unexplained_gap')
+            .in('client_id', clientIds)
+            .order('snapshot_date'),
+          supabase.from('liabilities')
+            .select('id, client_id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, remaining_months, rate_type, original_principal, end_date')
+            .in('client_id', clientIds),
+        ]);
+        let allReviews: any[] = [];
+        try {
+          const { data: rv, error } = await supabase.from('reviews')
+            .select('client_id, kind, status, period_end, approved_at')
+            .in('client_id', clientIds);
+          if (error) throw error;
+          allReviews = rv || [];
+        } catch {
+          allReviews = [];
+        }
+
+        const snapsByClient = new Map<string, any[]>();
+        (allSnaps || []).forEach((s: any) => {
+          const arr = snapsByClient.get(s.client_id) || [];
+          arr.push(s);
+          snapsByClient.set(s.client_id, arr);
+        });
+        const reviewsByClient = new Map<string, any[]>();
+        allReviews.forEach((r: any) => {
+          const arr = reviewsByClient.get(r.client_id) || [];
+          arr.push(r);
+          reviewsByClient.set(r.client_id, arr);
+        });
+        const liabsByClient = new Map<string, any[]>();
+        (allLiabs || []).forEach((l: any) => {
+          const arr = liabsByClient.get(l.client_id) || [];
+          arr.push(l);
+          liabsByClient.set(l.client_id, arr);
+        });
+
+        const mergedAlerts: Alert[] = [];
+        for (const cid of clientIds) {
+          const snaps = (snapsByClient.get(cid) || []).slice().sort((x: any, y: any) => (x.snapshot_date < y.snapshot_date ? -1 : 1));
+          if (snaps.length === 0) continue;
+          const latestSnapshot = snaps[snaps.length - 1];
+          const history = snaps.slice(0, -1);
+          mergedAlerts.push(...computeAlerts({
+            client_id: cid,
+            snapshots: history,
+            latestSnapshot,
+            reviews: (reviewsByClient.get(cid) || []).map((r: any) => ({
+              kind: r.kind, status: r.status, period_end: r.period_end, approved_at: r.approved_at,
+            })),
+            liabilities: liabsByClient.get(cid) || [],
+            asOf: new Date(),
+          }));
+        }
+        mergedAlerts.sort((x, y) => ALERT_SEVERITY_RANK[x.severity] - ALERT_SEVERITY_RANK[y.severity]);
+        setClientAlerts(mergedAlerts);
       } else {
         setIncompleteClients([]);
+        setClientAlerts([]);
       }
 
       // Load pending follow-ups (due today or overdue)
@@ -487,15 +564,33 @@ export default function Dashboard() {
       </ActionCard>
 
       {/* Block C: Needs Attention */}
-      {(urgentBirthdays.length > 0 || notContacted.length > 0) && (
+      {(clientAlerts.length > 0 || urgentBirthdays.length > 0 || notContacted.length > 0) && (
         <ActionCard
           title={t('Needs Attention', '需要关注')}
           icon="🔔"
-          count={urgentBirthdays.length + notContacted.length}
+          count={clientAlerts.length + urgentBirthdays.length + notContacted.length}
           urgent={true}
           empty={false}
           emptyText=""
         >
+          {clientAlerts.slice(0, 5).map((a, i) => {
+            const cl = clientMap[a.client_id];
+            const sevStyle = a.severity === 'high' ? 'bg-red-100 text-red-600' : a.severity === 'medium' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600';
+            return (
+              <Link key={`alert-${a.client_id}-${a.code}-${i}`} to={`/advisor/clients/${a.client_id}?tab=monitor`}
+                className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors"
+              >
+                <Avatar name={cl?.full_name || '?'} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-xin-blue truncate">{cl?.full_name || '—'}</div>
+                  <div className="text-xs text-slate-500 truncate">{language === 'zh' ? a.message_zh : a.message_en}</div>
+                </div>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 ${sevStyle}`}>
+                  {a.severity === 'high' ? '⚠' : a.severity === 'medium' ? '●' : '·'}
+                </span>
+              </Link>
+            );
+          })}
           {urgentBirthdays.slice(0, 3).map(c => (
             <Link key={`bday-${c.id}`} to={`/advisor/clients/${c.id}`}
               className="flex items-center gap-2.5 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 -mx-4 px-4 transition-colors"
@@ -528,9 +623,9 @@ export default function Dashboard() {
               </span>
             </Link>
           ))}
-          {(urgentBirthdays.length + notContacted.length) > 8 && (
+          {(clientAlerts.length + urgentBirthdays.length + notContacted.length) > 13 && (
             <div className="py-2.5 text-center text-xs text-slate-400">
-              + {urgentBirthdays.length + notContacted.length - 8} {t('more', '更多')}
+              + {clientAlerts.length + urgentBirthdays.length + notContacted.length - 13} {t('more', '更多')}
             </div>
           )}
         </ActionCard>

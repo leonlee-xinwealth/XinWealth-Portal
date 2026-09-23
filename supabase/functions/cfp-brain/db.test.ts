@@ -1,7 +1,7 @@
 import {
   assertEquals,
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
-import { fetchCfpData } from "./db.ts";
+import { fetchAssetValuationsGraceful, fetchCfpData } from "./db.ts";
 
 /**
  * A minimal stand-in for the PostgREST builder: every method returns the chain,
@@ -48,6 +48,7 @@ const CLIENT = {
   retirement_age: 50,
   epf_account_number: "12345678",
   ppa_account_number: null,
+  has_epf: true,
 };
 
 /**
@@ -75,9 +76,26 @@ function db(over: Record<string, unknown[]> = {}) {
     investment_accounts: [],
     portfolio_holdings: [],
     client_goals: [],
+    cashflow_items: [],
     ...over,
   });
 }
+
+const SALARY_ITEM = {
+  id: "i-1",
+  client_id: "c-1",
+  direction: "inflow",
+  category: "salary_basic",
+  name: "Salary",
+  amount: 8000,
+  frequency: "monthly",
+  effective_from: "2026-04-01",
+  effective_to: null,
+  linked_asset_id: null,
+  linked_liability_id: null,
+  linked_policy_id: null,
+  needs_review: false,
+};
 
 Deno.test("every month's rows survive the fetch", async () => {
   // The regression. cfp-brain used to keep only each direction's most recent
@@ -159,4 +177,112 @@ Deno.test("account numbers degrade to booleans at the fetch boundary", async () 
     Object.keys(f!.client).some((k) => k.includes("account_number")),
     false,
   );
+});
+
+// ---------------------------------------------------------------------------
+// P2b — cashflow_items (常设项目) and clients.has_epf
+// ---------------------------------------------------------------------------
+
+Deno.test("cashflow_items: every version is fetched for the client", async () => {
+  const f = await fetchCfpData(db({ cashflow_items: [SALARY_ITEM] }), "c-1");
+  assertEquals(f!.items.length, 1);
+  assertEquals(f!.items[0].category, "salary_basic");
+  assertEquals(f!.items[0].effective_from, "2026-04-01");
+});
+
+Deno.test("cashflow_items: a client with none yields an empty list, not a throw", async () => {
+  const f = await fetchCfpData(db(), "c-1");
+  assertEquals(f!.items, []);
+});
+
+Deno.test("clients.has_epf reaches CfpClient.has_epf verbatim (true/false/null)", async () => {
+  const truthy = await fetchCfpData(db(), "c-1");
+  assertEquals(truthy!.client.has_epf, true);
+
+  const falsy = await fetchCfpData(db({ clients: [{ ...CLIENT, has_epf: false }] }), "c-1");
+  assertEquals(falsy!.client.has_epf, false);
+
+  const unset = await fetchCfpData(db({ clients: [{ ...CLIENT, has_epf: null }] }), "c-1");
+  assertEquals(unset!.client.has_epf, null);
+});
+
+// ---------------------------------------------------------------------------
+// P3 — asset_id/id/linked_asset_id/account_id columns feed legacyHoldings and
+// assessAssets; asset_valuations degrades gracefully when the table errors
+// or is missing (it may not exist yet in every environment).
+// ---------------------------------------------------------------------------
+
+Deno.test("P3: assets/liabilities/investment_accounts/portfolio_holdings select the new columns", async () => {
+  const d = db();
+  await fetchCfpData(d, "c-1");
+  assertEquals(d.selects.assets.includes("id"), true);
+  assertEquals(d.selects.liabilities.includes("linked_asset_id"), true);
+  assertEquals(d.selects.investment_accounts.includes("id"), true);
+  assertEquals(d.selects.investment_accounts.includes("asset_id"), true);
+  assertEquals(d.selects.portfolio_holdings.includes("account_id"), true);
+});
+
+Deno.test("P3: asset_valuations rows reach CfpData.asset_valuations", async () => {
+  const rows = [
+    { asset_id: "a-1", valuation_date: "2026-07-01", value: 25000, net_contribution: 0 },
+  ];
+  const f = await fetchCfpData(db({ asset_valuations: rows }), "c-1");
+  assertEquals(f!.asset_valuations, rows);
+});
+
+Deno.test("P3: a client with no asset_valuations rows yet gets an empty list, not a throw", async () => {
+  const f = await fetchCfpData(db(), "c-1");
+  assertEquals(f!.asset_valuations, []);
+});
+
+Deno.test("P3: fetchAssetValuationsGraceful degrades to [] when the table errors (not yet migrated in this env)", async () => {
+  const erroringDb = {
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        then(res: (v: unknown) => unknown) {
+          return Promise.resolve({ data: null, error: { message: 'relation "asset_valuations" does not exist' } }).then(res);
+        },
+      };
+    },
+  };
+  const rows = await fetchAssetValuationsGraceful(erroringDb, "c-1");
+  assertEquals(rows, []);
+});
+
+Deno.test("P3: fetchAssetValuationsGraceful degrades to [] when the query throws outright", async () => {
+  const throwingDb = {
+    from() {
+      throw new Error("network error");
+    },
+  };
+  const rows = await fetchAssetValuationsGraceful(throwingDb, "c-1");
+  assertEquals(rows, []);
+});
+
+Deno.test("cashflow_items select includes every column planCashflow/statutory need", async () => {
+  const d = db();
+  await fetchCfpData(d, "c-1");
+  for (
+    const col of [
+      "client_id",
+      "direction",
+      "category",
+      "amount",
+      "frequency",
+      "effective_from",
+      "effective_to",
+      "linked_asset_id",
+      "linked_liability_id",
+      "linked_policy_id",
+      "needs_review",
+    ]
+  ) {
+    assertEquals(d.selects.cashflow_items.includes(col), true, `missing column: ${col}`);
+  }
 });

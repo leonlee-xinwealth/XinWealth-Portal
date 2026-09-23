@@ -38,6 +38,7 @@ export default function CashflowBasisPicker({
   onSaved: () => void;
 }) {
   const [rows, setRows] = useState<PeriodRow[]>([]);
+  const [hasItems, setHasItems] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -49,11 +50,21 @@ export default function CashflowBasisPicker({
     let cancelled = false;
     (async () => {
       const ids = partnerClientId ? [clientId, partnerClientId] : [clientId];
-      const { data } = await supabase
-        .from('cashflow_entries')
-        .select('direction, amount, frequency, period_month, category, linked_asset_id')
-        .in('client_id', ids);
-      if (!cancelled) { setRows((data ?? []) as PeriodRow[]); setLoading(false); }
+      const [{ data }, { data: itemRows }] = await Promise.all([
+        supabase
+          .from('cashflow_entries')
+          .select('direction, amount, frequency, period_month, category, linked_asset_id')
+          .in('client_id', ids),
+        // P2b 决策 1/7: once the client has ANY standing item the plan is read
+        // from cashflow_items — the basis (which month range to average
+        // actuals over) is no longer meaningful, so the picker below is hidden.
+        supabase.from('cashflow_items').select('id').in('client_id', ids).limit(1),
+      ]);
+      if (!cancelled) {
+        setRows((data ?? []) as PeriodRow[]);
+        setHasItems((itemRows ?? []).length > 0);
+        setLoading(false);
+      }
     })();
     return () => { cancelled = true; };
   }, [clientId, partnerClientId]);
@@ -97,6 +108,17 @@ export default function CashflowBasisPicker({
   }
 
   if (loading) return null;
+
+  if (hasItems) {
+    return (
+      <div className="text-xs text-slate-500 flex items-center gap-2">
+        <span className="text-slate-500">{t('Plan basis', '计划依据')}:</span>
+        <span className="font-semibold text-xin-blue">
+          {t('Standing items (as of today)', '常设项目（截至今天）')}
+        </span>
+      </div>
+    );
+  }
 
   if (!effective) {
     return (

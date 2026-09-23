@@ -248,7 +248,12 @@ export function computeSynthesis(
     ],
   ];
 
-  const surplus = Math.max(0, b.annual_surplus);
+  // P2b 决策 6: forced EPF savings (annual_disposable_surplus already nets it
+  // out) can't be redirected to protection/emergency/retirement/goals — the
+  // waterfall must allocate what's actually free to move, not the raw
+  // surplus. Falls back to annual_surplus itself on the actuals path, where
+  // the two are equal anyway (monthly_employee_epf is 0).
+  const surplus = Math.max(0, b.annual_disposable_surplus ?? b.annual_surplus);
   let remaining = surplus;
   const lines: BudgetLine[] = requirements.map(
     ([key, label_zh, label_en, required]) => {

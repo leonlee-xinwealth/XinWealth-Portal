@@ -132,8 +132,11 @@ export function monthOf(periodMonth: string): number | null {
   return Number.isInteger(m) && m >= 1 && m <= 12 ? m : null;
 }
 
-/** A row that records one month's actual amount, as opposed to a periodic item. */
-function isMonthlyActual(r: PeriodRow): boolean {
+/** A row that records one month's actual amount, as opposed to a periodic item.
+ *  Exported so ../cashflow/items.ts (which may import only this file) can group
+ *  cashflow_entries rows the SAME way this file does, rather than re-deriving
+ *  the rule and risking drift. */
+export function isMonthlyActual(r: { frequency?: string | null }): boolean {
   return (r.frequency ?? "monthly") === "monthly";
 }
 

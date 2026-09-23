@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  assetCashflowEntries, kycAssetFields, kycExpenseEntry, kycIncomeEntry,
+  assetCashflowEntries, assetCashflowItems, kycAssetFields, kycExpenseEntry, kycExpenseItem,
+  kycIncomeEntry, kycIncomeItem,
 } from "../../api/_lib/kycMapping.js";
 
 describe("KYC expenses", () => {
@@ -47,6 +48,38 @@ describe("KYC assets", () => {
     const other = assetCashflowEntries({ assetType: "unit_trust", name: "Fund", monthlyIncome: 0, monthlyExpenses: 50 });
     expect(other).toEqual([
       { direction: "outflow", category: "other_expense", amount: 50, needs_review: true, review_reason: "请确认这笔资产相关支出的类别", source_note: "Fund (KYC)" },
+    ]);
+  });
+});
+
+// P2b: KYC now writes standing items (cashflow_items), not month rows. These
+// item-shaped variants carry `name` where the entries shape carried
+// `source_note` — everything else (category/frequency/needs_review) is
+// identical, so they're tested against the same fixtures as above.
+describe("KYC items (P2b cashflow_items shape)", () => {
+  it("kycIncomeItem is the same mapping as kycIncomeEntry", () => {
+    expect(kycIncomeItem("salary")).toEqual({ category: "salary_basic", frequency: "monthly" });
+    expect(kycIncomeItem("bonus")).toEqual({ category: "bonus", frequency: "annual" });
+  });
+
+  it("kycExpenseItem classifies the same as kycExpenseEntry but returns `name` not `source_note`", () => {
+    const item = kycExpenseItem("household", { type: "Utilities Bills" });
+    expect(item).toEqual({ category: "utilities", frequency: "monthly", name: "Utilities Bills", needs_review: false, review_reason: null });
+  });
+
+  it("kycExpenseItem keeps the yearly-item and review-flag behaviour", () => {
+    const yearly = kycExpenseItem("personal", { type: "Vacation/ Travel" });
+    expect(yearly).toMatchObject({ category: "travel", frequency: "annual", needs_review: false });
+    const loan = kycExpenseItem("otherExpenses", { type: "Loan Repayment" });
+    expect(loan.category).toBe("debt_other");
+    expect(loan.needs_review).toBe(true);
+  });
+
+  it("assetCashflowItems mirrors assetCashflowEntries with `name` in place of `source_note`", () => {
+    const rows = assetCashflowItems({ assetType: "investment_property", name: "Condo", monthlyIncome: 1800, monthlyExpenses: 300 });
+    expect(rows).toEqual([
+      { direction: "inflow", category: "rental_income", amount: 1800, needs_review: false, review_reason: null, name: "Condo (KYC)" },
+      { direction: "outflow", category: "housing_other", amount: 300, needs_review: false, review_reason: null, name: "Condo (KYC)" },
     ]);
   });
 });

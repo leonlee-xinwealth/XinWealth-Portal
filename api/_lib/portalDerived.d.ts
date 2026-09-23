@@ -10,6 +10,21 @@ export declare function latestMonthYear(
   today?: Date,
 ): { month: string; year: string };
 
+export interface PortalInvestmentAccountLike {
+  id?: string | null;
+  asset_id?: string | null;
+}
+
+export interface PortalHoldingLike {
+  account_id?: string | null;
+  [key: string]: unknown;
+}
+
+export declare function legacyHoldings<H extends PortalHoldingLike>(
+  holdings: H[] | null | undefined,
+  accounts: PortalInvestmentAccountLike[] | null | undefined,
+): H[];
+
 export declare function isSupersededOutflow(
   row: { direction?: string | null; category?: string | null } | null | undefined,
   liabilities: any[],

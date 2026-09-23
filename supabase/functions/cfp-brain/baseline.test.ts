@@ -16,7 +16,9 @@ export function makeCfpData(overrides: Partial<CfpData> = {}): CfpData {
       retirement_age: 60,
       has_epf_account: true,
       has_prs_account: false,
+      has_epf: false,
     },
+    items: [],
     cashflow: [
       { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
       { direction: "inflow", amount: 12000, frequency: "annual", category: "bonus", period_month: "2026-06-01" },
@@ -139,6 +141,79 @@ Deno.test("holdings count toward total assets", () => {
     NOW,
   );
   assertEquals(b.total_assets, 675000);
+});
+
+// ---------------------------------------------------------------------------
+// P3 决策 1 — `assets` is the single source of truth. A holding whose account
+// has been folded into an asset (asset_id set) must not ALSO count here.
+// ---------------------------------------------------------------------------
+
+Deno.test("a holding with no matching account is legacy and still counts (today's behaviour, pre-migration)", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      investment_accounts: [],
+      holdings: [{ account_id: "acct-1", snapshot_month: "2026-07-01", instrument_code: "F1", market_value: 25000, cost_basis: 20000 }],
+    }),
+    {},
+    NOW,
+  );
+  assertEquals(b.total_assets, 675000);
+});
+
+Deno.test("a holding whose account has an asset_id is excluded — already folded into assets", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      investment_accounts: [
+        { id: "acct-1", asset_id: "asset-1", account_type: "unit_trust", prs_sub_account_a: null, prs_sub_account_b: null },
+      ],
+      holdings: [{ account_id: "acct-1", snapshot_month: "2026-07-01", instrument_code: "F1", market_value: 25000, cost_basis: 20000 }],
+    }),
+    {},
+    NOW,
+  );
+  // 650,000 base (see "ratios, net worth and demographics" above) unchanged —
+  // the holding would have added 25,000 pre-P3.
+  assertEquals(b.total_assets, 650000);
+});
+
+Deno.test("mixed: only the holding backed by a migrated account is excluded, the other (legacy) still counts", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      investment_accounts: [
+        { id: "acct-1", asset_id: "asset-1", account_type: "unit_trust", prs_sub_account_a: null, prs_sub_account_b: null },
+        { id: "acct-2", asset_id: null, account_type: "prs", prs_sub_account_a: null, prs_sub_account_b: null },
+      ],
+      holdings: [
+        { account_id: "acct-1", snapshot_month: "2026-07-01", instrument_code: "F1", market_value: 25000, cost_basis: 20000 },
+        { account_id: "acct-2", snapshot_month: "2026-07-01", instrument_code: "F2", market_value: 9000, cost_basis: 9000 },
+      ],
+    }),
+    {},
+    NOW,
+  );
+  assertEquals(b.total_assets, 659000); // 650,000 + 9,000 legacy; the 25,000 migrated one is dropped
+});
+
+Deno.test("asset_quality is computed additively — quadrant reflects an asset's linked item/liability + value history", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      assets: [
+        { id: "house-1", asset_type: "property", current_value: 500000, cost_value: null, ownership_type: null },
+      ],
+      liabilities: [],
+      items: [],
+    }),
+    {},
+    NOW,
+  );
+  assert(b.asset_quality);
+  assertEquals(b.asset_quality!.assets.length, 1);
+  assertEquals(b.asset_quality!.assets[0].asset_id, "house-1");
+  // class D (property), no linked items/liabilities and no valuation history:
+  // net cash flow 0, value change treated as 0 (not a vehicle, no history) —
+  // both >= 0, so the quadrant rule (assetQuality.ts quadrantFor) says "productive".
+  assertEquals(b.asset_quality!.assets[0].quadrant, "productive");
+  assert(b.asset_quality!.assets[0].notes.includes("缺少估值历史"));
 });
 
 Deno.test("asset transfers are excluded from income and expenses (小会计口径)", () => {
@@ -283,4 +358,67 @@ Deno.test("P2a: 乙's derived installments/premium turn a reported near-breakeve
     b.baseline_notes.some((n) => n.includes("月供不足以支付当期利息")),
     b.baseline_notes.join(" | "),
   );
+});
+
+// ---------------------------------------------------------------------------
+// P2b — standing items (决策 1) and statutory EPF/SOCSO/EIS (决策 6). NOW =
+// 2026-07-16, so items are evaluated "as of" 2026-07.
+// ---------------------------------------------------------------------------
+
+Deno.test("P2b: a standing salary item switches cashflow_source to 'items' and derives statutory deductions", () => {
+  const f = makeCfpData({
+    client: { ...makeCfpData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  const b = computeBaseline(f, {}, NOW);
+
+  assertEquals(b.cashflow_source, "items");
+  assertEquals(b.items_as_of, "2026-07-01");
+  assertEquals(b.annual_income, 96000);
+
+  // wage 8,000: employee 11% = 880 (transfer, never in expenses), employer
+  // 12% (>5,000 threshold) = 960, SOCSO/EIS 0.7% of the 6,000-capped wage = 42.
+  assertEquals(b.monthly_employee_epf, 880);
+  assertEquals(b.monthly_employer_epf, 960);
+  assertAlmostEquals(b.monthly_socso_eis, 42, 0.01);
+  assertAlmostEquals(b.annual_expenses, 42 * 12, 0.01);
+
+  // annual_disposable_surplus = annual_surplus − 12 × employee EPF.
+  assertEquals(b.annual_disposable_surplus, b.annual_surplus - 880 * 12);
+
+  assert(b.baseline_notes.some((n) => n.includes("常设项目") && n.includes("2026-07")), b.baseline_notes.join(" | "));
+  assert(b.baseline_notes.some((n) => n.includes("按法定比例估算")), b.baseline_notes.join(" | "));
+  assertEquals(b.one_off_items, []);
+});
+
+Deno.test("P2b: no items stays on the actuals path — cashflow_source, statutory fields and disposable surplus are all unaffected", () => {
+  const b = computeBaseline(makeCfpData(), {}, NOW);
+  assertEquals(b.cashflow_source, "actuals");
+  assertEquals(b.items_as_of, null);
+  assertEquals(b.monthly_employee_epf, 0);
+  assertEquals(b.monthly_employer_epf, 0);
+  assertEquals(b.monthly_socso_eis, 0);
+  assertEquals(b.annual_disposable_surplus, b.annual_surplus);
+  assertEquals(b.one_off_items, []);
+});
+
+Deno.test("P2b: has_epf true but no active salary items derives no statutory deductions", () => {
+  const f = makeCfpData({
+    client: { ...makeCfpData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "outflow", category: "groceries", amount: 500, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  const b = computeBaseline(f, {}, NOW);
+  assertEquals(b.monthly_employee_epf, 0);
+  assertEquals(b.monthly_employer_epf, 0);
+  assertEquals(b.monthly_socso_eis, 0);
 });

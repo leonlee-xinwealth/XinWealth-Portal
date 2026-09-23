@@ -75,6 +75,11 @@ export function toCfpFinancials(f: CfpData): CfpFinancials {
         category: r.category ?? "",
       })),
     liabilities: f.liabilities.map((l) => ({
+      // P5 决策 1: `id` is what a policy's `covers_liability_id` matches
+      // against to net an MRTA/MLTA-covered mortgage balance out of the
+      // death/TPD need (_shared/insurance/mapping.ts's buildCoverageDetail).
+      // Not identifying — a liability row id, never client PII.
+      id: l.id ?? null,
       liability_type: l.liability_type,
       name: "",
       outstanding_balance: l.outstanding_balance,

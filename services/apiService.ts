@@ -1,4 +1,8 @@
-import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics, AnalyticsItem, Portfolio, PortfolioSnapshot, PortfolioMetrics, PortfolioMonthlyPoint } from '../types';
+import {
+  PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics,
+  AnalyticsItem, Portfolio, PortfolioSnapshot, PortfolioMetrics, PortfolioMonthlyPoint,
+  AssetQualitySummary, PortfolioAllocationSummary, HealthSnapshot, CnaResult, ReviewStatus, CurrentPlan,
+} from '../types';
 
 import { getAccessToken, supabase } from '../lib/supabase';
 
@@ -300,6 +304,72 @@ export const submitLevelUp = async (formData: any): Promise<{ success: boolean }
   }
 };
 
+// ── P4 Task C — quarterly review (client-submitted). Same /api/levelUp
+// endpoint as submitLevelUp above (Vercel Hobby plan is at its function-count
+// limit — spec docs/superpowers/specs/2026-09-27-cfp-p4-review-monitoring-design.md
+// section C), distinguished by `mode: 'review'`. ──
+
+export interface ReviewPrefillAsset { id: string; name: string; type: string; current_value: number; }
+export interface ReviewPrefillLiability {
+  id: string; name: string; type: string; outstanding_balance: number;
+  interest_rate: number | null; monthly_payment: number | null;
+}
+export interface ReviewSummary {
+  id: string; status: string; kind?: string; period_end: string;
+  submitted_at?: string | null; approved_at?: string | null; advisor_note?: string | null;
+}
+export interface ReviewPrefillData {
+  assets: ReviewPrefillAsset[];
+  liabilities: ReviewPrefillLiability[];
+  review: ReviewSummary | null;
+  review_unavailable: boolean;
+}
+
+export const fetchReviewPrefill = async (): Promise<ReviewPrefillData> => {
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new Error('Authentication error. Please login again.');
+
+  const res = await fetch('/api/levelUp?mode=review&action=prefill', {
+    headers: { 'Authorization': `Bearer ${accessToken}` }
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Failed to load review data');
+  return data as ReviewPrefillData;
+};
+
+export interface SubmitQuarterlyReviewPayload {
+  assets: Array<{ asset_id: string; value: number }>;
+  liabilities: Array<{ liability_id: string; balance: number; interest_rate?: number | null; monthly_payment?: number | null }>;
+  notes?: string | null;
+}
+
+/** Throws with message 'REVIEW_UNAVAILABLE' when the `reviews` table isn't
+ *  deployed yet (api/levelUp.js's 503 `{error:'review_unavailable'}`) and
+ *  'REVIEW_ALREADY_PENDING' when one is already awaiting approval — callers
+ *  (LevelUp.tsx) match on these to show the right message. */
+export const submitQuarterlyReview = async (
+  payload: SubmitQuarterlyReviewPayload
+): Promise<{ success: boolean; review?: ReviewSummary }> => {
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new Error('Authentication error. Please login again.');
+
+  const res = await fetch('/api/levelUp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`
+    },
+    body: JSON.stringify({ mode: 'review', action: 'submit_review', ...payload })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    if (data?.error === 'review_unavailable') throw new Error('REVIEW_UNAVAILABLE');
+    if (data?.error === 'review_already_pending') throw new Error('REVIEW_ALREADY_PENDING');
+    throw new Error(data.error || 'Failed to submit review');
+  }
+  return data;
+};
+
 /**
  * Advanced Financial Analytics Engine
  * Calculates Equity, Progress, ROI, and Cumulative Cashflow
@@ -438,6 +508,38 @@ export const calculateAnalytics = (data: any): FinancialAnalytics => {
   };
 };
 
+/**
+ * P3 (spec docs/superpowers/specs/2026-09-26-cfp-p3-assets-portfolio-design.md
+ * 决策 3/4): api/health.js now returns two additive fields alongside the
+ * existing ones — the per-asset 2×2 (`asset_quality`) and the portfolio
+ * allocation vs the target model (`portfolio`). These are plain pick helpers
+ * over an already-fetched fetchRawHealthData() response (no extra network
+ * call) so callers (NetWorth.tsx) get typed access instead of `data.asset_quality`.
+ */
+export const pickAssetQuality = (data: any): AssetQualitySummary | null =>
+  (data?.asset_quality as AssetQualitySummary) ?? null;
+
+export const pickPortfolioAllocation = (data: any): PortfolioAllocationSummary | null =>
+  (data?.portfolio as PortfolioAllocationSummary) ?? null;
+
+/**
+ * P2b/P4 (spec docs/superpowers/specs/2026-09-25-cfp-p2b-standing-items-design.md
+ * D2, 2026-09-27-cfp-p4-review-monitoring-design.md 决策 3): api/health.js's
+ * `current` field — the plan-sourced "as of today" income/expenses/surplus/
+ * debt-service/EPF figures. Cashflow.tsx and Retirement.tsx read this
+ * instead of summing the latest month's raw rows by hand.
+ */
+export const pickCurrentPlan = (data: any): CurrentPlan | null =>
+  (data?.current as CurrentPlan) ?? null;
+
+/**
+ * P4 决策 6: api/health.js's `review_status` field — the client-home due/
+ * 「等待顾问审核」 banner source. Degrades to "not due, not pending" rather
+ * than null so a caller can render it without an extra null check.
+ */
+export const pickReviewStatus = (data: any): ReviewStatus =>
+  (data?.review_status as ReviewStatus) ?? { last_approved_at: null, pending: false, due: false };
+
 export const fetchRawHealthData = async (): Promise<any> => {
   const accessToken = await getAccessToken();
   if (!accessToken) throw new Error('Authentication error. Please login again.');
@@ -514,165 +616,65 @@ export const getLatestRecords = (records: any[]) => {
   );
 };
 
+const EMPTY_REVIEW_STATUS: ReviewStatus = { last_approved_at: null, pending: false, due: false };
+
+/**
+ * P4 决策 3 / P5 决策 1 (spec docs/superpowers/specs/
+ * 2026-09-27-cfp-p4-review-monitoring-design.md,
+ * 2026-09-26-cfp-p5-insurance-design.md): every ratio here used to be
+ * recomputed ad-hoc from the latest raw records — its own copy of the same
+ * math HealthScoreCard.tsx and cfp-brain/baseline.ts each had. api/health.js
+ * now computes them all once via the shared computeSnapshot()/computeCna()
+ * formulas (`data.snapshot` / `data.insurance_gap`) and this function just
+ * reads them, so the three call sites can never disagree again. A missing
+ * `data.snapshot` (client not found) degrades every ratio/raw figure to
+ * NaN/0 exactly as the old ad-hoc math did when it had no data to sum.
+ */
 export const fetchFinancialHealth = async (): Promise<FinancialHealthData> => {
   const data = await fetchRawHealthData();
+  const snapshot: HealthSnapshot | null = data.snapshot ?? null;
+  const raw_metrics = (snapshot?.raw_metrics ?? {}) as Record<string, number>;
+  const num = (v: unknown, fallback = 0): number => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+  const ratio = (v: number | null | undefined): number => (v == null ? NaN : v);
 
-  // Helper to extract value safely
-  const getValue = (item: any, fieldNames: string[]): number => {
-    for (const field of fieldNames) {
-      if (item.fields[field] !== undefined) {
-         return safeFloat(item.fields[field]);
-      }
-    }
-    return 0;
-  };
-
-  // 1. Calculate components using only the latest snapshots
-  const latestAssets = getLatestRecords(data.assets || []);
-  const latestInvestments = getLatestRecords(data.investments || []);
-  const latestLiabilities = getLatestRecords(data.liabilities || []);
-  const latestExpenses = getLatestRecords(data.expenses || []);
-  const latestIncomes = getLatestRecords(data.incomes || []);
-
-  let cashAndFD = 0;
-  let totalAssets = 0;
-  let investmentAssets = 0;
-  
-  latestAssets.forEach((item: any) => {
-    const val = getValue(item, ["Value", "value", "Amount", "amount"]);
-    const cat = item.fields["Category"] || "";
-    totalAssets += val;
-    if (cat === "Cash/Savings" || cat === "Savings" || cat === "Savings/Current Account" || cat === "Fixed Deposit" || cat === "Money Market Fund For Savings") {
-      cashAndFD += val;
-    }
-  });
-
-  latestInvestments.forEach((item: any) => {
-    const val = getValue(item, ["Amount", "amount", "Value", "value", "End Value"]);
-    totalAssets += val;
-    investmentAssets += val;
-  });
-
-  let totalLiabilities = 0;
-  latestLiabilities.forEach((item: any) => {
-    const val = getValue(item, ["Value", "value", "Outstanding Amount", "outstanding amount", "Amount", "amount"]);
-    totalLiabilities += val;
-  });
-
-  const netWorth = totalAssets - totalLiabilities;
-
-  let monthlyExpenses = 0;
-  let annualExpenses = 0;
-  let totalMonthlyDebtRepayment = 0;
-  let consumerDebtRepayment = 0; 
-
-  latestExpenses.forEach((item: any) => {
-    let val = getValue(item, ["Amount", "amount"]);
-    const type = item.fields["Type"] || "";
-
-    // Convert yearly to monthly if applicable
-    if (type === 'Vacation/ Travel' || type === 'Income Tax Expense') {
-       annualExpenses += val;
-       val = val / 12;
-    } else {
-       annualExpenses += val * 12;
-    }
-    monthlyExpenses += val;
-
-    if (type === 'Loan Repayment' || type.includes('Loan')) {
-       totalMonthlyDebtRepayment += val;
-       consumerDebtRepayment += val; 
-    }
-  });
-
-  let monthlyGrossIncome = 0;
-  let annualPassiveIncome = 0;
-
-  // For dynamic annual income calculation
-  let totalCurrentYearIncome = 0;
-  const currentYear = new Date().getFullYear().toString();
-  const recordedMonths = new Set<string>();
-
-  data.incomes?.forEach((item: any) => {
-    let val = getValue(item, ["Amount", "amount"]);
-    const year = item.fields["Year"] || item.fields["year"] || "";
-    const month = item.fields["Month"] || item.fields["month"] || "";
-
-    if (year === currentYear) {
-      totalCurrentYearIncome += val;
-      if (month) recordedMonths.add(month);
-    }
-  });
-
-  latestIncomes.forEach((item: any) => {
-    let val = getValue(item, ["Amount", "amount"]);
-    const cat = item.fields["Category"] || "";
-
-    if (cat === 'Annual Bonus') {
-      monthlyGrossIncome += val / 12;
-    } else {
-      monthlyGrossIncome += val;
-    }
-
-    if (cat === 'Rental Income' || cat === 'Dividend Income') {
-      annualPassiveIncome += val * 12;
-    }
-  });
-
-  const monthlyNetIncome = monthlyGrossIncome; // Approximate if tax isn't detailed
-  const monthlySavings = monthlyNetIncome - monthlyExpenses;
-  
-  // Calculate dynamic annual income
-  let annualIncome = 0;
-  const monthsCount = recordedMonths.size;
-  if (monthsCount > 0) {
-    annualIncome = (totalCurrentYearIncome / monthsCount) * 12;
-  } else {
-    // Fallback to legacy calculation if no data for current year
-    annualIncome = monthlyGrossIncome * 12;
-  }
-  
-  // Total Sum Assured - hardcoded to 0 for now as no insurance table
-  const totalSumAssured = 0;
-
-  // 2. Calculate Ratios — NaN signals "no data" (denominator is zero / client hasn't filled in)
-  const basicLiquidityRatio = monthlyExpenses > 0 ? cashAndFD / monthlyExpenses : NaN;
-  const liquidAssetToNetWorth = netWorth > 0 ? cashAndFD / netWorth : NaN;
-  const solvencyRatio = totalAssets > 0 ? netWorth / totalAssets : NaN;
-  const debtServiceRatio = monthlyNetIncome > 0 ? totalMonthlyDebtRepayment / monthlyNetIncome : NaN;
-  const nonMortgageDSR = monthlyNetIncome > 0 ? consumerDebtRepayment / monthlyNetIncome : NaN;
-  const lifeInsuranceCoverage = annualIncome > 0 ? totalSumAssured / annualIncome : NaN;
-  const savingsRatio = monthlyGrossIncome > 0 ? monthlySavings / monthlyGrossIncome : NaN;
-  const investAssetsToNetWorth = netWorth > 0 ? investmentAssets / netWorth : NaN;
-  const passiveIncomeCoverage = annualExpenses > 0 ? annualPassiveIncome / annualExpenses : NaN;
+  const annualIncome = num(raw_metrics.annual_income, num(snapshot?.monthly_income) * 12);
+  const annualExpenses = num(snapshot?.monthly_expenses) * 12;
+  const annualPassiveIncome = num(raw_metrics.passive_income_monthly) * 12;
+  const totalSumAssured = num(raw_metrics.active_life_sum_assured);
 
   return {
-    basicLiquidityRatio,
-    liquidAssetToNetWorth,
-    solvencyRatio,
-    debtServiceRatio,
-    nonMortgageDSR,
-    lifeInsuranceCoverage,
-    savingsRatio,
-    investAssetsToNetWorth,
-    passiveIncomeCoverage,
+    basicLiquidityRatio: ratio(snapshot?.basic_liquidity_ratio),
+    liquidAssetToNetWorth: ratio(snapshot?.liquid_asset_to_net_worth),
+    solvencyRatio: ratio(snapshot?.solvency_ratio),
+    debtServiceRatio: ratio(snapshot?.debt_service_ratio),
+    nonMortgageDSR: ratio(snapshot?.non_mortgage_dsr),
+    lifeInsuranceCoverage: ratio(snapshot?.life_insurance_coverage),
+    savingsRatio: ratio(snapshot?.savings_ratio),
+    investAssetsToNetWorth: ratio(snapshot?.invest_assets_to_net_worth),
+    passiveIncomeCoverage: ratio(snapshot?.passive_income_coverage),
     raw: {
-      cashAndFD,
-      monthlyExpenses,
-      netWorth,
-      totalAssets,
-      totalMonthlyDebtRepayment,
-      monthlyNetIncome,
-      consumerDebtRepayment,
+      cashAndFD: num(raw_metrics.liquid_assets_total),
+      monthlyExpenses: num(snapshot?.monthly_expenses),
+      netWorth: num(snapshot?.net_worth),
+      totalAssets: num(snapshot?.total_assets),
+      totalMonthlyDebtRepayment: num(raw_metrics.monthly_debt_service),
+      monthlyNetIncome: num(snapshot?.monthly_income),
+      consumerDebtRepayment: num(raw_metrics.monthly_non_mortgage_service),
+      // real in-force total (P5) — active life/investment_linked policies'
+      // sum_assured, exactly what life_insurance_coverage's numerator is.
       totalSumAssured,
       annualIncome,
-      monthlySavings,
-      monthlyGrossIncome,
-      investmentAssets,
+      monthlySavings: num(snapshot?.monthly_surplus),
+      monthlyGrossIncome: num(snapshot?.monthly_income),
+      investmentAssets: num(raw_metrics.invest_assets_total),
       annualPassiveIncome,
       annualExpenses,
-      insurance: data.insurance || []
+      insurance: data.insurance || data.insurances || []
     },
-    analytics: calculateAnalytics(data)
+    analytics: calculateAnalytics(data),
+    snapshot,
+    insuranceGap: (data.insurance_gap as CnaResult) ?? null,
+    reviewStatus: (data.review_status as ReviewStatus) ?? EMPTY_REVIEW_STATUS,
+    current: (data.current as CurrentPlan) ?? null,
   };
 };

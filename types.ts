@@ -79,6 +79,214 @@ export interface FinancialHealthData {
     insurance: any[]; // Add insurance raw data
   };
   analytics?: FinancialAnalytics;
+  // P4/P5 (client-portal, spec docs/superpowers/specs/
+  // 2026-09-27-cfp-p4-review-monitoring-design.md and
+  // 2026-09-26-cfp-p5-insurance-design.md): the one snapshot/coverage-gap
+  // formula's output, passed through from api/health.js's `snapshot` /
+  // `insurance_gap` / `review_status` fields so Player.tsx and Insurance.tsx
+  // don't need a second fetch.
+  snapshot: HealthSnapshot | null;
+  insuranceGap: CnaResult | null;
+  reviewStatus: ReviewStatus;
+  current: CurrentPlan | null;
+}
+
+// ── P4: the one health-snapshot shape (mirrors _shared/finance/snapshot.ts's
+// SnapshotResult — api/health.js's `snapshot` field, decision 3). ──
+export interface HealthSnapshot {
+  net_worth: number;
+  total_assets: number;
+  total_liabilities: number;
+  basic_liquidity_ratio: number | null;
+  liquid_asset_to_net_worth: number | null;
+  solvency_ratio: number | null;
+  debt_service_ratio: number | null;
+  non_mortgage_dsr: number | null;
+  savings_ratio: number | null;
+  life_insurance_coverage: number | null;
+  invest_assets_to_net_worth: number | null;
+  passive_income_coverage: number | null;
+  raw_metrics: Record<string, unknown>;
+  emergency_fund_months: number | null;
+  monthly_income: number;
+  monthly_expenses: number;
+  monthly_surplus: number;
+  monthly_principal: number;
+  monthly_employer_epf: number;
+}
+
+// ── P2b/P4: the current plan (mirrors api/_lib/portalDerived.js's
+// buildCurrentPlan output — api/health.js's `current` field). Cashflow.tsx
+// and Retirement.tsx read this for "as of today" income/expense figures
+// instead of recomputing them from raw monthly rows. ──
+export interface CurrentPlan {
+  source: string;
+  monthly_income: number;
+  monthly_expenses: number;
+  monthly_surplus: number;
+  annual_income: number;
+  annual_expenses: number;
+  monthly_debt_service: number;
+  monthly_principal: number;
+  monthly_interest: number;
+  monthly_premiums: number;
+  monthly_employee_epf: number;
+  monthly_employer_epf: number;
+  monthly_socso_eis: number;
+}
+
+// ── P4: quarterly-review due/pending status (api/health.js's `review_status`
+// field, spec 决策 6 — the client-home due/「等待顾问审核」 banner). ──
+export interface ReviewStatus {
+  /** ISO date/timestamp of the most recently APPROVED quarterly review, or
+   *  null when none has ever been approved. */
+  last_approved_at: string | null;
+  /** true when a quarterly review is sitting submitted, awaiting advisor approval. */
+  pending: boolean;
+  /** true when the last approved/submitted quarterly review (or, with no
+   *  review history at all, the client's onboarding date) is over 92 days old. */
+  due: boolean;
+}
+
+// ── P5: the one insurance coverage-gap shape (mirrors
+// _shared/insurance/cna.ts's CnaResult — api/health.js's `insurance_gap`
+// field, decision 1). Both the advisor panel (InsuranceGapPanel.tsx) and
+// Insurance.tsx render this verbatim instead of computing their own gaps. ──
+export interface CnaLineItem {
+  need?: number;
+  cover: number;
+  gap?: number;
+  notes: string[];
+}
+
+export interface CnaMedicalItem extends CnaLineItem {
+  has_cover: boolean;
+  annual_limit: number;
+  /** true only when a limit is on file AND it's below RM1,000,000. */
+  low_limit: boolean;
+  /** true when there's cover but no annual_limit was recorded anywhere. */
+  limit_unknown: boolean;
+}
+
+export interface CnaProtectionSet {
+  death: CnaLineItem;
+  tpd: CnaLineItem;
+  ci: CnaLineItem;
+  /** cover-only — early/advance-stage critical illness, no separate need. */
+  ci_early_cover: CnaLineItem;
+  medical: CnaMedicalItem;
+  /** cover-only — personal accident, supplementary, no need computed against it. */
+  pa: CnaLineItem;
+}
+
+export interface CnaGap {
+  key: 'life' | 'ci' | 'medical';
+  label: string;
+  need?: number;
+  covered?: number;
+  gap?: number;
+  flag_only?: boolean;
+  has_cover?: boolean;
+}
+
+export interface CnaResult extends CnaProtectionSet {
+  assumptions: string[];
+  needs: {
+    income_replacement: number;
+    liabilities: number;
+    education: number;
+    total_life: number;
+    ci: number;
+  };
+  resources: {
+    life_cover: number;
+    ci_cover: number;
+    liquid_assets: number;
+  };
+  /** legacy 3-row gap list — kept for any caller still reading it. */
+  gaps: CnaGap[];
+  /** true when income is unknown/zero — the numbers aren't meaningful. */
+  insufficient: boolean;
+  /** the same six categories above, recomputed with every group-employer
+   *  policy excluded from cover (decision 1's 「不含团保」 toggle). */
+  excluding_group: CnaProtectionSet;
+}
+
+// ── P3: per-asset 2×2 quality + portfolio allocation vs target ──
+// Shapes returned additively by api/health.js (decisions 3/4, spec
+// docs/superpowers/specs/2026-09-26-cfp-p3-assets-portfolio-design.md),
+// mirroring supabase/functions/_shared/finance/assetQuality.ts and
+// allocation.ts's result types on the Deno side. fetchRawHealthData() stays
+// loosely typed (`any`) for its existing consumers; components that read
+// these two fields cast to these types instead.
+
+export type AssetQualityQuadrant =
+  | 'productive'
+  | 'yielding_depreciating'
+  | 'appreciating_cash_consuming'
+  | 'consuming';
+
+export interface AssetQualityAssessment {
+  asset_id: string;
+  asset_class: 'A' | 'B' | 'C' | 'D';
+  /** null for class A/B — they don't get a 2×2 label. */
+  quadrant: AssetQualityQuadrant | null;
+  net_cash_flow_monthly: number;
+  value_change_annual: number | null;
+  value_change_source: 'history' | 'default_depreciation' | 'none';
+  total_return_annual: number;
+  return_pct: number | null;
+  notes: string[];
+}
+
+export interface AssetQualityQuadrantTotal {
+  count: number;
+  value: number;
+  net_cash_flow_monthly: number;
+}
+
+export interface AssetQualitySummary {
+  assets: AssetQualityAssessment[];
+  by_quadrant: Record<AssetQualityQuadrant, AssetQualityQuadrantTotal>;
+}
+
+export type PortfolioAllocationBucket = 'equity' | 'bond' | 'cash' | 'alternatives';
+
+export interface PortfolioAllocationRow {
+  bucket: PortfolioAllocationBucket;
+  amount: number;
+  pct: number | null;
+}
+
+export interface PortfolioDriftRow {
+  bucket: PortfolioAllocationBucket;
+  current_pct: number | null;
+  target_pct: number;
+  drift_pp: number | null;
+}
+
+export interface PortfolioRebalancingAction {
+  bucket: PortfolioAllocationBucket;
+  action: 'increase' | 'reduce';
+  amount: number;
+}
+
+export interface PortfolioAllocationSummary {
+  /** risk band the target allocation is drawn from (e.g. "growth") — falls
+   *  back to "balanced" when neither a suitability result nor
+   *  clients.risk_profile resolves to a known band (see risk_band_defaulted). */
+  risk_band: string;
+  /** true when risk_band fell back to "balanced" rather than being resolved
+   *  from suitability or clients.risk_profile. */
+  risk_band_defaulted: boolean;
+  /** which source won: the client's latest suitability result, or the
+   *  advisor-set clients.risk_profile — null when risk_band_defaulted. */
+  risk_band_source: 'suitability' | 'profile' | null;
+  investable_total: number;
+  current_allocation: PortfolioAllocationRow[];
+  target_allocation: PortfolioAllocationRow[];
+  drift: PortfolioDriftRow[];
+  rebalancing_actions: PortfolioRebalancingAction[];
 }
 
 export interface ClientProfile {
@@ -284,6 +492,16 @@ export interface Portfolio {
   capital_injection: number;
   injection_date: string;    // ISO date e.g. "2025-12-01"
   portfolio_history: PortfolioSnapshot[];
+  // P3 (CFP assets & portfolio, decision 1): api/portfolios.js now reads
+  // investment assets (class C + PRS) with their asset_valuations history,
+  // falling back to the legacy portfolios/portfolio_history row when an
+  // asset has no valuations yet. Both fields are additive/optional so
+  // existing callers built before P3 keep compiling unchanged.
+  /** taxonomy asset_type code (e.g. "unit_trust", "prs") — absent on a
+   *  legacy-sourced row. */
+  asset_type?: string;
+  /** which table this row was shaped from. */
+  source?: 'asset' | 'legacy';
 }
 
 export interface PortfolioSnapshot {

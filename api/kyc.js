@@ -1,6 +1,6 @@
 import { applyCors, configError, supabaseAdmin } from './_lib/supabase.js';
 import {
-  assetCashflowEntries, INCOME_CATEGORY_MAP, kycAssetFields, kycExpenseEntry, kycIncomeEntry,
+  assetCashflowItems, INCOME_CATEGORY_MAP, kycAssetFields, kycExpenseItem, kycIncomeItem,
 } from './_lib/kycMapping.js';
 
 // =============================================================
@@ -11,7 +11,8 @@ import {
 //   clients            (one row per submission; advisor-owned)
 //   assets             (cash/EPF/property/vehicle/investments)
 //   liabilities        (loans, incl. those derived from financed assets)
-//   cashflow_entries   (income = inflow, expenses = outflow)
+//   cashflow_items     (income = inflow, expenses = outflow; standing items,
+//                        source='kyc' — P2b decision 1, NOT month rows)
 //
 // The full raw payload + audit fields live on the client row itself
 // (kyc_payload / kyc_status / kyc_submitted_at). There is no separate
@@ -50,7 +51,7 @@ const TAX_STATUS_MAP = {
 };
 
 // Expense cards. Only the KEYS are used: each card's items are filed by
-// kycExpenseEntry (api/_lib/kycMapping.js) under the chart of accounts.
+// kycExpenseItem (api/_lib/kycMapping.js) under the chart of accounts.
 const EXPENSE_CATEGORY_MAP = {
   household:      'household',
   transportation: 'transportation',
@@ -132,7 +133,7 @@ const remainingMonthsToLoanEnd = (loanEndYear, loanEndMonth, today = new Date())
 
 const mapEnum = (value, map) => (value != null && map.hasOwnProperty(value)) ? map[value] : null;
 
-// First day of the reporting month (YYYY-MM-01) for cashflow_entries.period_month
+// First day of the reporting month (YYYY-MM-01) — used as cashflow_items.effective_from
 const periodMonthFromKyc = (basic) => {
   const rawMonth = basic.globalMonth != null && basic.globalMonth !== ''
     ? basic.globalMonth
@@ -464,21 +465,26 @@ export default async function handler(req, res) {
       });
     }
 
-    // 4. Build cashflow rows (income = inflow, expenses = outflow)
-    const cashflowRows = [];
+    // 4. Build standing cashflow items (income = inflow, expenses = outflow).
+    // P2b decision 1/2: KYC writes cashflow_items, not month rows — each item
+    // is open-ended from the submission month (effective_from = periodMonth,
+    // effective_to = null), source='kyc', needs_review/review_reason carried
+    // over from the classifier exactly as the old cashflow_entries rows did.
+    const itemRows = [];
 
     for (const kycKey of Object.keys(INCOME_CATEGORY_MAP)) {
       const amt = parseAmount(income?.[kycKey]);
       if (amt > 0) {
-        cashflowRows.push({
-          client_id:    clientId,
-          direction:    'inflow',
-          ...kycIncomeEntry(kycKey),
-          amount:       amt,
-          currency:     'MYR',
-          period_month: periodMonth,
-          is_recurring: true,
-          source_note:  null
+        itemRows.push({
+          client_id:       clientId,
+          direction:       'inflow',
+          ...kycIncomeItem(kycKey),
+          amount:          amt,
+          currency:        'MYR',
+          effective_from:  periodMonth,
+          effective_to:    null,
+          source:          'kyc',
+          name:            null
         });
       }
     }
@@ -488,23 +494,27 @@ export default async function handler(req, res) {
       for (const it of items) {
         const amt = parseAmount(it.amount);
         if (amt <= 0) continue;
-        cashflowRows.push({
-          client_id:    clientId,
-          direction:    'outflow',
-          ...kycExpenseEntry(kycKey, it),
-          amount:       amt,
-          currency:     'MYR',
-          period_month: periodMonth,
-          is_recurring: true
+        itemRows.push({
+          client_id:       clientId,
+          direction:       'outflow',
+          ...kycExpenseItem(kycKey, it),
+          amount:          amt,
+          currency:        'MYR',
+          effective_from:  periodMonth,
+          effective_to:    null,
+          source:          'kyc'
         });
       }
     }
 
     for (const m of assetCashMeta) {
-      for (const e of assetCashflowEntries(m)) {
-        cashflowRows.push({
-          client_id: clientId, currency: 'MYR', period_month: periodMonth,
-          is_recurring: true, frequency: 'monthly',
+      for (const e of assetCashflowItems(m)) {
+        itemRows.push({
+          client_id: clientId, currency: 'MYR',
+          effective_from: periodMonth, effective_to: null,
+          frequency: 'monthly', source: 'kyc',
+          // rent/upkeep/etc. derived from an asset (rent → its property) is
+          // linked back to that asset (spec D2).
           linked_asset_id: insertedAssets[m.rowIndex]?.id || null,
           ...e,
         });
@@ -516,9 +526,9 @@ export default async function handler(req, res) {
       const { error } = await supabaseAdmin.from('liabilities').insert(liabilityRows);
       if (error) throw new Error(`Failed to insert liabilities: ${error.message}`);
     }
-    if (cashflowRows.length > 0) {
-      const { error } = await supabaseAdmin.from('cashflow_entries').insert(cashflowRows);
-      if (error) throw new Error(`Failed to insert cashflow entries: ${error.message}`);
+    if (itemRows.length > 0) {
+      const { error } = await supabaseAdmin.from('cashflow_items').insert(itemRows);
+      if (error) throw new Error(`Failed to insert cashflow items: ${error.message}`);
     }
 
     return res.status(200).json({

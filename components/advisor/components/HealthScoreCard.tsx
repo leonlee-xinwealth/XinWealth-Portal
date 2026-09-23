@@ -2,14 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { RefreshCw } from 'lucide-react';
-import { firstDayOfCurrentMonth, fmtMultiplier, fmtPercent, fmtRM, safeNumber, yyyyMmDd } from '../utils/finance';
+import { firstDayOfCurrentMonth, fmtMultiplier, fmtPercent, fmtRM, yyyyMmDd } from '../utils/finance';
+import type { PeriodRow } from '../../../supabase/functions/_shared/cashflow/periods';
 import {
-  defaultBasis, type PeriodRow,
-} from '../../../supabase/functions/_shared/cashflow/periods';
-import { isLiquid } from '../../../supabase/functions/_shared/taxonomy/balance';
-import {
-  planCashflow, type LiabilityRow, type PolicyRow,
-} from '../../../supabase/functions/_shared/finance/derived';
+  computeSnapshot, type LiabilityRow, type PolicyRow, type SnapshotResult,
+} from '../../../supabase/functions/_shared/finance/snapshot';
+import type { StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
 
 type Tone = 'good' | 'warn' | 'bad' | 'na';
 
@@ -28,17 +26,11 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string>('');
 
-  const [data, setData] = useState<{
-    monthlyIncome: number;
-    monthlyExpenses: number;
-    monthlySurplus: number;
-    totalMonthlyLoanRepayment: number;
-    liquidAssets: number;
-    totalAssets: number;
-    totalLiabilities: number;
-    netWorth: number;
-    lifeSumAssured: number;
-  } | null>(null);
+  // P4 Task B — computeSnapshot() is now the ONE place these ratios are
+  // computed (spec docs/superpowers/specs/2026-09-27-cfp-p4-review-monitoring-design.md
+  // 决策 3), replacing this component's own hand-rolled math. See the note
+  // above `metrics` below for the two figures that change value as a result.
+  const [snapshot, setSnapshot] = useState<SnapshotResult | null>(null);
 
   const snapshotDate = useMemo(() => firstDayOfCurrentMonth(), []);
   const snapshotDateStr = useMemo(() => yyyyMmDd(snapshotDate), [snapshotDate]);
@@ -47,62 +39,46 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
     setLoading(true);
     setErr('');
     try {
-      const today = new Date().toISOString().split('T')[0];
-      const [{ data: assets, error: aErr }, { data: liabilities, error: lErr }, { data: cashflow, error: cErr }, { data: policies, error: pErr }] = await Promise.all([
-        supabase.from('assets').select('current_value, asset_type').eq('client_id', clientId),
+      const [{ data: assets, error: aErr }, { data: liabilities, error: lErr }, { data: cashflow, error: cErr }, { data: policies, error: pErr }, { data: items, error: iErr }, { data: clientRow, error: clErr }] = await Promise.all([
+        supabase.from('assets').select('current_value, asset_type, ownership_pct').eq('client_id', clientId),
         supabase.from('liabilities').select('id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, remaining_months, rate_type, original_principal, end_date').eq('client_id', clientId),
         supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category').eq('client_id', clientId),
         supabase.from('insurance_policies').select('id, policy_type, plan_name, provider, premium, premium_frequency, sum_assured, end_date').eq('client_id', clientId),
+        supabase.from('cashflow_items').select('*').eq('client_id', clientId),
+        supabase.from('clients').select('has_epf, date_of_birth').eq('id', clientId).maybeSingle(),
       ]);
 
-      const combinedError = aErr || lErr || cErr || pErr;
+      const combinedError = aErr || lErr || cErr || pErr || iErr || clErr;
       if (combinedError) throw combinedError;
 
-      // A row records ONE MONTH'S actual figure, so the run-rate these ratios
-      // need comes from averaging the recorded months — not from converting
-      // every row to a monthly rate and summing them, which treats June's and
-      // July's positions as two concurrent commitments. planCashflow wraps that
-      // same averaging (_shared/cashflow/periods.ts) and ALSO folds in the
-      // installments/premiums a liability or policy implies — those never
-      // live in cashflow_entries (spec 2026-09-24-cfp-p2a decision 1), so the
-      // old plain monthly_payment sum silently undercounted debt service.
-      const rows = (cashflow || []) as PeriodRow[];
-      const liabilityRows = (liabilities || []) as LiabilityRow[];
-      const policyRows = (policies || []) as PolicyRow[];
-      const plan = planCashflow({ rows, liabilities: liabilityRows, policies: policyRows, basis: defaultBasis(rows) });
-      const monthlyIncome = plan.totals.monthly_income;
-      const monthlyExpenses = plan.totals.monthly_expenses;
-      const monthlySurplus = monthlyIncome - monthlyExpenses;
-
-      const totalMonthlyLoanRepayment = plan.monthly_debt_service;
-
-      const liquidAssets = (assets || [])
-        .filter((a: any) => isLiquid(a.asset_type))
-        .reduce((s: number, a: any) => s + safeNumber(a.current_value), 0);
-
-      const totalAssets = (assets || []).reduce((s: number, a: any) => s + safeNumber(a.current_value), 0);
-      const totalLiabilities = (liabilities || []).reduce((s: number, l: any) => s + safeNumber(l.outstanding_balance), 0);
-      const netWorth = totalAssets - totalLiabilities;
-
-      const activePolicies = (policies || []).filter((p: any) => !p.end_date || p.end_date >= today);
-      const lifeSumAssured = activePolicies
-        .filter((p: any) => ['life', 'investment_linked'].includes(String(p.policy_type || '').toLowerCase()))
-        .reduce((s: number, p: any) => s + safeNumber(p.sum_assured), 0);
-
-      setData({
-        monthlyIncome,
-        monthlyExpenses,
-        monthlySurplus,
-        totalMonthlyLoanRepayment,
-        liquidAssets,
-        totalAssets,
-        totalLiabilities,
-        netWorth,
-        lifeSumAssured,
+      // P4 Task B — computeSnapshot() (_shared/finance/snapshot.ts) is now
+      // the shared definition for every one of these ratios, used verbatim
+      // by ReviewTab's approval flow, MonitorTab and this card, so all three
+      // read the same numbers. It wraps the same planCashflow() this card
+      // used to call directly (same averaging-vs-items behaviour, same
+      // installment/premium folding — see its own header for why that
+      // matters), so savings ratio, DSR and life coverage are UNCHANGED.
+      // Two figures DO change value, both deliberately (spec 决策 3 "assets
+      // counted at ownership_pct"): total_assets/net_worth and the emergency
+      // fund's liquid-assets total are now weighted by each asset's
+      // ownership_pct instead of summing raw current_value — this card
+      // previously ignored ownership_pct entirely. For a solely-owned asset
+      // (ownership_pct defaults to 100) the number is identical; it only
+      // moves for a jointly-owned asset, where it now correctly counts only
+      // the client's own share, consistent with every other CFP screen.
+      const snap = computeSnapshot({
+        assets: (assets || []) as { asset_type: string; current_value: number; ownership_pct?: number | null }[],
+        liabilities: (liabilities || []) as LiabilityRow[],
+        rows: (cashflow || []) as PeriodRow[],
+        items: (items || []) as StandingItem[],
+        policies: (policies || []) as PolicyRow[],
+        client: { has_epf: clientRow?.has_epf, date_of_birth: clientRow?.date_of_birth },
+        asOf: new Date(),
       });
+      setSnapshot(snap);
     } catch (e: any) {
       setErr(e?.message || 'Failed to load');
-      setData(null);
+      setSnapshot(null);
     } finally {
       setLoading(false);
     }
@@ -122,22 +98,22 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
   useEffect(() => { load(); }, [clientId]);
 
   const metrics = useMemo(() => {
-    if (!data) return null;
+    if (!snapshot) return null;
 
-    const annualIncome = data.monthlyIncome * 12;
-    const savingsRate = data.monthlyIncome > 0 ? (data.monthlySurplus / data.monthlyIncome) * 100 : null;
-    const dsr = data.monthlyIncome > 0 ? (data.totalMonthlyLoanRepayment / data.monthlyIncome) * 100 : null;
-    const emergencyMonths = data.monthlyExpenses > 0 ? (data.liquidAssets / data.monthlyExpenses) : null;
-    const lifeCoverage = annualIncome > 0 ? (data.lifeSumAssured / annualIncome) : null;
+    const savingsRate = snapshot.savings_ratio === null ? null : snapshot.savings_ratio * 100;
+    const dsr = snapshot.debt_service_ratio === null ? null : snapshot.debt_service_ratio * 100;
+    const emergencyMonths = snapshot.basic_liquidity_ratio;
+    const lifeCoverage = snapshot.life_insurance_coverage;
+    const netWorth = snapshot.net_worth;
 
     const toneSavings: Tone = savingsRate === null ? 'na' : (savingsRate >= 20 ? 'good' : (savingsRate >= 10 ? 'warn' : 'bad'));
     const toneDSR: Tone = dsr === null ? 'na' : (dsr < 40 ? 'good' : (dsr <= 60 ? 'warn' : 'bad'));
     const toneEmergency: Tone = emergencyMonths === null ? 'na' : (emergencyMonths >= 6 ? 'good' : (emergencyMonths >= 3 ? 'warn' : 'bad'));
     const toneLife: Tone = lifeCoverage === null ? 'na' : (lifeCoverage >= 10 ? 'good' : (lifeCoverage >= 5 ? 'warn' : 'bad'));
-    const toneNW: Tone = data.netWorth === 0 ? 'warn' : (data.netWorth > 0 ? 'good' : 'bad');
+    const toneNW: Tone = netWorth === 0 ? 'warn' : (netWorth > 0 ? 'good' : 'bad');
 
     return {
-      annualIncome,
+      netWorth,
       savingsRate,
       dsr,
       emergencyMonths,
@@ -148,32 +124,39 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
       toneLife,
       toneNW,
     };
-  }, [data]);
+  }, [snapshot]);
 
   useEffect(() => {
-    if (!data || !metrics) return;
+    if (!snapshot) return;
+    // Every metric column computeSnapshot exposes — including the ones this
+    // card doesn't display (solvency_ratio, non_mortgage_dsr,
+    // invest_assets_to_net_worth, passive_income_coverage,
+    // liquid_asset_to_net_worth) — so MonitorTab's trend charts and any
+    // other reader of health_snapshots get a fully-populated row from this
+    // automatic write, not just the five figures this card shows. This is
+    // an automatic "heartbeat" snapshot (fires on every page load), separate
+    // from a review-driven one: `review_id`/`unexplained_gap` are
+    // deliberately left out of the payload so upserting here never clobbers
+    // those columns on a row a review approval already wrote.
     const payload = {
       client_id: clientId,
       snapshot_date: snapshotDateStr,
-      net_worth: data.netWorth,
-      total_assets: data.totalAssets,
-      total_liabilities: data.totalLiabilities,
-      savings_ratio: metrics.savingsRate === null ? null : metrics.savingsRate / 100,
-      debt_service_ratio: metrics.dsr === null ? null : metrics.dsr / 100,
-      basic_liquidity_ratio: metrics.emergencyMonths === null ? null : metrics.emergencyMonths,
-      life_insurance_coverage: metrics.lifeCoverage === null ? null : metrics.lifeCoverage,
-      raw_metrics: {
-        monthly_income: data.monthlyIncome,
-        monthly_expenses: data.monthlyExpenses,
-        monthly_surplus: data.monthlySurplus,
-        total_monthly_loan_repayment: data.totalMonthlyLoanRepayment,
-        liquid_assets: data.liquidAssets,
-        total_life_sum_assured: data.lifeSumAssured,
-        annual_income: metrics.annualIncome,
-      }
+      net_worth: snapshot.net_worth,
+      total_assets: snapshot.total_assets,
+      total_liabilities: snapshot.total_liabilities,
+      savings_ratio: snapshot.savings_ratio,
+      debt_service_ratio: snapshot.debt_service_ratio,
+      basic_liquidity_ratio: snapshot.basic_liquidity_ratio,
+      life_insurance_coverage: snapshot.life_insurance_coverage,
+      liquid_asset_to_net_worth: snapshot.liquid_asset_to_net_worth,
+      solvency_ratio: snapshot.solvency_ratio,
+      non_mortgage_dsr: snapshot.non_mortgage_dsr,
+      invest_assets_to_net_worth: snapshot.invest_assets_to_net_worth,
+      passive_income_coverage: snapshot.passive_income_coverage,
+      raw_metrics: snapshot.raw_metrics,
     };
     saveSnapshotIfPossible(payload);
-  }, [clientId, data, metrics, snapshotDateStr]);
+  }, [clientId, snapshot, snapshotDateStr]);
 
   const updatedText = useMemo(() => {
     const d = new Date(snapshotDateStr);
@@ -253,7 +236,7 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
         />
         <Metric
           title={t('Net Worth', '净资产')}
-          value={data ? `RM ${fmtRM(data.netWorth)}` : '—'}
+          value={snapshot ? `RM ${fmtRM(snapshot.net_worth)}` : '—'}
           tone={metrics?.toneNW || 'na'}
           subtitle={t('Assets - liabilities', '资产 - 负债')}
           language={language}

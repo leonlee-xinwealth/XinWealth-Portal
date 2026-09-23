@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchRawHealthData } from '../services/apiService';
+import { fetchRawHealthData, pickCurrentPlan } from '../services/apiService';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { CurrentPlan } from '../types';
 
 type TabType = 'inflow' | 'outflow';
 
@@ -157,6 +158,13 @@ const Cashflow: React.FC = () => {
   
   const [incomes, setIncomes] = useState<RecordItem[]>([]);
   const [expenses, setExpenses] = useState<RecordItem[]>([]);
+  // P2b/P4 决策 (docs/superpowers/specs/2026-09-25-cfp-p2b-standing-items-design.md
+  // D2): "current" — as-of-today income/expenses/surplus/installments/
+  // premiums/statutory EPF+SOCSO, read from the plan (cashflow_items when the
+  // client has any, else averaged actuals). The month-by-month charts below
+  // intentionally keep reading raw cashflow_entries — only this summary panel
+  // uses the plan.
+  const [currentPlan, setCurrentPlan] = useState<CurrentPlan | null>(null);
 
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [selectedMonth, setSelectedMonth] = useState<string>((new Date().getMonth() + 1).toString().padStart(2, '0'));
@@ -202,7 +210,8 @@ const Cashflow: React.FC = () => {
         
         setIncomes(parsedIncomes || []);
         setExpenses(parsedExpenses || []);
-        
+        setCurrentPlan(pickCurrentPlan(data));
+
         let latestYear = '';
         
         [...(parsedIncomes || []), ...(parsedExpenses || [])].forEach(item => {
@@ -500,6 +509,58 @@ const Cashflow: React.FC = () => {
             </div>
         </div>
       </div>
+
+      {/* Current position — plan-sourced (cashflow_items when present, else
+          averaged actuals), not the raw month-by-month rows the charts below
+          use. */}
+      {currentPlan && (
+        <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Current Position</h3>
+            <span className="text-[11px] font-semibold text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full">
+              {currentPlan.source === 'items' ? 'From your standing plan' : 'From recorded actuals'}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monthly Income</p>
+              <p className="text-xl font-bold text-emerald-500">{formatCurrency(currentPlan.monthly_income)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Monthly Expenses</p>
+              <p className="text-xl font-bold text-rose-500">{formatCurrency(currentPlan.monthly_expenses)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Surplus</p>
+              <p className={`text-xl font-bold ${currentPlan.monthly_surplus >= 0 ? 'text-xin-blue' : 'text-rose-500'}`}>
+                {formatCurrency(currentPlan.monthly_surplus)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Debt Service</p>
+              <p className="text-xl font-bold text-slate-700">{formatCurrency(currentPlan.monthly_debt_service)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Loan Installments</p>
+              <p className="text-sm font-semibold text-slate-600">{formatCurrency(currentPlan.monthly_principal + currentPlan.monthly_interest)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Insurance Premiums</p>
+              <p className="text-sm font-semibold text-slate-600">{formatCurrency(currentPlan.monthly_premiums)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">EPF (You + Employer)</p>
+              <p className="text-sm font-semibold text-slate-600">
+                {formatCurrency(currentPlan.monthly_employee_epf)} + {formatCurrency(currentPlan.monthly_employer_epf)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">SOCSO / EIS</p>
+              <p className="text-sm font-semibold text-slate-600">{formatCurrency(currentPlan.monthly_socso_eis)}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-4 mb-8 border-b border-slate-200">

@@ -1,3 +1,9 @@
+import {
+  planCashflow, type LiabilityRow, type PolicyRow,
+} from '../../../supabase/functions/_shared/finance/derived';
+import type { CashflowBasis, PeriodRow } from '../../../supabase/functions/_shared/cashflow/periods';
+import type { StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
+
 export const safeNumber = (v: any): number => {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string') {
@@ -52,4 +58,51 @@ export const fmtRM = (n: number) => n.toLocaleString('en-MY', { minimumFractionD
 export const fmtPercent = (n: number) => `${n.toFixed(0)}%`;
 
 export const fmtMultiplier = (n: number) => `${n.toFixed(1)}×`;
+
+export interface PlanIncomeExpenseInput {
+  rows: PeriodRow[];
+  liabilities?: LiabilityRow[];
+  policies?: PolicyRow[];
+  /** P2b 决策 1: pass the client's cashflow_items when there are any — the
+   *  plan is then read from them instead of averaged cashflow_entries. */
+  items?: StandingItem[];
+  basis?: CashflowBasis | null;
+  client?: { has_epf?: boolean | null; date_of_birth?: string | null } | null;
+  today?: Date;
+}
+
+export interface PlanIncomeExpenseResult {
+  annualIncome: number;
+  annualExpenses: number;
+  monthlyIncome: number;
+  monthlyExpenses: number;
+  source: 'items' | 'actuals';
+}
+
+/**
+ * The one way advisor-side screens should read a client's income/expenses:
+ * the plan (cashflow_items) when the client has any, the averaged actuals
+ * otherwise — spec 2026-09-25-cfp-p2b decision 1. Thin wrapper around
+ * planCashflow so callers (health score, insurance gap, …) don't each
+ * re-derive "does this client have items" and the P2a superseded-row/derived
+ * installment logic by hand.
+ */
+export function planAnnualIncomeExpenses(input: PlanIncomeExpenseInput): PlanIncomeExpenseResult {
+  const plan = planCashflow({
+    rows: input.rows,
+    liabilities: input.liabilities ?? [],
+    policies: input.policies ?? [],
+    basis: input.basis ?? null,
+    items: input.items ?? [],
+    client: input.client ?? undefined,
+    today: input.today,
+  });
+  return {
+    annualIncome: plan.totals.annual_income,
+    annualExpenses: plan.totals.annual_expenses,
+    monthlyIncome: plan.totals.monthly_income,
+    monthlyExpenses: plan.totals.monthly_expenses,
+    source: plan.source,
+  };
+}
 

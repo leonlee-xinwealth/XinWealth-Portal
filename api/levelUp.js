@@ -2,6 +2,8 @@ import { applyCors, configError, getAuthUser, supabaseAdmin } from './_lib/supab
 import {
   assetTypeMeta, classifyCashflowRow, levelUpAsset, levelUpLiabilityType, liquidityLevel,
 } from './_lib/taxonomy.mjs';
+import { isMissingTableError } from './_lib/degrade.js';
+import { quarterlyPeriodEnd } from './_lib/reviewDates.js';
 
 const parseAmount = (val) => {
   if (val == null || val === '') return 0;
@@ -20,7 +22,9 @@ const periodMonth = (targetMonth, targetYear) => {
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
   if (!supabaseAdmin) return configError(res);
 
   const { user, error } = await getAuthUser(req);
@@ -40,6 +44,31 @@ export default async function handler(req, res) {
   if (clientErr) return res.status(500).json({ error: 'Error fetching client', details: clientErr.message });
   if (!clientRow?.id) return res.status(404).json({ error: 'Client profile not found' });
 
+  const clientId = clientRow.id;
+
+  // CFP P4 Task C — quarterly review mode: GET action:'prefill' / POST
+  // action:'submit_review'. Kept in the same file as the monthly-actuals
+  // path below (Vercel Hobby plan is at its function-count limit, so this
+  // can't be a new api/*.js file — spec docs/superpowers/specs/
+  // 2026-09-27-cfp-p4-review-monitoring-design.md 决策 1/section C).
+  if (req.method === 'GET') {
+    if (req.query?.mode === 'review' && req.query?.action === 'prefill') {
+      return handleReviewPrefill(res, clientId);
+    }
+    return res.status(400).json({ error: 'Unsupported GET request' });
+  }
+
+  if (req.body?.mode === 'review') {
+    if (req.body?.action === 'submit_review') {
+      return handleSubmitReview(res, clientId, req.body);
+    }
+    return res.status(400).json({ error: 'Unsupported review action' });
+  }
+
+  return handleMonthlyActuals(res, clientId, req.body || {});
+}
+
+async function handleMonthlyActuals(res, clientId, body) {
   const {
     targetMonth,
     targetYear,
@@ -48,14 +77,13 @@ export default async function handler(req, res) {
     assets,
     liabilities,
     investments
-  } = req.body || {};
+  } = body;
 
   if (targetMonth == null || targetYear == null) {
     return res.status(400).json({ error: 'Missing required parameters' });
   }
 
   const monthDate = periodMonth(targetMonth, targetYear);
-  const clientId = clientRow.id;
 
   // The form's option labels ('Household', 'Salary', …) are read into the chart
   // of accounts; writing them raw failed the cashflow_categories foreign key.
@@ -154,5 +182,168 @@ export default async function handler(req, res) {
   }
 
   return res.status(200).json({ success: true });
+}
+
+// ---------------------------------------------------------------------------
+// CFP P4 Task C — quarterly review (client-submitted).
+// spec docs/superpowers/specs/2026-09-27-cfp-p4-review-monitoring-design.md
+// 决策 1, 2, 5, 6, section C. D5: a submitted review changes nothing on its
+// own — approving it (advisor side, components/advisor/review/approveReview.ts)
+// is what writes asset_valuations/liability_balances/assets/liabilities/
+// health_snapshots. This endpoint only ever inserts a `reviews` row.
+// ---------------------------------------------------------------------------
+
+/** GET ?mode=review&action=prefill — the client's current assets/liabilities
+ *  (to prefill the "no change" step) plus the latest quarterly review, so
+ *  LevelUp.tsx can show the 「已提交，等待顾问审核」 state instead of the form
+ *  when one is already sitting there. */
+async function handleReviewPrefill(res, clientId) {
+  const [{ data: assets, error: assetsErr }, { data: liabilities, error: liabilitiesErr }] = await Promise.all([
+    supabaseAdmin.from('assets').select('id, name, asset_type, current_value').eq('client_id', clientId),
+    supabaseAdmin.from('liabilities')
+      .select('id, name, liability_type, outstanding_balance, interest_rate, monthly_payment')
+      .eq('client_id', clientId),
+  ]);
+  if (assetsErr) return res.status(500).json({ error: 'Failed to fetch assets', details: assetsErr.message });
+  if (liabilitiesErr) return res.status(500).json({ error: 'Failed to fetch liabilities', details: liabilitiesErr.message });
+
+  let latestReview = null;
+  let reviewUnavailable = false;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('reviews')
+      .select('id, status, kind, period_end, submitted_at, approved_at, advisor_note')
+      .eq('client_id', clientId)
+      .eq('kind', 'quarterly')
+      .order('period_end', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    latestReview = data || null;
+  } catch (e) {
+    reviewUnavailable = isMissingTableError(e);
+    latestReview = null;
+  }
+
+  return res.status(200).json({
+    assets: (assets || []).map((a) => ({
+      id: a.id, name: a.name, type: a.asset_type, current_value: Number(a.current_value) || 0,
+    })),
+    liabilities: (liabilities || []).map((l) => ({
+      id: l.id,
+      name: l.name,
+      type: l.liability_type,
+      outstanding_balance: Number(l.outstanding_balance) || 0,
+      interest_rate: l.interest_rate != null ? Number(l.interest_rate) : null,
+      monthly_payment: l.monthly_payment != null ? Number(l.monthly_payment) : null,
+    })),
+    review: latestReview,
+    review_unavailable: reviewUnavailable,
+  });
+}
+
+/** POST { mode:'review', action:'submit_review', assets, liabilities, notes }
+ *  — writes ONE `reviews` row (kind:'quarterly', status:'submitted',
+ *  submitted_by:'client'). `prev_value`/`prev_balance`/`prev_rate` are always
+ *  taken from the server's own current DB read, never trusted from the
+ *  client, so the advisor's before/after comparison (ReviewTab.tsx) can't be
+ *  spoofed by a stale or tampered request body. */
+async function handleSubmitReview(res, clientId, body) {
+  const submittedAssets = Array.isArray(body.assets) ? body.assets : [];
+  const submittedLiabilities = Array.isArray(body.liabilities) ? body.liabilities : [];
+  const notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null;
+
+  const [{ data: assets, error: assetsErr }, { data: liabilities, error: liabilitiesErr }] = await Promise.all([
+    supabaseAdmin.from('assets').select('id, current_value').eq('client_id', clientId),
+    supabaseAdmin.from('liabilities').select('id, outstanding_balance, interest_rate, monthly_payment').eq('client_id', clientId),
+  ]);
+  if (assetsErr) return res.status(500).json({ error: 'Failed to fetch assets', details: assetsErr.message });
+  if (liabilitiesErr) return res.status(500).json({ error: 'Failed to fetch liabilities', details: liabilitiesErr.message });
+
+  const assetById = new Map((assets || []).map((a) => [a.id, a]));
+  const liabilityById = new Map((liabilities || []).map((l) => [l.id, l]));
+
+  // Only entries for assets/liabilities that actually belong to this client
+  // make it into the payload — an id that doesn't resolve is silently
+  // dropped rather than trusted from the request body.
+  const payloadAssets = submittedAssets
+    .filter((a) => a && assetById.has(a.asset_id))
+    .map((a) => {
+      const current = assetById.get(a.asset_id);
+      return {
+        asset_id: a.asset_id,
+        prev_value: current.current_value != null ? Number(current.current_value) : null,
+        value: parseAmount(a.value),
+      };
+    });
+
+  const payloadLiabilities = submittedLiabilities
+    .filter((l) => l && liabilityById.has(l.liability_id))
+    .map((l) => {
+      const current = liabilityById.get(l.liability_id);
+      const interestRate = l.interest_rate != null && l.interest_rate !== ''
+        ? parseAmount(l.interest_rate)
+        : (current.interest_rate != null ? Number(current.interest_rate) : null);
+      const monthlyPayment = l.monthly_payment != null && l.monthly_payment !== ''
+        ? parseAmount(l.monthly_payment)
+        : (current.monthly_payment != null ? Number(current.monthly_payment) : null);
+      return {
+        liability_id: l.liability_id,
+        prev_balance: current.outstanding_balance != null ? Number(current.outstanding_balance) : null,
+        balance: parseAmount(l.balance),
+        prev_rate: current.interest_rate != null ? Number(current.interest_rate) : null,
+        interest_rate: interestRate,
+        monthly_payment: monthlyPayment,
+      };
+    });
+
+  // A client can't submit a second quarterly review while one is still
+  // awaiting approval — mirrors the "if a submitted review exists show that
+  // state instead of the form" rule in LevelUp.tsx, enforced here too since
+  // the client is not the only thing that can call this endpoint.
+  try {
+    const { data: pending, error: pendingErr } = await supabaseAdmin
+      .from('reviews')
+      .select('id')
+      .eq('client_id', clientId)
+      .eq('kind', 'quarterly')
+      .eq('status', 'submitted')
+      .limit(1)
+      .maybeSingle();
+    if (pendingErr) throw pendingErr;
+    if (pending) return res.status(409).json({ error: 'review_already_pending' });
+  } catch (e) {
+    if (!isMissingTableError(e)) {
+      return res.status(500).json({ error: 'Failed to check pending reviews', details: e.message || String(e) });
+    }
+    // table missing → no pending review possible; fall through to the insert
+    // below, which will itself surface review_unavailable.
+  }
+
+  const periodEnd = quarterlyPeriodEnd(new Date());
+  const nowIso = new Date().toISOString();
+
+  const { data: inserted, error: insertErr } = await supabaseAdmin
+    .from('reviews')
+    .insert([{
+      client_id: clientId,
+      kind: 'quarterly',
+      period_end: periodEnd,
+      status: 'submitted',
+      submitted_by: 'client',
+      submitted_at: nowIso,
+      payload: { assets: payloadAssets, liabilities: payloadLiabilities, notes },
+    }])
+    .select('id, status, period_end')
+    .maybeSingle();
+
+  if (insertErr) {
+    if (isMissingTableError(insertErr)) {
+      return res.status(503).json({ error: 'review_unavailable' });
+    }
+    return res.status(500).json({ error: 'Failed to submit review', details: insertErr.message });
+  }
+
+  return res.status(200).json({ success: true, review: inserted });
 }
 

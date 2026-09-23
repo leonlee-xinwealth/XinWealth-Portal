@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth, updateClientInfo, updateSession } from '../services/apiService';
 import { getSession } from '../services/apiService';
 import { FinancialHealthData, UserSession } from '../types';
-import { Loader2, AlertCircle, Gamepad2, Shield, Heart, Brain, Sparkles, Sword, Coins, User, Edit2, X, Check, Save, ArrowBigUpDash } from 'lucide-react';
+import { Loader2, AlertCircle, Gamepad2, Shield, Heart, Brain, Sparkles, Sword, Coins, User, Edit2, X, Check, Save, ArrowBigUpDash, Clock } from 'lucide-react';
 import LevelUp from './LevelUp';
+import { useLanguage } from '../context/LanguageContext';
 
 const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?: string }) => (
   <svg 
@@ -28,6 +29,8 @@ const MovementIcon = ({ size = 24, className = "" }: { size?: number, className?
 );
 
 const Player: React.FC = () => {
+  const { language } = useLanguage();
+  const isZh = language === 'zh';
   const [healthData, setHealthData] = useState<FinancialHealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,55 +97,29 @@ const Player: React.FC = () => {
   const atkValue = Math.max(activeIncome, 0);
 
   // 4) DEF (防御力) - Insurance Coverage
-  // Logic: 6 targets for insurance. Display percentage of targets met (e.g. 2/6 = 33%)
-  let defValue = 0;
-  let finalTargets = 0;
-  if (raw.insurance && Array.isArray(raw.insurance)) {
-    // Calculate basic metrics from existing healthData logic
-    const { 
-      monthlyExpenses, 
-      totalMonthlyDebtRepayment, 
-      cashAndFD, 
-      monthlyNetIncome,
-      annualIncome 
-    } = raw;
-    
-    // const emergencyTarget = monthlyExpenses * 3;
-    const debtServiceRatio = monthlyNetIncome > 0 ? totalMonthlyDebtRepayment / monthlyNetIncome : 0;
-    const basicLiquidityRatio = monthlyExpenses > 0 ? cashAndFD / monthlyExpenses : 0;
-    
-    let lifeCoverage = 0;
-    let criticalIllnessCoverage = 0;
-    let personalAccidentCoverage = 0;
-    let hasMedicalCard = false;
-    
-    raw.insurance.forEach((item: any) => {
-      const type = item.fields["Type"] || item.fields["type"] || "";
-      const sumAssured = parseFloat(item.fields["Sum Assured"] || item.fields["sum assured"] || 0);
-      
-      if (type.toLowerCase().includes("life") || type.toLowerCase().includes("death")) {
-        lifeCoverage += sumAssured;
-      }
-      if (type.toLowerCase().includes("critical") || type.toLowerCase().includes("ci")) {
-        criticalIllnessCoverage += sumAssured;
-      }
-      if (type.toLowerCase().includes("accident") || type.toLowerCase().includes("pa")) {
-        personalAccidentCoverage += sumAssured;
-      }
-      if (type.toLowerCase().includes("medical") || type.toLowerCase().includes("hospital")) {
-        hasMedicalCard = true;
-      }
-    });
-
-    if (lifeCoverage >= (annualIncome * 10)) finalTargets++;
-    if (criticalIllnessCoverage >= (annualIncome * 3)) finalTargets++;
-    if (personalAccidentCoverage >= (annualIncome * 5)) finalTargets++;
-    if (hasMedicalCard) finalTargets++;
-    if (basicLiquidityRatio >= 3) finalTargets++;
-    if (debtServiceRatio <= 0.35) finalTargets++;
-
-    defValue = Math.round((finalTargets / 6) * 100);
-  }
+  // P5 决策 1: reads `insuranceGap` — the SAME computeCna() output the
+  // advisor's InsuranceGapPanel.tsx and Insurance.tsx render — instead of
+  // re-parsing raw policy records with its own 10x/3x/5x-income multiples
+  // (which duplicated, and could disagree with, the shared formula).
+  // Logic: 6 targets. Display percentage of targets met (e.g. 2/6 = 33%).
+  const gap = healthData.insuranceGap;
+  const gapUsable = !!gap && !gap.insufficient;
+  const metTargets = gapUsable
+    ? [
+        (gap!.death.gap ?? Infinity) <= 0,
+        (gap!.tpd.gap ?? Infinity) <= 0,
+        (gap!.ci.gap ?? Infinity) <= 0,
+        gap!.medical.has_cover && !gap!.medical.low_limit && !gap!.medical.limit_unknown,
+        Number.isFinite(healthData.basicLiquidityRatio) && healthData.basicLiquidityRatio >= 3,
+        Number.isFinite(healthData.debtServiceRatio) && healthData.debtServiceRatio <= 0.35,
+      ]
+    : [
+        false, false, false, false,
+        Number.isFinite(healthData.basicLiquidityRatio) && healthData.basicLiquidityRatio >= 3,
+        Number.isFinite(healthData.debtServiceRatio) && healthData.debtServiceRatio <= 0.35,
+      ];
+  const finalTargets = metTargets.filter(Boolean).length;
+  const defValue = Math.round((finalTargets / metTargets.length) * 100);
 
   // 5) INT (智力) - Net Worth Growth Rate (placeholder until portfolio data is wired here)
   const intValue = 0;
@@ -326,6 +303,28 @@ const Player: React.FC = () => {
         </h2>
         <p className="text-slate-500">Your gamified financial profile. Level up your stats by improving your financial health!</p>
       </div>
+
+      {/* P4 决策 6: client-home due/pending banner — reviewStatus.pending
+          (a submitted review awaiting approval) takes priority over
+          reviewStatus.due (>92 days since the last approved/submitted
+          quarterly review, or since onboarding with no review history). */}
+      {healthData.reviewStatus?.pending ? (
+        <div className="mb-6 flex items-center gap-3 bg-amber-50 border border-amber-100 text-amber-700 rounded-2xl px-5 py-3.5">
+          <Clock size={18} className="shrink-0" />
+          <span className="text-sm font-bold">{isZh ? '等待顾问审核' : 'Awaiting advisor review'}</span>
+        </div>
+      ) : healthData.reviewStatus?.due ? (
+        <button
+          onClick={() => setActiveTab('levelup')}
+          className="mb-6 w-full flex items-center justify-between gap-3 bg-rose-50 border border-rose-100 text-rose-700 rounded-2xl px-5 py-3.5 hover:bg-rose-100 transition-colors text-left"
+        >
+          <span className="flex items-center gap-3 text-sm font-bold">
+            <AlertCircle size={18} className="shrink-0" />
+            {isZh ? '季度复检已到期' : 'Your quarterly review is due'}
+          </span>
+          <span className="text-xs font-bold underline shrink-0">{isZh ? '前往复检' : 'Review now'}</span>
+        </button>
+      ) : null}
 
       <div className="flex gap-4 mb-8 border-b border-slate-200">
         <button

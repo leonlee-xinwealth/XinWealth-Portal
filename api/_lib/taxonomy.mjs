@@ -778,6 +778,45 @@ function amountOf(r) {
   const n = Number(r.amount);
   return Number.isFinite(n) ? n : 0;
 }
+function recordedYears(rows) {
+  const years = /* @__PURE__ */ new Set();
+  for (const r of rows ?? []) {
+    const y = yearOf(r.period_month);
+    if (y != null)
+      years.add(y);
+  }
+  return [...years].sort((a, b) => b - a);
+}
+function monthlyBreakdown(rows, year) {
+  const byMonth = /* @__PURE__ */ new Map();
+  for (const r of rows ?? []) {
+    if (yearOf(r.period_month) !== year)
+      continue;
+    const m = monthOf(r.period_month);
+    if (m == null)
+      continue;
+    if (isAssetTransfer(r))
+      continue;
+    const slot = byMonth.get(m) ?? { month: m, income: 0, expenses: 0, entries: 0 };
+    const amount = amountOf(r);
+    if (r.direction === "inflow")
+      slot.income += amount;
+    else
+      slot.expenses += amount;
+    slot.entries += 1;
+    byMonth.set(m, slot);
+  }
+  return [...byMonth.values()].sort((a, b) => a.month - b.month);
+}
+function defaultBasis(rows) {
+  const year = recordedYears(rows)[0];
+  if (year == null)
+    return null;
+  const months = monthlyBreakdown(rows, year).map((m) => m.month);
+  if (months.length === 0)
+    return null;
+  return { year, from_month: months[0], to_month: months[months.length - 1] };
+}
 function normalise(basis, fallbackYear) {
   if (!basis)
     return { year: fallbackYear, from_month: 1, to_month: 12 };
@@ -839,8 +878,387 @@ function annualizeCashflow(rows, basis) {
   };
 }
 
-// supabase/functions/_shared/finance/derived.ts
+// supabase/functions/_shared/cashflow/items.ts
+function monthStart(d) {
+  if (typeof d === "string") {
+    const m = /^(\d{4})-(\d{2})/.exec(d);
+    if (m)
+      return `${m[1]}-${m[2]}-01`;
+    const parsed = new Date(d);
+    if (isNaN(parsed.getTime())) {
+      throw new Error(`monthStart: unusable date "${d}"`);
+    }
+    return monthStart(parsed);
+  }
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}-${mo}-01`;
+}
+function monthIndex(month) {
+  const y = Number(month.slice(0, 4));
+  const mo = Number(month.slice(5, 7));
+  return y * 12 + (mo - 1);
+}
+function monthFromIndex(idx) {
+  const y = Math.floor(idx / 12);
+  const mo = idx - y * 12 + 1;
+  return `${y}-${String(mo).padStart(2, "0")}-01`;
+}
+function monthBefore(month) {
+  return monthFromIndex(monthIndex(month) - 1);
+}
 function round22(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function isActiveAt(item, asOf) {
+  const asOfMonth = monthStart(asOf);
+  if (item.effective_from > asOfMonth)
+    return false;
+  if (item.effective_to != null && item.effective_to < asOfMonth)
+    return false;
+  return true;
+}
+function activeItems(items, asOf) {
+  return (items ?? []).filter((it) => isActiveAt(it, asOf));
+}
+function itemMonthlyAmount(item) {
+  const occurrences = ANNUAL_OCCURRENCES[item.frequency] ?? 12;
+  const amount = Number(item.amount);
+  const n = Number.isFinite(amount) ? amount : 0;
+  return n * occurrences / 12;
+}
+function annualizeItems(items, asOf) {
+  const asOfMonth = monthStart(asOf);
+  const active = activeItems(items ?? [], asOfMonth);
+  let monthlyIncome = 0;
+  let monthlyExpenses = 0;
+  let annualItemsIncome = 0;
+  let annualItemsExpenses = 0;
+  for (const item of active) {
+    if (item.frequency === "one_off")
+      continue;
+    if (isTransferCode(item.category))
+      continue;
+    const inflow = item.direction === "inflow";
+    const monthlyAmount = itemMonthlyAmount(item);
+    if ((item.frequency ?? "monthly") === "monthly") {
+      if (inflow)
+        monthlyIncome += monthlyAmount;
+      else
+        monthlyExpenses += monthlyAmount;
+    } else {
+      const annual = monthlyAmount * 12;
+      if (inflow)
+        annualItemsIncome += annual;
+      else
+        annualItemsExpenses += annual;
+    }
+  }
+  const annualIncome = monthlyIncome * 12 + annualItemsIncome;
+  const annualExpenses = monthlyExpenses * 12 + annualItemsExpenses;
+  const asOfIdx = monthIndex(asOfMonth);
+  const lowIdx = asOfIdx - 11;
+  const highIdx = asOfIdx + 12;
+  const one_off_items = (items ?? []).filter((it) => {
+    if (it.frequency !== "one_off")
+      return false;
+    const idx = monthIndex(monthStart(it.effective_from));
+    return idx >= lowIdx && idx <= highIdx;
+  });
+  return {
+    annual_income: annualIncome,
+    annual_expenses: annualExpenses,
+    monthly_income: annualIncome / 12,
+    monthly_expenses: annualExpenses / 12,
+    basis_months: 12,
+    months_with_data: [],
+    annual_items_income: annualItemsIncome,
+    annual_items_expenses: annualItemsExpenses,
+    one_off_items
+  };
+}
+function annualizeItemsByCategory(items, asOf, opts = {}) {
+  const asOfMonth = monthStart(asOf);
+  const active = activeItems(items ?? [], asOfMonth);
+  const acc = /* @__PURE__ */ new Map();
+  for (const item of active) {
+    if (item.frequency === "one_off")
+      continue;
+    if (!opts.includeTransfers && isTransferCode(item.category))
+      continue;
+    const key = item.category;
+    const a = acc.get(key) ?? { mi: 0, me: 0, ai: 0, ae: 0 };
+    const inflow = item.direction === "inflow";
+    const monthlyAmount = itemMonthlyAmount(item);
+    if ((item.frequency ?? "monthly") === "monthly") {
+      if (inflow)
+        a.mi += monthlyAmount;
+      else
+        a.me += monthlyAmount;
+    } else {
+      const annual = monthlyAmount * 12;
+      if (inflow)
+        a.ai += annual;
+      else
+        a.ae += annual;
+    }
+    acc.set(key, a);
+  }
+  return [...acc.entries()].map(([category, a]) => {
+    const annual_income = a.mi * 12 + a.ai;
+    const annual_expenses = a.me * 12 + a.ae;
+    return {
+      category,
+      annual_income,
+      annual_expenses,
+      monthly_income: annual_income / 12,
+      monthly_expenses: annual_expenses / 12
+    };
+  });
+}
+function reviseItem(item, changes, fromMonth) {
+  const fm = monthStart(fromMonth);
+  if (item.frequency === "one_off") {
+    const update = { ...changes };
+    if (update.effective_from != null) {
+      const ef = monthStart(update.effective_from);
+      update.effective_from = ef;
+      update.effective_to = ef;
+    }
+    return { mode: "correct", update };
+  }
+  if (fm <= item.effective_from) {
+    return { mode: "correct", update: { ...changes } };
+  }
+  const { id: _oldId, ...rest } = item;
+  const insert = {
+    ...rest,
+    ...changes,
+    effective_from: fm,
+    effective_to: item.effective_to ?? null,
+    previous_id: item.id
+  };
+  return {
+    mode: "version",
+    close: { id: item.id, effective_to: monthBefore(fm) },
+    insert
+  };
+}
+function endItem(item, lastMonth) {
+  const lm = monthStart(lastMonth);
+  const effective_to = lm < item.effective_from ? item.effective_from : lm;
+  return { id: item.id, effective_to };
+}
+function normaliseNote(note) {
+  return (note ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+function itemsFromMonthRows(rows, basis) {
+  const allRows = rows ?? [];
+  const year = recordedYears(allRows)[0];
+  if (year == null)
+    return [];
+  const eligible = allRows.filter((r) => yearOf(r.period_month) === year).slice().sort((x, y) => x.period_month !== y.period_month ? x.period_month < y.period_month ? -1 : 1 : x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+  const groups = /* @__PURE__ */ new Map();
+  for (const r of eligible) {
+    const freq = r.frequency ?? "monthly";
+    const note = normaliseNote(r.source_note);
+    const linkedAsset = r.linked_asset_id ?? null;
+    const linkedLiability = r.linked_liability_id ?? null;
+    const month = monthStart(r.period_month);
+    const key = JSON.stringify([r.direction, r.category, freq, note, linkedAsset, linkedLiability]);
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        client_id: r.client_id ?? null,
+        direction: r.direction,
+        category: r.category,
+        frequency: freq,
+        note,
+        linked_asset_id: linkedAsset,
+        linked_liability_id: linkedLiability,
+        allIds: [],
+        earliestMonth: month,
+        latestMonth: month,
+        latestMonthAmount: 0,
+        latestMonthIds: [],
+        latestNote: null,
+        needsReview: false,
+        reviewReason: null
+      };
+      groups.set(key, g);
+    }
+    g.allIds.push(r.id);
+    if (month < g.earliestMonth)
+      g.earliestMonth = month;
+    const amount = Number(r.amount);
+    const amt = Number.isFinite(amount) ? amount : 0;
+    if (month > g.latestMonth) {
+      g.latestMonth = month;
+      g.latestMonthAmount = amt;
+      g.latestMonthIds = [r.id];
+      g.latestNote = r.source_note ?? null;
+    } else {
+      g.latestMonthAmount += amt;
+      g.latestMonthIds.push(r.id);
+      g.latestNote = r.source_note ?? g.latestNote;
+    }
+    if (r.needs_review)
+      g.needsReview = true;
+    if (!g.reviewReason && r.review_reason)
+      g.reviewReason = r.review_reason;
+  }
+  const items = [];
+  for (const g of groups.values()) {
+    const isOneOff = g.frequency === "one_off";
+    const amount = round22(g.latestMonthAmount);
+    const effective_from = g.earliestMonth;
+    const effective_to = isOneOff ? effective_from : null;
+    items.push({
+      client_id: g.client_id ?? void 0,
+      direction: g.direction,
+      category: g.category,
+      name: g.latestNote ?? void 0,
+      amount,
+      frequency: g.frequency,
+      effective_from,
+      effective_to,
+      linked_asset_id: g.linked_asset_id ?? void 0,
+      linked_liability_id: g.linked_liability_id ?? void 0,
+      source: "migrated",
+      needs_review: g.needsReview,
+      review_reason: g.reviewReason ?? void 0,
+      source_ids: g.allIds.slice().sort(),
+      amount_ids: g.latestMonthIds.slice().sort(),
+      divisor: 1
+    });
+  }
+  return items.sort((a, b2) => {
+    if (a.direction !== b2.direction)
+      return a.direction < b2.direction ? -1 : 1;
+    if (a.category !== b2.category)
+      return a.category < b2.category ? -1 : 1;
+    const an = normaliseNote(a.name);
+    const bn = normaliseNote(b2.name);
+    if (an !== bn)
+      return an < bn ? -1 : 1;
+    if (a.frequency !== b2.frequency)
+      return a.frequency < b2.frequency ? -1 : 1;
+    return 0;
+  });
+}
+
+// supabase/functions/_shared/finance/statutory.ts
+var EPF_EMPLOYEE_RATE = 0.11;
+var EPF_EMPLOYEE_RATE_SENIOR = 0;
+var EPF_EMPLOYER_RATE_LOW = 0.13;
+var EPF_EMPLOYER_RATE_HIGH = 0.12;
+var EPF_EMPLOYER_RATE_SENIOR = 0.04;
+var EPF_EMPLOYER_WAGE_THRESHOLD = 5e3;
+var SOCSO_EMPLOYEE_RATE = 5e-3;
+var EIS_EMPLOYEE_RATE = 2e-3;
+var SOCSO_EIS_WAGE_CEILING = 6e3;
+var STATUTORY_SENIOR_AGE = 60;
+var STATUTORY_NOTE = "\u6309\u6CD5\u5B9A\u6BD4\u4F8B\u4F30\u7B97";
+var EPF_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission", "bonus"];
+var REGULAR_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission"];
+var SOCSO_EIS_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission", "overtime"];
+function round23(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function roundUpToRinggit(n) {
+  return Math.ceil(n - 1e-9);
+}
+function ageAt(dob, asOf) {
+  if (!dob)
+    return null;
+  const d = new Date(dob);
+  if (isNaN(d.getTime()))
+    return null;
+  let age = asOf.getUTCFullYear() - d.getUTCFullYear();
+  const beforeBirthdayThisYear = asOf.getUTCMonth() < d.getUTCMonth() || asOf.getUTCMonth() === d.getUTCMonth() && asOf.getUTCDate() < d.getUTCDate();
+  if (beforeBirthdayThisYear)
+    age -= 1;
+  return age;
+}
+function sumWage(items, asOf, categories) {
+  let total = 0;
+  for (const item of activeItems(items ?? [], asOf)) {
+    if (item.direction !== "inflow")
+      continue;
+    if (!categories.includes(item.category))
+      continue;
+    total += itemMonthlyAmount(item);
+  }
+  return total;
+}
+function deriveStatutoryItems(items, client, asOf = /* @__PURE__ */ new Date()) {
+  const nothing = {
+    items: [],
+    employee_epf_monthly: 0,
+    employer_epf_monthly: 0,
+    socso_eis_monthly: 0,
+    epf_wage_monthly: 0,
+    notes: []
+  };
+  if (client?.has_epf !== true)
+    return nothing;
+  const epfWage = sumWage(items, asOf, EPF_WAGE_CATEGORIES);
+  if (epfWage <= 0)
+    return nothing;
+  const regularWage = sumWage(items, asOf, REGULAR_WAGE_CATEGORIES);
+  const socsoEisWage = Math.min(sumWage(items, asOf, SOCSO_EIS_WAGE_CATEGORIES), SOCSO_EIS_WAGE_CEILING);
+  const age = ageAt(client.date_of_birth, asOf);
+  const isSenior = age != null && age >= STATUTORY_SENIOR_AGE;
+  const employeeRate = isSenior ? EPF_EMPLOYEE_RATE_SENIOR : EPF_EMPLOYEE_RATE;
+  const employerRate = isSenior ? EPF_EMPLOYER_RATE_SENIOR : regularWage <= EPF_EMPLOYER_WAGE_THRESHOLD ? EPF_EMPLOYER_RATE_LOW : EPF_EMPLOYER_RATE_HIGH;
+  const employeeEpf = roundUpToRinggit(epfWage * employeeRate);
+  const employerEpf = roundUpToRinggit(epfWage * employerRate);
+  const socsoRate = isSenior ? 0 : SOCSO_EMPLOYEE_RATE;
+  const eisRate = isSenior ? 0 : EIS_EMPLOYEE_RATE;
+  const socsoEis = round23(socsoEisWage * (socsoRate + eisRate));
+  const resultItems = [];
+  if (employeeEpf > 0) {
+    resultItems.push({
+      key: "statutory:epf_employee",
+      source_type: "statutory",
+      source_id: null,
+      source_name: "EPF\uFF08\u96C7\u5458\uFF09",
+      category: "epf_employee",
+      direction: "outflow",
+      monthly_amount: employeeEpf,
+      interest_monthly: 0,
+      principal_monthly: 0,
+      estimated: ["statutory_rate"],
+      warnings: [STATUTORY_NOTE]
+    });
+  }
+  if (socsoEis > 0) {
+    resultItems.push({
+      key: "statutory:socso_eis",
+      source_type: "statutory",
+      source_id: null,
+      source_name: "SOCSO/EIS",
+      category: "socso_eis",
+      direction: "outflow",
+      monthly_amount: socsoEis,
+      interest_monthly: 0,
+      principal_monthly: 0,
+      estimated: ["statutory_rate"],
+      warnings: [STATUTORY_NOTE]
+    });
+  }
+  return {
+    items: resultItems,
+    employee_epf_monthly: employeeEpf,
+    employer_epf_monthly: employerEpf,
+    socso_eis_monthly: socsoEis,
+    epf_wage_monthly: round23(epfWage),
+    notes: resultItems.length > 0 ? [STATUTORY_NOTE] : []
+  };
+}
+
+// supabase/functions/_shared/finance/derived.ts
+function round24(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 var PREMIUM_OCCURRENCES = {
@@ -877,6 +1295,9 @@ function isExpired(endDate, today) {
   const cutoff = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
   return end.getTime() < cutoff.getTime();
 }
+function isPremiumActive(status) {
+  return status == null || status === "in_force";
+}
 function deriveLoanItems(liabilities, today = /* @__PURE__ */ new Date()) {
   const items = [];
   for (const l of liabilities ?? []) {
@@ -895,7 +1316,7 @@ function deriveLoanItems(liabilities, today = /* @__PURE__ */ new Date()) {
       source_name: l.name ?? meta.label_zh,
       category,
       direction: "outflow",
-      monthly_amount: round22(amount),
+      monthly_amount: round24(amount),
       interest_monthly: est.interest_monthly,
       principal_monthly: est.principal_monthly,
       estimated: est.estimated,
@@ -909,8 +1330,10 @@ function derivePremiumItems(policies, today = /* @__PURE__ */ new Date()) {
   for (const p of policies ?? []) {
     if (isExpired(p.end_date, today))
       continue;
+    if (!isPremiumActive(p.status))
+      continue;
     const occurrences = PREMIUM_OCCURRENCES[p.premium_frequency ?? "annual"] ?? 12;
-    const monthly = round22((p.premium ?? 0) * occurrences / 12);
+    const monthly = round24((p.premium ?? 0) * occurrences / 12);
     if (monthly === 0)
       continue;
     items.push({
@@ -947,16 +1370,20 @@ function isSuperseded(row, liabilities, policies) {
     return false;
   }
   if (cat.group === "O3") {
-    const policyCategories = new Set((policies ?? []).map((p) => premiumCategoryOf(p.policy_type)));
+    const activePolicies = (policies ?? []).filter((p) => isPremiumActive(p.status));
+    const policyCategories = new Set(activePolicies.map((p) => premiumCategoryOf(p.policy_type)));
     if (policyCategories.has(code))
       return true;
-    if (code === "protection_other" && (policies?.length ?? 0) > 0)
+    if (code === "protection_other" && activePolicies.length > 0)
       return true;
     return false;
   }
   return false;
 }
 function planCashflow(input) {
+  return input.items && input.items.length > 0 ? planCashflowFromItems(input) : planCashflowFromActuals(input);
+}
+function planCashflowFromActuals(input) {
   const { rows, liabilities, policies, basis } = input;
   const today = input.today ?? /* @__PURE__ */ new Date();
   const superseded = [];
@@ -977,8 +1404,8 @@ function planCashflow(input) {
       continue;
     derivedMonthlyExpense += item.monthly_amount;
   }
-  const monthly_expenses = round22(baseTotals.monthly_expenses + derivedMonthlyExpense);
-  const annual_expenses = round22(baseTotals.annual_expenses + derivedMonthlyExpense * 12);
+  const monthly_expenses = round24(baseTotals.monthly_expenses + derivedMonthlyExpense);
+  const annual_expenses = round24(baseTotals.annual_expenses + derivedMonthlyExpense * 12);
   const totals = {
     ...baseTotals,
     monthly_expenses,
@@ -1003,52 +1430,1308 @@ function planCashflow(input) {
     totals,
     derived,
     superseded,
-    monthly_debt_service: round22(monthly_debt_service),
-    monthly_principal: round22(monthly_principal),
-    monthly_interest: round22(monthly_interest),
-    monthly_premiums: round22(monthly_premiums)
+    monthly_debt_service: round24(monthly_debt_service),
+    monthly_principal: round24(monthly_principal),
+    monthly_interest: round24(monthly_interest),
+    monthly_premiums: round24(monthly_premiums),
+    source: "actuals",
+    monthly_employee_epf: 0,
+    monthly_employer_epf: 0,
+    monthly_socso_eis: 0,
+    one_off_items: []
+  };
+}
+function deriveStatutoryForHousehold(items, clientInfo, clients, today) {
+  if (!clients)
+    return deriveStatutoryItems(items, clientInfo ?? {}, today);
+  const byClient = /* @__PURE__ */ new Map();
+  for (const it of items ?? []) {
+    const cid = it.client_id ?? "";
+    const group = byClient.get(cid);
+    if (group)
+      group.push(it);
+    else
+      byClient.set(cid, [it]);
+  }
+  let employee_epf_monthly = 0;
+  let employer_epf_monthly = 0;
+  let socso_eis_monthly = 0;
+  let epf_wage_monthly = 0;
+  const items_out = [];
+  const notes = /* @__PURE__ */ new Set();
+  for (const [cid, groupItems] of byClient) {
+    const result = deriveStatutoryItems(groupItems, clients[cid] ?? {}, today);
+    employee_epf_monthly += result.employee_epf_monthly;
+    employer_epf_monthly += result.employer_epf_monthly;
+    socso_eis_monthly += result.socso_eis_monthly;
+    epf_wage_monthly += result.epf_wage_monthly;
+    for (const it of result.items) {
+      items_out.push({ ...it, key: cid ? `${it.key}:${cid}` : it.key });
+    }
+    for (const n of result.notes)
+      notes.add(n);
+  }
+  return {
+    items: items_out,
+    employee_epf_monthly: round24(employee_epf_monthly),
+    employer_epf_monthly: round24(employer_epf_monthly),
+    socso_eis_monthly: round24(socso_eis_monthly),
+    epf_wage_monthly: round24(epf_wage_monthly),
+    notes: [...notes]
+  };
+}
+function planCashflowFromItems(input) {
+  const { liabilities, policies, client, clients } = input;
+  const items = input.items ?? [];
+  const today = input.today ?? /* @__PURE__ */ new Date();
+  const active = activeItems(items, today);
+  const superseded = [];
+  const kept = [];
+  for (const it of active) {
+    if (isSuperseded(it, liabilities, policies))
+      superseded.push(it);
+    else
+      kept.push(it);
+  }
+  const itemTotals = annualizeItems(kept, today);
+  const nonSupersededAll = items.filter((it) => !isSuperseded(it, liabilities, policies));
+  const one_off_items = annualizeItems(nonSupersededAll, today).one_off_items;
+  const loanItems = deriveLoanItems(liabilities, today);
+  const premiumItems = derivePremiumItems(policies, today);
+  const statutory = deriveStatutoryForHousehold(items, client, clients, today);
+  const derived = [...loanItems, ...premiumItems, ...statutory.items];
+  let derivedMonthlyExpense = 0;
+  for (const item of derived) {
+    if (isTransferCode(item.category))
+      continue;
+    derivedMonthlyExpense += item.monthly_amount;
+  }
+  const monthly_expenses = round24(itemTotals.monthly_expenses + derivedMonthlyExpense);
+  const annual_expenses = round24(itemTotals.annual_expenses + derivedMonthlyExpense * 12);
+  const { one_off_items: _itemTotalsOneOff, ...itemTotalsRest } = itemTotals;
+  const totals = {
+    ...itemTotalsRest,
+    monthly_expenses,
+    annual_expenses
+  };
+  let monthly_debt_service = 0;
+  let monthly_principal = 0;
+  let monthly_interest = 0;
+  for (const l of liabilities ?? []) {
+    const meta = liabilityTypeMeta(l.liability_type);
+    if (!meta || meta.installment_category == null)
+      continue;
+    const est = estimateLoan(l, today);
+    monthly_debt_service += est.monthly_payment;
+    monthly_principal += est.principal_monthly;
+    monthly_interest += est.interest_monthly;
+  }
+  let monthly_premiums = 0;
+  for (const item of premiumItems)
+    monthly_premiums += item.monthly_amount;
+  return {
+    totals,
+    derived,
+    superseded,
+    monthly_debt_service: round24(monthly_debt_service),
+    monthly_principal: round24(monthly_principal),
+    monthly_interest: round24(monthly_interest),
+    monthly_premiums: round24(monthly_premiums),
+    source: "items",
+    monthly_employee_epf: statutory.employee_epf_monthly,
+    monthly_employer_epf: statutory.employer_epf_monthly,
+    monthly_socso_eis: statutory.socso_eis_monthly,
+    one_off_items
   };
 }
 
+// supabase/functions/_shared/finance/valuation.ts
+var MS_PER_DAY = 24 * 60 * 60 * 1e3;
+var MIN_SPAN_DAYS = 60;
+var TARGET_SPAN_DAYS = 365;
+var VEHICLE_DEFAULT_DEPRECIATION_PCT = -0.1;
+var VEHICLE_ASSET_TYPE = "vehicle";
+function round25(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function round5(n) {
+  return Math.round((n + Number.EPSILON) * 1e5) / 1e5;
+}
+function toUtcMs(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr ?? "");
+  if (!m) {
+    const d = new Date(dateStr);
+    return d.getTime();
+  }
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+function asOfMs(asOf) {
+  if (typeof asOf === "string")
+    return toUtcMs(asOf);
+  return Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate());
+}
+function sortedDated(valuations) {
+  return (valuations ?? []).filter((v) => !!v && !!v.valuation_date && Number.isFinite(v.value)).map((v) => ({ ...v, _ts: toUtcMs(v.valuation_date) })).sort((a, b) => a._ts - b._ts);
+}
+function valueChangeAnnual(valuations, asOf, opts) {
+  const currentValue = Number(opts.currentValue) || 0;
+  const none = () => {
+    if (opts.assetType === VEHICLE_ASSET_TYPE) {
+      return {
+        annual_change: round25(VEHICLE_DEFAULT_DEPRECIATION_PCT * currentValue),
+        source: "default_depreciation"
+      };
+    }
+    return { annual_change: null, source: "none" };
+  };
+  const asOfTs = asOfMs(asOf);
+  const list = sortedDated(valuations).filter((v) => v._ts <= asOfTs);
+  if (list.length === 0)
+    return none();
+  const latest = list[list.length - 1];
+  const earlierCandidates = list.filter((v) => v._ts < latest._ts);
+  if (earlierCandidates.length === 0)
+    return none();
+  const targetTs = latest._ts - TARGET_SPAN_DAYS * MS_PER_DAY;
+  let earlier = earlierCandidates[0];
+  let bestDiff = Math.abs(earlier._ts - targetTs);
+  for (const c of earlierCandidates.slice(1)) {
+    const diff = Math.abs(c._ts - targetTs);
+    if (diff < bestDiff || diff === bestDiff && c._ts > earlier._ts) {
+      earlier = c;
+      bestDiff = diff;
+    }
+  }
+  const days = Math.round((latest._ts - earlier._ts) / MS_PER_DAY);
+  if (days < MIN_SPAN_DAYS)
+    return none();
+  const contributions = list.filter((v) => v._ts > earlier._ts && v._ts <= latest._ts).reduce((s, v) => s + (Number(v.net_contribution) || 0), 0);
+  const rawChange = latest.value - earlier.value - contributions;
+  const annual_change = round25(rawChange * (TARGET_SPAN_DAYS / days));
+  return {
+    annual_change,
+    source: "history",
+    from_date: earlier.valuation_date,
+    to_date: latest.valuation_date,
+    days
+  };
+}
+function twr(valuations) {
+  const list = sortedDated(valuations);
+  if (list.length < 2)
+    return null;
+  let chain = 1;
+  let any = false;
+  for (let i = 1; i < list.length; i++) {
+    const prev = list[i - 1];
+    const cur = list[i];
+    if (prev.value === 0)
+      continue;
+    const c = Number(cur.net_contribution) || 0;
+    const r = (cur.value - c) / prev.value - 1;
+    chain *= 1 + r;
+    any = true;
+  }
+  if (!any)
+    return null;
+  const from = list[0].valuation_date;
+  const to = list[list.length - 1].valuation_date;
+  const totalDays = (list[list.length - 1]._ts - list[0]._ts) / MS_PER_DAY;
+  const twrValue = chain - 1;
+  const annualised = totalDays > 0 ? Math.pow(chain, TARGET_SPAN_DAYS / totalDays) - 1 : null;
+  return {
+    twr: round5(twrValue),
+    annualised: annualised != null ? round5(annualised) : null,
+    from,
+    to
+  };
+}
+
+// supabase/functions/_shared/finance/assetQuality.ts
+var QUADRANTS = [
+  { id: "productive", label_zh: "\u751F\u8D22\u8D44\u4EA7", label_en: "Productive" },
+  { id: "yielding_depreciating", label_zh: "\u6536\u76CA\u4F46\u8D2C\u503C", label_en: "Yielding but depreciating" },
+  { id: "appreciating_cash_consuming", label_zh: "\u589E\u503C\u4F46\u5403\u73B0\u91D1", label_en: "Appreciating but cash-consuming" },
+  { id: "consuming", label_zh: "\u6D88\u8017\u578B\u8D44\u4EA7", label_en: "Consuming" }
+];
+var NOTE_MISSING_VALUATION_HISTORY = "\u7F3A\u5C11\u4F30\u503C\u5386\u53F2";
+function round26(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function round4(n) {
+  return Math.round((n + Number.EPSILON) * 1e4) / 1e4;
+}
+function quadrantFor(netCashFlowMonthly, valueChangeEffective) {
+  const cashOk = netCashFlowMonthly >= 0;
+  const valueOk = valueChangeEffective >= 0;
+  if (cashOk && valueOk)
+    return "productive";
+  if (cashOk && !valueOk)
+    return "yielding_depreciating";
+  if (!cashOk && valueOk)
+    return "appreciating_cash_consuming";
+  return "consuming";
+}
+function assessAsset(asset, ctx, asOf) {
+  const asset_class = assetClassOf(asset.asset_type);
+  const currentValue = Number(asset.current_value) || 0;
+  const asOfDate = typeof asOf === "string" ? new Date(asOf) : asOf;
+  const linkedItems = activeItems(ctx.items ?? [], asOf).filter(
+    (it) => it.linked_asset_id != null && it.linked_asset_id === asset.id
+  );
+  let itemsMonthly = 0;
+  const linked_items = linkedItems.map((it) => {
+    const monthly = round26(itemMonthlyAmount(it));
+    itemsMonthly += it.direction === "inflow" ? monthly : -monthly;
+    return { id: it.id, category: it.category, direction: it.direction, monthly_amount: monthly };
+  });
+  const linkedLiabilities = (ctx.liabilities ?? []).filter(
+    (l) => l.linked_asset_id != null && l.linked_asset_id === asset.id
+  );
+  let liabilitiesMonthly = 0;
+  const linked_liabilities = linkedLiabilities.map((l) => {
+    const est = estimateLoan(l, asOfDate);
+    liabilitiesMonthly += est.monthly_payment;
+    return { id: l.id ?? null, liability_type: l.liability_type, monthly_payment: est.monthly_payment };
+  });
+  const net_cash_flow_monthly = round26(itemsMonthly - liabilitiesMonthly);
+  const ownValuations = (ctx.valuations ?? []).filter(
+    (v) => v.asset_id == null || v.asset_id === asset.id
+  );
+  const vc = valueChangeAnnual(ownValuations, asOf, { assetType: asset.asset_type, currentValue });
+  const notes = [];
+  let effectiveValueChange;
+  if (vc.annual_change == null) {
+    effectiveValueChange = 0;
+    if (vc.source === "none")
+      notes.push(NOTE_MISSING_VALUATION_HISTORY);
+  } else {
+    effectiveValueChange = vc.annual_change;
+  }
+  const labeled = asset_class === "C" || asset_class === "D";
+  const quadrant = labeled ? quadrantFor(net_cash_flow_monthly, effectiveValueChange) : null;
+  const total_return_annual = round26(net_cash_flow_monthly * 12 + effectiveValueChange);
+  const return_pct = currentValue > 0 ? round4(total_return_annual / currentValue) : null;
+  return {
+    asset_id: asset.id,
+    asset_class,
+    quadrant,
+    net_cash_flow_monthly,
+    linked_items,
+    linked_liabilities,
+    value_change_annual: vc.annual_change,
+    value_change_source: vc.source,
+    total_return_annual,
+    return_pct,
+    notes
+  };
+}
+function assessAssets(assets, ctx, asOf) {
+  const list = assets ?? [];
+  const results = list.map((a) => assessAsset(a, ctx, asOf));
+  const by_quadrant = {
+    productive: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+    yielding_depreciating: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+    appreciating_cash_consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+    consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 }
+  };
+  for (let i = 0; i < list.length; i++) {
+    const r = results[i];
+    if (r.quadrant == null)
+      continue;
+    const bucket = by_quadrant[r.quadrant];
+    bucket.count += 1;
+    bucket.value = round26(bucket.value + (Number(list[i].current_value) || 0));
+    bucket.net_cash_flow_monthly = round26(bucket.net_cash_flow_monthly + r.net_cash_flow_monthly);
+  }
+  return { assets: results, by_quadrant };
+}
+
+// supabase/functions/_shared/finance/snapshot.ts
+function round0(n) {
+  return Math.round(n);
+}
+function round42(n) {
+  return Number(n.toFixed(4));
+}
+function ownedValue(a) {
+  const value = Number(a.current_value) || 0;
+  const pct = a.ownership_pct == null ? 100 : Number(a.ownership_pct);
+  const pctSafe = Number.isFinite(pct) ? pct : 100;
+  return value * (pctSafe / 100);
+}
+function passiveIncomeMonthly(items, rows, basis, asOf) {
+  if (items.length > 0) {
+    let total = 0;
+    for (const it of activeItems(items, asOf)) {
+      if (it.direction !== "inflow")
+        continue;
+      if (groupOf(it.category)?.id !== "I2")
+        continue;
+      total += itemMonthlyAmount(it);
+    }
+    return total;
+  }
+  const passive = (rows ?? []).filter(
+    (r) => r.direction === "inflow" && groupOf(r.category ?? null)?.id === "I2"
+  );
+  return annualizeCashflow(passive, basis).monthly_income;
+}
+function computeSnapshot(input) {
+  const asOfDate = typeof input.asOf === "string" ? new Date(input.asOf) : input.asOf;
+  const asOfStr = typeof input.asOf === "string" ? input.asOf.slice(0, 10) : asOfDate.toISOString().slice(0, 10);
+  const assets = input.assets ?? [];
+  const liabilities = input.liabilities ?? [];
+  const policies = input.policies ?? [];
+  const items = input.items ?? [];
+  const rows = input.rows ?? [];
+  let totalAssets = 0;
+  let liquidTotal = 0;
+  let investTotal = 0;
+  let epfTotal = 0;
+  for (const a of assets) {
+    const v = ownedValue(a);
+    totalAssets += v;
+    if (isLiquid(a.asset_type))
+      liquidTotal += v;
+    if (assetClassOf(a.asset_type) === "C")
+      investTotal += v;
+    if (EPF_ASSET_TYPES.includes(a.asset_type))
+      epfTotal += v;
+  }
+  const totalLiabilities = liabilities.reduce((s, l) => s + (Number(l.outstanding_balance) || 0), 0);
+  const netWorth = totalAssets - totalLiabilities;
+  const basis = items.length > 0 ? null : defaultBasis(rows);
+  const plan = planCashflow({
+    rows,
+    liabilities,
+    policies,
+    basis,
+    today: asOfDate,
+    items,
+    client: input.client
+  });
+  const monthlyIncome = plan.totals.monthly_income;
+  const monthlyExpenses = plan.totals.monthly_expenses;
+  const monthlySurplus = monthlyIncome - monthlyExpenses;
+  const monthlyDebtService = plan.monthly_debt_service;
+  let mortgageMonthly = 0;
+  for (const l of liabilities) {
+    if (l.liability_type !== "mortgage")
+      continue;
+    const meta = liabilityTypeMeta(l.liability_type);
+    if (!meta || meta.installment_category == null)
+      continue;
+    mortgageMonthly += estimateLoan(l, asOfDate).monthly_payment;
+  }
+  const nonMortgageDebtService = monthlyDebtService - mortgageMonthly;
+  let activeLifeSumAssured = 0;
+  for (const p of policies) {
+    const active = !p.end_date || p.end_date >= asOfStr;
+    if (!active)
+      continue;
+    const kind = String(p.policy_type || "").toLowerCase();
+    if (kind !== "life" && kind !== "investment_linked")
+      continue;
+    activeLifeSumAssured += Number(p.sum_assured) || 0;
+  }
+  const annualIncome = monthlyIncome * 12;
+  const passiveMonthly = passiveIncomeMonthly(items, rows, basis, asOfDate);
+  const emergencyFundMonths = monthlyExpenses > 0 ? round42(liquidTotal / monthlyExpenses) : null;
+  const notes = [];
+  if (monthlyIncome <= 0)
+    notes.push("\u672A\u5F55\u5F97\u7ECF\u5E38\u6027\u6536\u5165\uFF0C\u6536\u5165\u76F8\u5173\u6BD4\u7387\u4E0D\u5177\u53C2\u8003\u610F\u4E49");
+  if (netWorth <= 0)
+    notes.push("\u51C0\u8D44\u4EA7\u4E3A\u96F6\u6216\u8D1F\u6570\uFF0C\u4EE5\u51C0\u8D44\u4EA7\u4E3A\u5206\u6BCD\u7684\u6BD4\u7387\u8BB0\u4E3A null");
+  return {
+    net_worth: round0(netWorth),
+    total_assets: round0(totalAssets),
+    total_liabilities: round0(totalLiabilities),
+    basic_liquidity_ratio: emergencyFundMonths,
+    liquid_asset_to_net_worth: netWorth > 0 ? round42(liquidTotal / netWorth) : null,
+    solvency_ratio: totalAssets > 0 ? round42(netWorth / totalAssets) : null,
+    debt_service_ratio: monthlyIncome > 0 ? round42(monthlyDebtService / monthlyIncome) : null,
+    non_mortgage_dsr: monthlyIncome > 0 ? round42(nonMortgageDebtService / monthlyIncome) : null,
+    savings_ratio: monthlyIncome > 0 ? round42(monthlySurplus / monthlyIncome) : null,
+    life_insurance_coverage: annualIncome > 0 ? round42(activeLifeSumAssured / annualIncome) : null,
+    invest_assets_to_net_worth: netWorth > 0 ? round42(investTotal / netWorth) : null,
+    passive_income_coverage: monthlyExpenses > 0 ? round42(passiveMonthly / monthlyExpenses) : null,
+    raw_metrics: {
+      liquid_assets_total: round0(liquidTotal),
+      invest_assets_total: round0(investTotal),
+      epf_assets_total: round0(epfTotal),
+      monthly_debt_service: round0(monthlyDebtService),
+      monthly_mortgage_service: round0(mortgageMonthly),
+      monthly_non_mortgage_service: round0(nonMortgageDebtService),
+      monthly_employee_epf: round0(plan.monthly_employee_epf),
+      monthly_socso_eis: round0(plan.monthly_socso_eis),
+      active_life_sum_assured: round0(activeLifeSumAssured),
+      passive_income_monthly: round0(passiveMonthly),
+      annual_income: round0(annualIncome),
+      plan_source: plan.source,
+      cashflow_basis: basis,
+      as_of: asOfStr,
+      notes
+    },
+    emergency_fund_months: emergencyFundMonths,
+    monthly_income: round0(monthlyIncome),
+    monthly_expenses: round0(monthlyExpenses),
+    monthly_surplus: round0(monthlySurplus),
+    monthly_principal: round0(plan.monthly_principal),
+    monthly_employer_epf: round0(plan.monthly_employer_epf)
+  };
+}
+
+// supabase/functions/_shared/finance/reconcile.ts
+function round27(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function toUtcMs2(d) {
+  if (typeof d === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+    if (m)
+      return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return new Date(d).getTime();
+  }
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+function valueAt(valuations, asOfMs2) {
+  const usable = (valuations ?? []).filter((v) => v && v.valuation_date && Number.isFinite(v.value)).map((v) => ({ ...v, _ts: toUtcMs2(v.valuation_date) })).filter((v) => v._ts <= asOfMs2).sort((a, b) => a._ts - b._ts);
+  if (usable.length === 0)
+    return null;
+  return usable[usable.length - 1].value;
+}
+function linkedContributionMonthly(items, assetId, asOf, isTransfer) {
+  let total = 0;
+  for (const it of activeItems(items, asOf)) {
+    if (it.linked_asset_id !== assetId)
+      continue;
+    if (!isTransfer(it.category))
+      continue;
+    total += Math.abs(itemMonthlyAmount(it));
+  }
+  return total;
+}
+var TRANSFER_CATEGORIES = /* @__PURE__ */ new Set([
+  "asnb_contribution",
+  "asset_purchase",
+  "asset_sale",
+  "borrowing_family",
+  "business_capital",
+  "credit_card_payment",
+  "crypto_purchase",
+  "epf_employee",
+  "epf_voluntary",
+  "epf_withdrawal",
+  "fd_placement",
+  "gold_purchase",
+  "investment_contribution",
+  "investment_other",
+  "lend_out",
+  "loan_drawdown",
+  "prs_contribution",
+  "savings_withdrawal",
+  "sspn",
+  "stock_etf_purchase",
+  "tabung_haji",
+  "to_savings",
+  "unit_trust_contribution"
+]);
+var isTransferCategory = (code) => code != null && TRANSFER_CATEGORIES.has(code);
+var NOTE_UNLINKED_TRANSFERS = "\u672A\u5173\u8054\u7684\u5B9A\u671F\u6295\u5165\u4F1A\u8BA9\u5BF9\u8D26\u5931\u771F";
+function reconcile(input) {
+  const { prev, curr, months, plan, assets, valuationsByAsset, items = [] } = input;
+  const deltaNetWorth = round27(curr.net_worth - prev.net_worth);
+  const savings = round27(months * plan.monthly_surplus);
+  const principal = round27(months * plan.monthly_principal);
+  const employerEpf = round27(months * plan.monthly_employer_epf);
+  const employeeEpf = plan.monthly_employee_epf ?? 0;
+  const prevMs = toUtcMs2(prev.asOf);
+  const currMs = toUtcMs2(curr.asOf);
+  const notes = [];
+  const market_by_asset = [];
+  const epfAssets = assets.filter((a) => EPF_ASSET_TYPES.includes(a.asset_type));
+  const otherAssets = assets.filter(
+    (a) => !isLiquid(a.asset_type) && !EPF_ASSET_TYPES.includes(a.asset_type)
+  );
+  if (epfAssets.length > 0) {
+    let rawChange = 0;
+    let anyHistory = false;
+    for (const a of epfAssets) {
+      const before = valueAt(valuationsByAsset[a.id], prevMs);
+      const after = valueAt(valuationsByAsset[a.id], currMs);
+      if (before != null && after != null) {
+        rawChange += after - before;
+        anyHistory = true;
+      }
+    }
+    const contribution = round27(months * (employeeEpf + plan.monthly_employer_epf));
+    if (!anyHistory) {
+      notes.push(`EPF \u8D26\u6237\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55\uFF0C\u5E02\u573A\u53D8\u52A8\u8BB0\u4E3A 0\uFF08\u5408\u8BA1 ${epfAssets.length} \u4E2A\u8D26\u6237\uFF09`);
+      market_by_asset.push({
+        asset_id: "epf_combined",
+        asset_type: "epf",
+        value_change: 0,
+        contribution_adjustment: contribution,
+        market_change: round27(0 - contribution),
+        source: "none",
+        note: "\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55"
+      });
+    } else {
+      const marketChange = round27(rawChange - contribution);
+      market_by_asset.push({
+        asset_id: "epf_combined",
+        asset_type: "epf",
+        value_change: round27(rawChange),
+        contribution_adjustment: contribution,
+        market_change: marketChange,
+        source: "epf_combined"
+      });
+    }
+  }
+  for (const a of otherAssets) {
+    const before = valueAt(valuationsByAsset[a.id], prevMs);
+    const after = valueAt(valuationsByAsset[a.id], currMs);
+    const contribution = round27(months * linkedContributionMonthly(items, a.id, curr.asOf, isTransferCategory));
+    if (before == null || after == null) {
+      notes.push(`\u8D44\u4EA7\u300C${a.id}\u300D\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55\uFF0C\u5E02\u573A\u53D8\u52A8\u8BB0\u4E3A 0`);
+      market_by_asset.push({
+        asset_id: a.id,
+        asset_type: a.asset_type,
+        value_change: 0,
+        contribution_adjustment: contribution,
+        market_change: round27(0 - contribution),
+        source: "none",
+        note: "\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55"
+      });
+      continue;
+    }
+    const valueChange = round27(after - before);
+    market_by_asset.push({
+      asset_id: a.id,
+      asset_type: a.asset_type,
+      value_change: valueChange,
+      contribution_adjustment: contribution,
+      market_change: round27(valueChange - contribution),
+      source: "history"
+    });
+  }
+  const hasUnlinkedTransfer = activeItems(items, curr.asOf).some(
+    (it) => isTransferCategory(it.category) && it.linked_asset_id == null
+  );
+  if (hasUnlinkedTransfer)
+    notes.push(NOTE_UNLINKED_TRANSFERS);
+  const marketChangeTotal = round27(market_by_asset.reduce((s, m) => s + m.market_change, 0));
+  const explainedTotal = round27(savings + principal + employerEpf + marketChangeTotal);
+  const unexplainedGap = round27(deltaNetWorth - explainedTotal);
+  return {
+    delta_net_worth: deltaNetWorth,
+    explained: {
+      savings,
+      principal,
+      employer_epf: employerEpf,
+      market_change: marketChangeTotal
+    },
+    market_by_asset,
+    unexplained_gap: unexplainedGap,
+    notes
+  };
+}
+
+// supabase/functions/_shared/finance/alerts.ts
+var MS_PER_DAY2 = 24 * 60 * 60 * 1e3;
+var EMERGENCY_FUND_MONTHS_MIN = 3;
+var UNEXPLAINED_GAP_FLOOR = 5e3;
+var UNEXPLAINED_GAP_PCT_OF_NW = 0.05;
+var DSR_RISE_THRESHOLD = 0.05;
+var DSR_HIGH_THRESHOLD = 0.6;
+var QUARTERLY_DUE_DAYS = 92;
+var QUARTERLY_OVERDUE_DAYS = 120;
+var ANNUAL_DUE_DAYS = 365;
+var SEVERITY_RANK = { high: 0, medium: 1, low: 2 };
+function toUtcMs3(d) {
+  if (typeof d === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+    if (m)
+      return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return new Date(d).getTime();
+  }
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+function daysBetween(from, to) {
+  return Math.floor((toUtcMs3(to) - toUtcMs3(from)) / MS_PER_DAY2);
+}
+function sortedByDate(snapshots) {
+  return [...snapshots].sort(
+    (a, b) => a.snapshot_date < b.snapshot_date ? -1 : a.snapshot_date > b.snapshot_date ? 1 : 0
+  );
+}
+function lastApproved(reviews, kind) {
+  const approved = reviews.filter((r) => r.kind === kind && r.status === "approved");
+  if (approved.length === 0)
+    return null;
+  return approved.reduce((latest, r) => r.period_end > latest.period_end ? r : latest);
+}
+function computeAlerts(input) {
+  const { client_id, latestSnapshot, reviews, asOf } = input;
+  const liabilities = input.liabilities ?? [];
+  const alerts = [];
+  const push = (code, severity, message_zh, message_en) => alerts.push({ code, severity, message_zh, message_en, client_id });
+  const gap = latestSnapshot.unexplained_gap;
+  const netWorth = latestSnapshot.net_worth ?? 0;
+  if (gap != null) {
+    const threshold = Math.max(UNEXPLAINED_GAP_FLOOR, UNEXPLAINED_GAP_PCT_OF_NW * Math.abs(netWorth));
+    if (Math.abs(gap) > threshold) {
+      push(
+        "unexplained_gap",
+        "medium",
+        `\u51C0\u8D44\u4EA7\u6709 RM ${Math.abs(gap).toLocaleString("en-MY", { maximumFractionDigits: 0 })} \u672A\u80FD\u89E3\u91CA\uFF0C\u8BF7\u68C0\u67E5\u672C\u671F\u8D44\u4EA7/\u8D1F\u503A\u8BB0\u5F55`,
+        `RM ${Math.abs(gap).toLocaleString("en-MY", { maximumFractionDigits: 0 })} of net worth change is unexplained \u2014 review this period's asset/liability entries`
+      );
+    }
+  }
+  const months = latestSnapshot.basic_liquidity_ratio;
+  if (months != null && months < EMERGENCY_FUND_MONTHS_MIN) {
+    push(
+      "emergency_fund_low",
+      "high",
+      `\u7D27\u6025\u9884\u5907\u91D1\u4EC5 ${months.toFixed(1)} \u4E2A\u6708\uFF0C\u4F4E\u4E8E 3 \u4E2A\u6708\u7684\u6700\u4F4E\u6807\u51C6`,
+      `Emergency fund covers only ${months.toFixed(1)} months, below the 3-month minimum`
+    );
+  }
+  const history = sortedByDate(input.snapshots);
+  const prevSnapshot = history.length > 0 ? history[history.length - 1] : null;
+  const currDsr = latestSnapshot.debt_service_ratio;
+  const prevDsr = prevSnapshot?.debt_service_ratio;
+  if (currDsr != null && prevDsr != null) {
+    const risePp = Math.round((currDsr - prevDsr) * 1e4) / 1e4;
+    if (risePp >= DSR_RISE_THRESHOLD) {
+      push(
+        "dsr_rising",
+        "medium",
+        `\u8D1F\u503A\u507F\u8FD8\u6BD4\u7387\u8F83\u4E0A\u6B21\u5FEB\u7167\u4E0A\u5347 ${(risePp * 100).toFixed(1)} \u4E2A\u767E\u5206\u70B9`,
+        `Debt service ratio rose ${(risePp * 100).toFixed(1)} percentage points since the last snapshot`
+      );
+    }
+  }
+  if (currDsr != null && currDsr > DSR_HIGH_THRESHOLD) {
+    push(
+      "dsr_high",
+      "high",
+      `\u8D1F\u503A\u507F\u8FD8\u6BD4\u7387\u8FBE ${(currDsr * 100).toFixed(1)}%\uFF0C\u8D85\u8FC7 60%`,
+      `Debt service ratio is ${(currDsr * 100).toFixed(1)}%, above 60%`
+    );
+  }
+  const lastQuarterly = lastApproved(reviews, "quarterly");
+  if (lastQuarterly) {
+    const since = daysBetween(lastQuarterly.approved_at ?? lastQuarterly.period_end, asOf);
+    if (since > QUARTERLY_OVERDUE_DAYS) {
+      push(
+        "quarterly_review_overdue",
+        "high",
+        `\u5B63\u5EA6\u590D\u68C0\u5DF2\u903E\u671F ${since} \u5929\uFF08\u4E0A\u6B21\u6279\u51C6\uFF1A${lastQuarterly.period_end}\uFF09`,
+        `Quarterly review is ${since} days overdue (last approved: ${lastQuarterly.period_end})`
+      );
+    } else if (since > QUARTERLY_DUE_DAYS) {
+      push(
+        "quarterly_review_due",
+        "medium",
+        `\u5B63\u5EA6\u590D\u68C0\u5DF2\u5230\u671F ${since} \u5929\uFF08\u4E0A\u6B21\u6279\u51C6\uFF1A${lastQuarterly.period_end}\uFF09`,
+        `Quarterly review is due, ${since} days since last approved (${lastQuarterly.period_end})`
+      );
+    }
+  }
+  const lastAnnual = lastApproved(reviews, "annual");
+  if (lastAnnual) {
+    const since = daysBetween(lastAnnual.approved_at ?? lastAnnual.period_end, asOf);
+    if (since > ANNUAL_DUE_DAYS) {
+      push(
+        "annual_review_due",
+        "medium",
+        `\u5E74\u5EA6\u5168\u9762\u590D\u68C0\u5DF2\u5230\u671F ${since} \u5929\uFF08\u4E0A\u6B21\u6279\u51C6\uFF1A${lastAnnual.period_end}\uFF09`,
+        `Annual full review is due, ${since} days since last approved (${lastAnnual.period_end})`
+      );
+    }
+  }
+  if (liabilities.length > 0) {
+    const asOfDate = typeof asOf === "string" ? new Date(asOf) : asOf;
+    const estimatedNames = [];
+    liabilities.forEach((l, i) => {
+      const est = input.loanEstimates?.[i] ?? estimateLoan(l, asOfDate);
+      if (est.estimated.includes("interest_rate"))
+        estimatedNames.push(l.name ?? l.liability_type);
+    });
+    if (estimatedNames.length > 0) {
+      push(
+        "estimated_rate",
+        "low",
+        `${estimatedNames.length} \u9879\u8D1F\u503A\u7684\u5229\u7387\u4E3A\u4F30\u7B97\u503C\uFF08${estimatedNames.join("\u3001")}\uFF09\uFF0C\u590D\u68C0\u65F6\u8BF7\u66F4\u65B0\u5229\u7387`,
+        `${estimatedNames.length} liabilit${estimatedNames.length === 1 ? "y has" : "ies have"} an estimated interest rate (${estimatedNames.join(", ")}) \u2014 update it at the next review`
+      );
+    }
+  }
+  for (const r of reviews) {
+    if (r.status !== "submitted")
+      continue;
+    push(
+      "review_pending",
+      "low",
+      `\u6709\u4E00\u4EFD${r.kind === "quarterly" ? "\u5B63\u5EA6" : "\u5E74\u5EA6"}\u590D\u68C0\uFF08\u622A\u81F3 ${r.period_end}\uFF09\u5F85\u5BA1\u6838`,
+      `A ${r.kind} review (period ending ${r.period_end}) is awaiting approval`
+    );
+  }
+  return alerts.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+}
+
+// supabase/functions/_shared/insurance/cna.ts
+var CNA_DEFAULTS = {
+  income_replacement_years: 10,
+  education_per_child: 8e4,
+  education_inflation: 0.04,
+  education_years: 10,
+  ci_income_multiple: 3,
+  rounding: 1e3
+};
+var round = (n) => Math.round(n / CNA_DEFAULTS.rounding) * CNA_DEFAULTS.rounding;
+function incomeBandMidpoint(band) {
+  const map = {
+    "RM3,000 \u4EE5\u4E0B": 2e3,
+    "RM3,000-5,000": 4e3,
+    "RM5,000-8,000": 6500,
+    "RM8,000-12,000": 1e4,
+    "RM12,000 \u4EE5\u4E0A": 15e3
+  };
+  return map[(band ?? "").trim()] ?? 0;
+}
+var NOTE_GROUP_COVER = "\u542B\u56E2\u4FDD\uFF0C\u79BB\u804C\u5373\u5931\u6548 / Includes group-employer cover, which lapses once employment ends";
+var NOTE_TPD_ASSUMED = "\u5047\u8BBE\u5BFF\u9669\u542B TPD\uFF0C\u4FDD\u5355\u672A\u5355\u72EC\u5217\u660E\u5168\u6B8B\u4FDD\u969C / Assumes the life plan's sum assured also covers TPD (no separate TPD benefit on file)";
+var NOTE_MEDICAL_LOW_LIMIT = "\u533B\u7597\u5361\u5E74\u9650\u989D\u504F\u4F4E\uFF08\u4F4E\u4E8E RM1,000,000\uFF09 / Medical card annual limit is low (below RM1,000,000)";
+var NOTE_MEDICAL_NO_COVER = "\u672A\u89C1\u533B\u7597\u5361\u4FDD\u969C / No medical card cover on file";
+var NOTE_MEDICAL_LIMIT_UNKNOWN = "\u672A\u8BB0\u5F55\u5E74\u9650\u989D / No annual limit recorded on file";
+var NOTE_CI_EARLY_NOT_TRACKED = "\u7CFB\u7EDF\u672A\u5355\u72EC\u8BB0\u5F55\u65E9\u671F/\u665A\u671F\u91CD\u75BE\u8D54\u4ED8\u6BD4\u4F8B\uFF0C\u5982\u4FDD\u5355\u542B\u6B64\u9879\u8BF7\u4EBA\u5DE5\u6838\u5BF9 / Early-stage critical illness payout isn't tracked separately \u2014 verify manually if the policy includes one";
+var noteMrtaOffset = (amount) => `\u5DF2\u6263\u9664 MRTA/MLTA \u4FDD\u5355\u8986\u76D6\u7684\u623F\u8D37\u4F59\u989D RM${amount.toLocaleString()} / Excludes RM${amount.toLocaleString()} of mortgage balance already covered by an MRTA/MLTA policy`;
+function defaultCoverageDetail(input) {
+  return {
+    death_cover: input.life_cover,
+    death_has_group: false,
+    tpd_cover: input.life_cover,
+    tpd_has_group: false,
+    tpd_assumed_from_life: true,
+    ci_cover: input.ci_cover,
+    ci_has_group: false,
+    ci_early_cover: 0,
+    ci_early_has_group: false,
+    has_medical: input.has_medical,
+    medical_annual_limit: 0,
+    medical_has_group: false,
+    pa_cover: 0,
+    pa_has_group: false,
+    liabilities_covered_by_policy: 0
+  };
+}
+function lineItem(need, cover, notes) {
+  const item = { cover: round(cover), notes };
+  if (need != null) {
+    item.need = round(need);
+    item.gap = round(Math.max(0, need - cover));
+  }
+  return item;
+}
+function buildProtectionSet(cov, needBasis) {
+  const netLiabilities = Math.max(
+    0,
+    needBasis.liabilitiesGross - cov.liabilities_covered_by_policy
+  );
+  const lifeNeed = needBasis.incomeReplacement + netLiabilities + needBasis.education - needBasis.liquidAssets;
+  const deathNotes = [];
+  if (cov.death_has_group)
+    deathNotes.push(NOTE_GROUP_COVER);
+  if (cov.liabilities_covered_by_policy > 0) {
+    deathNotes.push(noteMrtaOffset(cov.liabilities_covered_by_policy));
+  }
+  const tpdNotes = [];
+  if (cov.tpd_has_group)
+    tpdNotes.push(NOTE_GROUP_COVER);
+  if (cov.tpd_assumed_from_life)
+    tpdNotes.push(NOTE_TPD_ASSUMED);
+  if (cov.liabilities_covered_by_policy > 0) {
+    tpdNotes.push(noteMrtaOffset(cov.liabilities_covered_by_policy));
+  }
+  const ciNotes = [];
+  if (cov.ci_has_group)
+    ciNotes.push(NOTE_GROUP_COVER);
+  const ciEarlyNotes = [NOTE_CI_EARLY_NOT_TRACKED];
+  if (cov.ci_early_has_group)
+    ciEarlyNotes.push(NOTE_GROUP_COVER);
+  const limitKnown = cov.medical_annual_limit > 0;
+  const lowLimit = cov.has_medical && limitKnown && cov.medical_annual_limit < 1e6;
+  const limitUnknown = cov.has_medical && !limitKnown;
+  const medicalNotes = [];
+  if (!cov.has_medical)
+    medicalNotes.push(NOTE_MEDICAL_NO_COVER);
+  if (limitUnknown)
+    medicalNotes.push(NOTE_MEDICAL_LIMIT_UNKNOWN);
+  if (lowLimit)
+    medicalNotes.push(NOTE_MEDICAL_LOW_LIMIT);
+  if (cov.medical_has_group)
+    medicalNotes.push(NOTE_GROUP_COVER);
+  const paNotes = [];
+  if (cov.pa_has_group)
+    paNotes.push(NOTE_GROUP_COVER);
+  return {
+    death: lineItem(lifeNeed, cov.death_cover, deathNotes),
+    tpd: lineItem(lifeNeed, cov.tpd_cover, tpdNotes),
+    ci: lineItem(needBasis.ciNeed, cov.ci_cover, ciNotes),
+    ci_early_cover: lineItem(void 0, cov.ci_early_cover, ciEarlyNotes),
+    medical: {
+      ...lineItem(void 0, cov.medical_annual_limit, medicalNotes),
+      has_cover: cov.has_medical,
+      annual_limit: round(cov.medical_annual_limit),
+      low_limit: lowLimit,
+      limit_unknown: limitUnknown
+    },
+    pa: lineItem(void 0, cov.pa_cover, paNotes)
+  };
+}
+function computeCna(input) {
+  const d = CNA_DEFAULTS;
+  const useEducationOverride = input.education_need_override != null;
+  const assumptions = [
+    `\u6536\u5165\u66FF\u4EE3\u5E74\u6570\u6309 ${d.income_replacement_years} \u5E74\u8BA1\u7B97`,
+    useEducationOverride ? "\u6559\u80B2\u91D1\u9700\u6C42\u53D6\u81EA\u5BA2\u6237\u7684\u771F\u5B9E\u6559\u80B2\u76EE\u6807\uFF08\u76EE\u6807\u89C4\u5212\u6A21\u5757\u63A8\u7B97\u7684\u672A\u6765\u6210\u672C\uFF09" : `\u6559\u80B2\u91D1\u6309\u6BCF\u540D\u53D7\u629A\u517B\u4EBA RM${d.education_per_child.toLocaleString()}\u3001\u6BCF\u5E74 ${d.education_inflation * 100}% \u901A\u80C0\u3001${d.education_years} \u5E74\u671F\u4F30\u7B97`,
+    `\u91CD\u75BE\u4FDD\u969C\u9700\u6C42\u6309\u5E74\u6536\u5165 ${d.ci_income_multiple} \u500D\u4F30\u7B97`,
+    `\u6240\u6709\u91D1\u989D\u53D6\u6574\u5230\u6700\u8FD1 RM${d.rounding.toLocaleString()}`
+  ];
+  if (input.income_estimated) {
+    assumptions.push("\u5E74\u6536\u5165\u6309\u8868\u5355\u6536\u5165\u533A\u95F4\u4E2D\u503C\u4F30\u7B97\uFF0C\u5B9E\u9645\u6570\u5B57\u53EF\u80FD\u6709\u51FA\u5165");
+  }
+  if (input.liabilities_total === null) {
+    assumptions.push("\u672A\u63D0\u4F9B\u8D1F\u503A\u8D44\u6599\uFF0C\u6682\u6309 RM0 \u8BA1\u7B97\uFF0C\u5B9E\u9645\u7F3A\u53E3\u53EF\u80FD\u66F4\u5927");
+  }
+  if (input.liquid_assets === null) {
+    assumptions.push("\u672A\u63D0\u4F9B\u6D41\u52A8\u8D44\u4EA7\u8D44\u6599\uFF0C\u6682\u6309 RM0 \u8BA1\u7B97");
+  }
+  const liabilities = input.liabilities_total ?? 0;
+  const liquidAssets = input.liquid_assets ?? 0;
+  const incomeReplacement = input.annual_income * d.income_replacement_years;
+  const education = useEducationOverride ? input.education_need_override : input.dependents * d.education_per_child * Math.pow(1 + d.education_inflation, d.education_years);
+  const ciNeed = input.annual_income * d.ci_income_multiple;
+  const mainCoverage = input.coverage ?? defaultCoverageDetail(input);
+  const exGroupCoverage = input.coverage_excluding_group ?? mainCoverage;
+  const netLiabilitiesMain = Math.max(
+    0,
+    liabilities - mainCoverage.liabilities_covered_by_policy
+  );
+  const totalLifeNeed = incomeReplacement + netLiabilitiesMain + education;
+  const lifeCovered = input.life_cover + liquidAssets;
+  const lifeGap = Math.max(0, totalLifeNeed - lifeCovered);
+  const ciGap = Math.max(0, ciNeed - input.ci_cover);
+  const needBasis = {
+    incomeReplacement,
+    liabilitiesGross: liabilities,
+    education,
+    liquidAssets,
+    ciNeed
+  };
+  const mainSet = buildProtectionSet(mainCoverage, needBasis);
+  const exGroupSet = buildProtectionSet(exGroupCoverage, needBasis);
+  return {
+    assumptions,
+    inputs: input,
+    needs: {
+      income_replacement: round(incomeReplacement),
+      liabilities: round(netLiabilitiesMain),
+      education: round(education),
+      total_life: round(totalLifeNeed),
+      ci: round(ciNeed)
+    },
+    resources: {
+      life_cover: round(input.life_cover),
+      ci_cover: round(input.ci_cover),
+      liquid_assets: round(liquidAssets)
+    },
+    gaps: [
+      {
+        key: "life",
+        label: "\u4EBA\u5BFF\u4FDD\u969C",
+        need: round(totalLifeNeed),
+        covered: round(lifeCovered),
+        gap: round(lifeGap)
+      },
+      {
+        key: "ci",
+        label: "\u91CD\u75BE\u4FDD\u969C",
+        need: round(ciNeed),
+        covered: round(input.ci_cover),
+        gap: round(ciGap)
+      },
+      {
+        key: "medical",
+        label: "\u533B\u7597\u4FDD\u969C",
+        flag_only: true,
+        has_cover: input.has_medical
+      }
+    ],
+    insufficient: input.annual_income <= 0,
+    death: mainSet.death,
+    tpd: mainSet.tpd,
+    ci: mainSet.ci,
+    ci_early_cover: mainSet.ci_early_cover,
+    medical: mainSet.medical,
+    pa: mainSet.pa,
+    excluding_group: exGroupSet
+  };
+}
+
+// supabase/functions/_shared/insurance/mapping.ts
+function parseAmount(raw) {
+  if (typeof raw === "number")
+    return isFinite(raw) ? raw : 0;
+  if (typeof raw !== "string")
+    return 0;
+  const cleaned = raw.replace(/[^0-9.]/g, "");
+  if (!cleaned)
+    return 0;
+  const n = parseFloat(cleaned);
+  return isFinite(n) ? n : 0;
+}
+function parseDependents(raw) {
+  if (typeof raw === "number")
+    return Math.max(0, Math.floor(raw));
+  if (typeof raw !== "string")
+    return 0;
+  const m = raw.match(/\d+/);
+  return m ? parseInt(m[0], 10) : 0;
+}
+var LIFE_TYPES_EXTRACTED = ["term life", "whole life", "investment-linked"];
+function buildProspectCnaInput(profile, extractedPolicies) {
+  const mc = profile.manual_coverage ?? {};
+  let lifeCover = mc.life ?? 0;
+  let ciCover = mc.ci ?? 0;
+  let hasMedical = (mc.medical ?? 0) > 0;
+  for (const p of extractedPolicies ?? []) {
+    const type = (p.policy_type ?? "").toLowerCase();
+    const sum = parseAmount(p.sum_assured);
+    if (LIFE_TYPES_EXTRACTED.some((t) => type.includes(t)))
+      lifeCover += sum;
+    if (type.includes("critical illness"))
+      ciCover += sum;
+    if (type.includes("medical"))
+      hasMedical = true;
+  }
+  return {
+    annual_income: incomeBandMidpoint(profile.monthly_income_band ?? "") * 12,
+    income_estimated: true,
+    liabilities_total: null,
+    liquid_assets: null,
+    life_cover: lifeCover,
+    ci_cover: ciCover,
+    has_medical: hasMedical,
+    dependents: parseDependents(profile.dependents)
+  };
+}
+var LIFE_POLICY_TYPES = ["life", "investment_linked"];
+var PREMIUM_ANNUALIZE = {
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  single_premium: 0
+};
+var CASHFLOW_ANNUALIZE = {
+  weekly: 52,
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  one_off: 0
+};
+var CI_RIDER_CATEGORIES = ["critical_illness", "cancer"];
+function isCoverageCounted(p) {
+  return p.status == null || p.status === "in_force" || p.status === "paid_up";
+}
+function buildCoverageDetail(policies, liabilities, excludeGroup) {
+  const pool = policies.filter(
+    (p) => isCoverageCounted(p) && (!excludeGroup || p.is_group_employer !== true)
+  );
+  let deathCover = 0, deathHasGroup = false;
+  let disabilityCover = 0, disabilityHasGroup = false;
+  let ciCover = 0, ciHasGroup = false;
+  let hasMedical = false, medicalHasGroup = false, medicalAnnualLimit = 0;
+  let paCover = 0, paHasGroup = false;
+  const mrtaLiabilityIds = /* @__PURE__ */ new Set();
+  for (const p of pool) {
+    const isGroup = p.is_group_employer === true;
+    const baseSum = p.sum_assured ?? 0;
+    if (LIFE_POLICY_TYPES.includes(p.policy_type)) {
+      deathCover += baseSum;
+      if (baseSum > 0 && isGroup)
+        deathHasGroup = true;
+    }
+    if (p.policy_type === "critical_illness") {
+      ciCover += baseSum;
+      if (baseSum > 0 && isGroup)
+        ciHasGroup = true;
+    }
+    if (p.policy_type === "disability") {
+      disabilityCover += baseSum;
+      if (baseSum > 0 && isGroup)
+        disabilityHasGroup = true;
+    }
+    if (p.policy_type === "accident") {
+      paCover += baseSum;
+      if (baseSum > 0 && isGroup)
+        paHasGroup = true;
+    }
+    if (p.policy_type === "medical") {
+      hasMedical = true;
+      if (isGroup)
+        medicalHasGroup = true;
+      const limit = p.annual_limit ?? 0;
+      if (limit > medicalAnnualLimit)
+        medicalAnnualLimit = limit;
+    }
+    if (p.covers_liability_id)
+      mrtaLiabilityIds.add(p.covers_liability_id);
+    for (const r of p.policy_riders ?? []) {
+      const riderSum = r.sum_assured ?? 0;
+      if (r.category === "life") {
+        deathCover += riderSum;
+        if (riderSum > 0 && isGroup)
+          deathHasGroup = true;
+      } else if (r.category === "disability") {
+        disabilityCover += riderSum;
+        if (riderSum > 0 && isGroup)
+          disabilityHasGroup = true;
+      } else if (CI_RIDER_CATEGORIES.includes(r.category)) {
+        ciCover += riderSum;
+        if (riderSum > 0 && isGroup)
+          ciHasGroup = true;
+      } else if (r.category === "medical") {
+        hasMedical = true;
+        if (isGroup)
+          medicalHasGroup = true;
+        const limit = r.annual_limit ?? 0;
+        if (limit > medicalAnnualLimit)
+          medicalAnnualLimit = limit;
+      } else if (r.category === "accident") {
+        paCover += riderSum;
+        if (riderSum > 0 && isGroup)
+          paHasGroup = true;
+      }
+    }
+  }
+  const liabilitiesCoveredByPolicy = [...mrtaLiabilityIds].reduce((sum, id) => {
+    const l = liabilities.find((x) => x.id === id);
+    return sum + (l?.outstanding_balance ?? 0);
+  }, 0);
+  const hasOwnTpdCover = disabilityCover > 0;
+  return {
+    death_cover: deathCover,
+    death_has_group: deathHasGroup,
+    tpd_cover: hasOwnTpdCover ? disabilityCover : deathCover,
+    tpd_has_group: hasOwnTpdCover ? disabilityHasGroup : deathHasGroup,
+    tpd_assumed_from_life: !hasOwnTpdCover,
+    ci_cover: ciCover,
+    ci_has_group: ciHasGroup,
+    // No policy_riders category distinguishes early/advance-stage CI payouts
+    // today — decision 1's ci_early_cover stays 0 with an explanatory note
+    // (computeCna adds it) until that data exists.
+    ci_early_cover: 0,
+    ci_early_has_group: false,
+    has_medical: hasMedical,
+    medical_annual_limit: medicalAnnualLimit,
+    medical_has_group: medicalHasGroup,
+    pa_cover: paCover,
+    pa_has_group: paHasGroup,
+    liabilities_covered_by_policy: liabilitiesCoveredByPolicy
+  };
+}
+function annualizeInflows(inflows) {
+  return inflows.reduce(
+    (sum, e) => sum + e.amount * (CASHFLOW_ANNUALIZE[e.frequency] ?? 12),
+    0
+  );
+}
+function annualPremiumTotal(policies) {
+  return policies.reduce(
+    (sum, p) => sum + (p.premium ?? 0) * (PREMIUM_ANNUALIZE[p.premium_frequency ?? "annual"] ?? 1),
+    0
+  );
+}
+function buildCfpCnaInput(f, overrides = {}) {
+  const coverage = buildCoverageDetail(f.policies, f.liabilities, false);
+  const coverageExcludingGroup = buildCoverageDetail(f.policies, f.liabilities, true);
+  return {
+    // The baseline's figure wins: it was annualised from the months the advisor
+    // chose, so the income replacement and CI needs below rest on the same
+    // basis as every other figure in the report. Falling back to the row-by-row
+    // sum keeps the prospect path (no baseline, income as a band) working.
+    annual_income: overrides.annual_income ?? annualizeInflows(f.inflows),
+    liabilities_total: f.liabilities.reduce(
+      (s, l) => s + (l.outstanding_balance ?? 0),
+      0
+    ),
+    liquid_assets: overrides.liquid_assets ?? f.assets.filter((a) => isLiquid(a.asset_type)).reduce((s, a) => s + (a.current_value ?? 0), 0),
+    life_cover: coverage.death_cover,
+    ci_cover: coverage.ci_cover,
+    has_medical: coverage.has_medical,
+    dependents: f.client.number_of_dependants ?? 0,
+    ...overrides.education_need != null ? { education_need_override: overrides.education_need } : {},
+    coverage,
+    coverage_excluding_group: coverageExcludingGroup
+  };
+}
+
+// supabase/functions/_shared/finance/allocation.ts
+var ALLOCATION_BUCKETS = ["equity", "bond", "cash", "alternatives"];
+var MODEL_PORTFOLIOS = {
+  conservative: { equity: 20, bond: 55, cash: 20, alternatives: 5 },
+  moderate: { equity: 35, bond: 45, cash: 15, alternatives: 5 },
+  balanced: { equity: 50, bond: 35, cash: 10, alternatives: 5 },
+  growth: { equity: 65, bond: 25, cash: 5, alternatives: 5 },
+  aggressive: { equity: 80, bond: 10, cash: 5, alternatives: 5 }
+};
+function riskBandFromSuitability(band) {
+  switch (band) {
+    case "STABLE":
+      return "conservative";
+    case "BALANCED":
+      return "balanced";
+    case "GROWTH":
+      return "growth";
+    case "AGGRESSIVE_GROWTH":
+      return "aggressive";
+    default:
+      return null;
+  }
+}
+var REBALANCE_THRESHOLD_PP = 5;
+var round3 = (n) => Math.round(n);
+function allocationOf(assets, holdings = [], cash = 0) {
+  const sumBucket = (bucket) => (assets ?? []).filter((a) => allocationBucketOf(a.asset_type) === bucket).reduce((s, a) => s + (a.current_value ?? 0), 0);
+  const equity = sumBucket("equity") + (holdings ?? []).reduce((s, h) => s + (h.market_value ?? 0), 0);
+  const bond = sumBucket("bond");
+  const alternatives = sumBucket("alternatives");
+  return { equity, bond, cash, alternatives };
+}
+function currentAllocationRows(amounts) {
+  const investable_total = ALLOCATION_BUCKETS.reduce((s, k) => s + amounts[k], 0);
+  const rows = ALLOCATION_BUCKETS.map((bucket) => ({
+    bucket,
+    amount: round3(amounts[bucket]),
+    pct: investable_total > 0 ? Number((amounts[bucket] / investable_total * 100).toFixed(1)) : null
+  }));
+  return { investable_total, rows };
+}
+function driftAgainst(model, allocation) {
+  const investable_total = allocation.reduce((s, r) => s + r.amount, 0);
+  const target_allocation = ALLOCATION_BUCKETS.map((bucket) => ({
+    bucket,
+    amount: round3(model[bucket] / 100 * investable_total),
+    pct: model[bucket]
+  }));
+  const drift = ALLOCATION_BUCKETS.map((bucket) => {
+    const currentPct = allocation.find((r) => r.bucket === bucket)?.pct ?? null;
+    const target = model[bucket];
+    return {
+      bucket,
+      current_pct: currentPct,
+      target_pct: target,
+      drift_pp: currentPct != null ? Number((currentPct - target).toFixed(1)) : null
+    };
+  });
+  const rebalancing_actions = drift.filter((d) => d.drift_pp != null && Math.abs(d.drift_pp) > REBALANCE_THRESHOLD_PP).map((d) => ({
+    bucket: d.bucket,
+    action: d.drift_pp > 0 ? "reduce" : "increase",
+    amount: round3(Math.abs(d.drift_pp) / 100 * investable_total)
+  }));
+  return { target_allocation, drift, rebalancing_actions };
+}
+
 // supabase/functions/_shared/taxonomy/index.ts
-function isTransferCategory(code, direction = "outflow") {
+function isTransferCategory2(code, direction = "outflow") {
   return wealthEffectOf(code, direction) === "transfer";
 }
 export {
+  ALLOCATION_BUCKETS,
   ASSET_CLASSES,
   ASSET_TYPES,
   CASHFLOW_CATEGORIES,
   CASHFLOW_GROUPS,
   CATEGORY_BY_CODE,
+  CNA_DEFAULTS,
+  EIS_EMPLOYEE_RATE,
   EPF_ASSET_TYPES,
+  EPF_EMPLOYEE_RATE,
+  EPF_EMPLOYEE_RATE_SENIOR,
+  EPF_EMPLOYER_RATE_HIGH,
+  EPF_EMPLOYER_RATE_LOW,
+  EPF_EMPLOYER_RATE_SENIOR,
+  EPF_EMPLOYER_WAGE_THRESHOLD,
   LEGACY_CATEGORY_MAP,
   LIABILITY_TYPES,
   LIQUID_ASSET_TYPES,
   LOAN_DEFAULTS,
+  MODEL_PORTFOLIOS,
+  QUADRANTS,
+  SOCSO_EIS_WAGE_CEILING,
+  SOCSO_EMPLOYEE_RATE,
+  STATUTORY_NOTE,
+  STATUTORY_SENIOR_AGE,
   TRANSFER_CATEGORY_CODES,
+  activeItems,
   allocationBucketOf,
+  allocationOf,
+  annualPremiumTotal,
+  annualizeInflows,
+  annualizeItems,
+  annualizeItemsByCategory,
+  assessAsset,
+  assessAssets,
   assetClassOf,
   assetTypeLabel,
   assetTypeMeta,
+  buildCfpCnaInput,
+  buildProspectCnaInput,
   categoriesOf,
   categoryLabel,
   classifyAsset,
   classifyCashflowRow,
+  computeAlerts,
+  computeCna,
+  computeSnapshot,
+  currentAllocationRows,
   deriveLoanItems,
   derivePremiumItems,
+  deriveStatutoryItems,
+  driftAgainst,
+  endItem,
   estimateLoan,
   groupOf,
+  incomeBandMidpoint,
+  isActiveAt,
   isLiquid,
   isRetirementCapital,
   isSuperseded,
-  isTransferCategory,
+  isTransferCategory2 as isTransferCategory,
+  itemMonthlyAmount,
+  itemsFromMonthRows,
   levelUpAsset,
   levelUpLiabilityType,
   liabilityTypeLabel,
   liabilityTypeMeta,
   liquidityLevel,
+  monthStart,
+  parseAmount,
+  parseDependents,
   planCashflow,
   premiumCategoryOf,
+  reconcile,
   resolveCategory,
+  reviseItem,
+  riskBandFromSuitability,
+  twr,
+  valueChangeAnnual,
   wealthEffectOf
 };

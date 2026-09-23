@@ -9,6 +9,25 @@ import { mergeHousehold } from "./household.ts";
 type Db = any;
 
 /**
+ * P3 决策 2: `asset_valuations` may not exist yet in every environment (the
+ * migration ships separately from this code) — every read degrades to an
+ * empty array instead of failing the whole fetch, exactly like a client with
+ * no rows in the table yet.
+ */
+export async function fetchAssetValuationsGraceful(db: Db, clientId: string) {
+  try {
+    const { data, error } = await db
+      .from("asset_valuations")
+      .select("asset_id, valuation_date, value, net_contribution")
+      .eq("client_id", clientId);
+    if (error || !data) return [];
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Keep only rows of the most recent snapshot represented in `rows`.
  *
  * Correct for portfolio_holdings, which genuinely IS a monthly snapshot: each
@@ -32,13 +51,13 @@ async function fetchPerson(
   const { data: client, error } = await db
     .from("clients")
     .select(
-      "id, date_of_birth, marital_status, number_of_dependants, employment_status, occupation, tax_residency, risk_profile, retirement_age, epf_account_number, ppa_account_number",
+      "id, date_of_birth, marital_status, number_of_dependants, employment_status, occupation, tax_residency, risk_profile, retirement_age, epf_account_number, ppa_account_number, has_epf",
     )
     .eq("id", clientId)
     .single();
   if (error || !client) return null;
 
-  const [cashflowRes, assetsRes, liabilitiesRes, policiesRes, acctRes, holdingsRes, goalsRes] =
+  const [cashflowRes, assetsRes, liabilitiesRes, policiesRes, acctRes, holdingsRes, goalsRes, itemsRes, valuations] =
     await Promise.all([
       db
         .from("cashflow_entries")
@@ -48,16 +67,19 @@ async function fetchPerson(
         .eq("client_id", clientId)
         .eq("is_recurring", true),
       db
+        // P3: `id` feeds assessAssets (2×2) — matching this asset against its
+        // linked standing items/liabilities/valuations. Not identifying.
         .from("assets")
-        .select("asset_type, current_value, cost_value, ownership_type")
+        .select("id, asset_type, current_value, cost_value, ownership_type")
         .eq("client_id", clientId),
       db
         .from("liabilities")
         // id/name/original_principal/remaining_months/rate_type feed the D1
         // loan estimator and its dedupe check (_shared/finance/derived.ts) —
-        // P2a. None of these are identifying fields.
+        // P2a. linked_asset_id (P3) feeds assessAssets's net-cash-flow. None
+        // of these are identifying fields.
         .select(
-          "id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, original_principal, remaining_months, rate_type, end_date",
+          "id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, original_principal, remaining_months, rate_type, end_date, linked_asset_id",
         )
         .eq("client_id", clientId),
       db
@@ -69,12 +91,15 @@ async function fetchPerson(
         )
         .eq("client_id", clientId),
       db
+        // P3 决策 1: id/asset_id feed legacyHoldings (baseline.ts) — telling
+        // whether this account's value has already been folded into `assets`.
         .from("investment_accounts")
-        .select("account_type, prs_sub_account_a, prs_sub_account_b")
+        .select("id, asset_id, account_type, prs_sub_account_a, prs_sub_account_b")
         .eq("client_id", clientId),
       db
+        // account_id (P3 决策 1) feeds legacyHoldings — see above.
         .from("portfolio_holdings")
-        .select("snapshot_month, instrument_code, market_value, cost_basis")
+        .select("account_id, snapshot_month, instrument_code, market_value, cost_basis")
         .eq("client_id", clientId)
         .order("snapshot_month", { ascending: false }),
       db
@@ -84,6 +109,16 @@ async function fetchPerson(
         )
         .eq("client_id", clientId)
         .order("priority", { ascending: true }),
+      db
+        .from("cashflow_items")
+        // P2b 决策 1: every version of every standing item — planCashflow
+        // itself decides which are active (决策 2) and picks a mode via
+        // isSuperseded (决策 8). None of these are identifying fields.
+        .select(
+          "id, client_id, direction, category, name, amount, frequency, effective_from, effective_to, linked_asset_id, linked_liability_id, linked_policy_id, needs_review",
+        )
+        .eq("client_id", clientId),
+      fetchAssetValuationsGraceful(db, clientId),
     ]);
 
   // EVERY row, across every month. Selecting a period here is exactly the bug
@@ -111,6 +146,7 @@ async function fetchPerson(
       retirement_age: client.retirement_age,
       has_epf_account: !!client.epf_account_number,
       has_prs_account: !!client.ppa_account_number,
+      has_epf: client.has_epf ?? null,
     },
     cashflow,
     assets: assetsRes.data ?? [],
@@ -118,7 +154,9 @@ async function fetchPerson(
     policies: policiesRes.data ?? [],
     investment_accounts: acctRes.data ?? [],
     holdings: latestSnapshotOnly(holdingsRes.data ?? [], "snapshot_month"),
+    asset_valuations: valuations,
     goals: goalsRes.data ?? [],
+    items: itemsRes.data ?? [],
   };
 }
 

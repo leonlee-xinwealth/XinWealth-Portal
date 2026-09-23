@@ -178,8 +178,21 @@ interface PortfolioDetailProps {
   metrics: PortfolioMetrics;
 }
 
+// P3 (spec docs/superpowers/specs/2026-09-26-cfp-p3-assets-portfolio-design.md):
+// api/portfolios.js now returns one entry PER INVESTMENT ASSET (class C + PRS),
+// each with its own asset_valuations history — this component's existing
+// per-portfolio selector/detail/chart already gives "per-asset charts", and
+// the overview banner's overviewTotalValue already sums across every entry,
+// so no restructuring was needed here; asset_type is the only new display bit.
+const ASSET_TYPE_LABEL: Record<string, string> = {
+  stock: 'Stocks', etf: 'ETF', unit_trust: 'Unit Trust', reit: 'REIT', bond: 'Bond / Sukuk',
+  asnb: 'ASNB', tabung_haji: 'Tabung Haji', gold: 'Gold', crypto: 'Crypto', forex: 'Forex',
+  investment_property: 'Investment Property', land: 'Land', business: 'Business Equity',
+  receivable: 'Loan Receivable', sspn: 'SSPN', prs: 'PRS', other: 'Other Investment',
+};
+
 const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio, metrics }) => {
-  const { currency, name, capital_injection, injection_date } = portfolio;
+  const { currency, name, capital_injection, injection_date, asset_type } = portfolio;
   const { currentValue, totalReturnPct, cagr, xirr, twr, fdDiffAbsolute, fdCurrentValue, monthlyData } = metrics;
 
   const isOutperforming = fdDiffAbsolute >= 0;
@@ -193,6 +206,7 @@ const PortfolioDetail: React.FC<PortfolioDetailProps> = ({ portfolio, metrics })
       <div className="flex flex-wrap gap-3">
         {[
           { label: 'Portfolio', value: name },
+          ...(asset_type ? [{ label: 'Type', value: ASSET_TYPE_LABEL[asset_type] || asset_type }] : []),
           { label: 'Started', value: injectionDateLabel },
           { label: 'Capital In', value: `${currency} ${fmt(capital_injection)}` },
           { label: 'Last Updated', value: lastUpdatedLabel },

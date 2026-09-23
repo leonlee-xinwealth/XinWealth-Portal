@@ -47,6 +47,32 @@ Deno.test("auto EPF and life premium reliefs are capped from client data", () =>
   assertEquals(life.headroom, 0);
 });
 
+// ---------------------------------------------------------------------------
+// P2b 决策 6 — the EPF relief uses the real statutory employee EPF (12 ×
+// monthly_employee_epf) instead of a blanket 11%-of-total-income guess, once
+// standing items produce one. The two diverge whenever total income
+// includes something outside the EPF wage base (here, rental income) — that
+// divergence is what proves the statutory figure, not the old heuristic, is
+// what actually got used.
+// ---------------------------------------------------------------------------
+
+Deno.test("EPF relief uses the statutory employee EPF when standing items produced one, still capped", () => {
+  const d = det({
+    client: { ...makeCfpData().client, has_epf: true },
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 2000, frequency: "monthly", effective_from: "2026-01-01" },
+      { direction: "inflow", category: "rental_income", amount: 1000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  // EPF wage base is ONLY the 2,000 salary (rental income isn't EPF wage):
+  // employee 11% = 220/mo -> 2,640/yr, well under the 4,000 cap.
+  // The old 11%-of-total-income heuristic would have given 11% × 36,000 =
+  // 3,960 — a different number, so this pins which formula actually ran.
+  const epf = reliefByKey(d, "epf");
+  assertEquals(epf.claimed, 2640);
+  assertEquals(epf.headroom, 4000 - 2640);
+});
+
 Deno.test("advisor override wins over the auto value and is still capped", () => {
   const notEmployed = det(
     { client: { ...makeCfpData().client, employment_status: "self_employed" } },

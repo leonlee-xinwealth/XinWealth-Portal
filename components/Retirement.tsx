@@ -165,6 +165,30 @@ const Retirement: React.FC = () => {
          }
       });
 
+      // P2b/P4 决策 (docs/superpowers/specs/2026-09-25-cfp-p2b-standing-items-design.md
+      // D2): the CURRENT year's income/expenses — which seed every future
+      // projection year below via lastKnownActiveInc/lastKnownExpenses — come
+      // from the plan (`current`, api/health.js's cashflow_items-aware
+      // figure) instead of summing that year's raw monthly rows by hand,
+      // which undercounts a partial year and misses derived installments/
+      // premiums/statutory deductions the plan already accounts for. Only the
+      // CURRENT year is overridden; earlier years keep their historical
+      // raw-row totals as an actual record of what happened. The active/
+      // passive split isn't part of the plan, so passiveInc stays whatever
+      // the historical categorisation above found and only the active share
+      // is backed out from the plan total.
+      const currentYearData = yearlyData.get(currentYear);
+      if (currentYearData && rawData.current) {
+         const planAnnualIncome = Number(rawData.current.annual_income);
+         const planAnnualExpenses = Number(rawData.current.annual_expenses);
+         if (Number.isFinite(planAnnualIncome)) {
+            currentYearData.activeInc = Math.max(0, planAnnualIncome - currentYearData.passiveInc);
+         }
+         if (Number.isFinite(planAnnualExpenses)) {
+            currentYearData.expenses = planAnnualExpenses;
+         }
+      }
+
       let totalCashFD = 0;
       (rawData.assets || []).forEach((item: any) => {
         const val = extractValue(item, ["Value", "value", "Amount", "amount"]);

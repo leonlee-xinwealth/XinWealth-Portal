@@ -179,7 +179,9 @@ export default function CfpTab({ clientId, advisorId }: { clientId: string; advi
           .in('id', ids),
         supabase.from('advisors').select('display_name, email').eq('id', advisorId).single(),
         supabase.from('financial_reports').select('baseline').eq('id', selected.id).single(),
-        supabase.from('assets').select('client_id, asset_type, name, current_value').in('client_id', ids),
+        // `id` feeds the PDF's per-asset 2×2 quadrant label (matched against
+        // baseline.asset_quality.assets[].asset_id — see CfpReportAsset).
+        supabase.from('assets').select('id, client_id, asset_type, name, current_value').in('client_id', ids),
         supabase.from('liabilities').select('client_id, liability_type, name, outstanding_balance').in('client_id', ids),
         // The suitability assessment is also issued standalone to prospects.
         // Those rows have client_id = null, so filtering on THIS client's id is
