@@ -53,14 +53,19 @@ async function fetchPerson(
         .eq("client_id", clientId),
       db
         .from("liabilities")
+        // id/name/original_principal/remaining_months/rate_type feed the D1
+        // loan estimator and its dedupe check (_shared/finance/derived.ts) —
+        // P2a. None of these are identifying fields.
         .select(
-          "liability_type, outstanding_balance, interest_rate, monthly_payment, end_date",
+          "id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, original_principal, remaining_months, rate_type, end_date",
         )
         .eq("client_id", clientId),
       db
         .from("insurance_policies")
+        // id/plan_name feed the P2a derived-premium item's dedupe key and
+        // display name (a product name, not client PII).
         .select(
-          "policy_type, provider, sum_assured, premium, premium_frequency, policy_number, cash_value, start_date, end_date, policy_riders(category, sum_assured, room_board_daily, annual_limit, lifetime_limit)",
+          "id, plan_name, policy_type, provider, sum_assured, premium, premium_frequency, policy_number, cash_value, start_date, end_date, policy_riders(category, sum_assured, room_board_daily, annual_limit, lifetime_limit)",
         )
         .eq("client_id", clientId),
       db

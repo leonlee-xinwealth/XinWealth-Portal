@@ -6,8 +6,10 @@ import type { ModuleOutputs } from "../../types.ts";
 
 const NOW = new Date("2026-07-16T00:00:00Z");
 
-// makeCfpData default baseline: surplus 60,000/yr; emergency actual 50k vs
-// need_high 36k (no shortfall); dsr 0.1364; savings_ratio 0.4545.
+// makeCfpData default baseline: surplus 42,000/yr (P2a: annual_expenses now
+// includes the fixture mortgage's derived 18,000/yr installment); emergency
+// actual 50k vs need_high 45k (no shortfall); dsr 0.1364 (unchanged — the
+// fixture's monthly_payment is literal, not estimated); savings_ratio 0.3182.
 function makePrior(overrides: Partial<Record<string, unknown>> = {}): ModuleOutputs {
   return {
     cashflow_planning: {},
@@ -34,15 +36,29 @@ function makePrior(overrides: Partial<Record<string, unknown>> = {}): ModuleOutp
 
 Deno.test("budget waterfall allocates by fixed priority and truncates when over budget", () => {
   const f = makeCfpData();
-  const det = computeSynthesis(f, computeBaseline(f, {}, NOW), makePrior());
+  // P2a: the default fixture's annual_surplus is now 42,000, not 60,000 —
+  // annual_expenses includes the fixture mortgage's derived installment
+  // (72,000 manual + 18,000 derived = 90,000). makePrior()'s default
+  // retirement_planning (24,000/yr required) no longer fits under the new
+  // surplus alongside protection+goals, so this "not over budget" scenario
+  // uses a smaller top-up; the "over budget" scenario below already exceeds
+  // any plausible surplus and needs no such adjustment.
+  const det = computeSynthesis(f, computeBaseline(f, {}, NOW), makePrior({
+    retirement_planning: {
+      required_monthly_topup: 1000,
+      capital_needed: 2000000,
+      total_projected: 1000000,
+      insufficient_data: false,
+    },
+  }));
   const [protection, emergency, retirement, goals, wealth] = det.budget.lines;
-  // required: 6000 + 0 (emergency covered) + 24000 + 18000 = 48000 ≤ 60000 surplus
+  // required: 6000 + 0 (emergency covered) + 12000 + 18000 = 36000 ≤ 42000 surplus
   assertEquals(det.budget.over_budget, false);
   assertEquals(protection.allocated_annual, 6000);
   assertEquals(emergency.required_annual, 0);
-  assertEquals(retirement.allocated_annual, 24000);
+  assertEquals(retirement.allocated_annual, 12000);
   assertEquals(goals.allocated_annual, 18000);
-  assertEquals(wealth.allocated_annual, 60000 - 48000);
+  assertEquals(wealth.allocated_annual, 42000 - 36000);
 
   // Shrink surplus: 10k income → surplus (10k−6k)×12=48k? No: use expenses to
   // force over-budget instead — raise retirement need.
@@ -55,12 +71,13 @@ Deno.test("budget waterfall allocates by fixed priority and truncates when over 
     },
   });
   const over = computeSynthesis(f, computeBaseline(f, {}, NOW), overPrior);
-  // required: 6000 + 0 + 60000 + 18000 = 84000 > 60000
+  // required: 6000 + 0 + 60000 + 18000 = 84000 > 42000
   assert(over.budget.over_budget);
   const [p2, , r2, g2, w2] = over.budget.lines;
   assertEquals(p2.allocated_annual, 6000); // protection first, fully funded
-  assertEquals(r2.allocated_annual, 54000); // then retirement takes the rest
-  assertEquals(r2.deferred_annual, 6000);
+  // P2a: available for retirement = surplus(42,000) − protection(6,000) = 36,000
+  assertEquals(r2.allocated_annual, 36000);
+  assertEquals(r2.deferred_annual, 24000);
   assertEquals(g2.allocated_annual, 0); // goals fully deferred
   assertEquals(g2.deferred_annual, 18000);
   assertEquals(w2.allocated_annual, 0);

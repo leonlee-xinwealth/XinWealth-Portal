@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "https://deno.land/std@0.168.0/testing/asserts.ts";
+import { assert, assertAlmostEquals, assertEquals } from "https://deno.land/std@0.168.0/testing/asserts.ts";
 import { computeBaseline } from "./baseline.ts";
 import type { CfpData } from "./types.ts";
 
@@ -50,18 +50,22 @@ const NOW = new Date("2026-07-16T00:00:00Z");
 Deno.test("annualizes mixed-frequency income and expenses", () => {
   const b = computeBaseline(makeCfpData(), {}, NOW);
   assertEquals(b.annual_income, 10000 * 12 + 12000); // 132,000
-  assertEquals(b.annual_expenses, 72000);
-  assertEquals(b.annual_surplus, 60000);
-  assertEquals(b.monthly_essential_expenses, 6000);
+  // P2a: the fixture's mortgage (monthly_payment: 1500) is now auto-derived
+  // into expenses (+18,000/yr) on top of the manual 72,000 of household spend.
+  assertEquals(b.annual_expenses, 90000);
+  assertEquals(b.annual_surplus, 42000);
+  assertEquals(b.monthly_essential_expenses, 7500);
 });
 
 Deno.test("emergency fund reserves 6 months before insurance deducts liquid assets", () => {
   const b = computeBaseline(makeCfpData(), {}, NOW);
-  assertEquals(b.emergency_fund_need_low, 18000);
-  assertEquals(b.emergency_fund_need_high, 36000);
+  // P2a: essential spend is now 7,500/mo (household 6,000 + derived mortgage
+  // installment 1,500), so the 3x/6x needs move with it.
+  assertEquals(b.emergency_fund_need_low, 22500);
+  assertEquals(b.emergency_fund_need_high, 45000);
   assertEquals(b.emergency_fund_actual, 50000); // savings + FD
   assertEquals(b.liquid_assets_total, 50000);
-  assertEquals(b.liquid_assets_after_emergency, 14000); // 50k − 36k
+  assertEquals(b.liquid_assets_after_emergency, 5000); // 50k − 45k
 });
 
 Deno.test("after-emergency liquid assets floor at zero", () => {
@@ -80,8 +84,11 @@ Deno.test("ratios, net worth and demographics", () => {
   assertEquals(b.total_assets, 650000);
   assertEquals(b.total_liabilities, 300000);
   assertEquals(b.net_worth, 350000);
-  assertEquals(b.debt_service_ratio, 0.1364); // 1500 / 11000
-  assertEquals(b.savings_ratio, Number((60000 / 132000).toFixed(4)));
+  assertEquals(b.debt_service_ratio, 0.1364); // 1500 / 11000 — unchanged: monthly_payment is literal, not estimated
+  // P2a: annual_expenses is now 90,000 (the derived mortgage installment is
+  // literally the same 1,500/mo already in the fixture, so debt_service_ratio
+  // above is untouched, but savings_ratio moves with the new expense total.
+  assertEquals(b.savings_ratio, Number((42000 / 132000).toFixed(4)));
   assertEquals(b.age, 36);
   assertEquals(b.years_to_retirement, 24);
 });
@@ -180,8 +187,9 @@ const TWO_MONTHS = makeCfpData({
 Deno.test("no basis chosen: every recorded month of the latest year", () => {
   const b = computeBaseline(TWO_MONTHS, {}, NOW);
   assertEquals(b.cashflow_basis, { year: 2026, from_month: 6, to_month: 7 });
-  // (1420 + 128) / 2 months
-  assertEquals(b.monthly_essential_expenses, 774);
+  // (1420 + 128) / 2 months of manual spend, PLUS the fixture's derived
+  // mortgage installment (1,500/mo), which isn't month-gated (P2a 决策 5).
+  assertEquals(b.monthly_essential_expenses, 2274);
 });
 
 Deno.test("the advisor can narrow the basis to the month that is complete", () => {
@@ -190,8 +198,9 @@ Deno.test("the advisor can narrow the basis to the month that is complete", () =
   const b = computeBaseline(TWO_MONTHS, {
     cashflow_basis: { year: 2026, from_month: 6, to_month: 6 },
   }, NOW);
-  assertEquals(b.monthly_essential_expenses, 1420);
-  assertEquals(b.annual_expenses, 17040);
+  // P2a: 1,420 manual + 1,500 derived mortgage installment.
+  assertEquals(b.monthly_essential_expenses, 2920);
+  assertEquals(b.annual_expenses, 35040);
   assertEquals(b.monthly_income, 2577);
 });
 
@@ -209,7 +218,9 @@ Deno.test("the basis is stated in the notes, because every ratio rests on it", (
   );
   assertEquals(b.cashflow_basis_months, 12);
   assertEquals(b.cashflow_months_with_data, [6, 7]);
-  assertEquals(b.monthly_essential_expenses, 774);
+  // P2a: same 774 manual average, plus the fixture's derived mortgage
+  // installment (1,500/mo, unconditional — see the two tests above).
+  assertEquals(b.monthly_essential_expenses, 2274);
 });
 
 Deno.test("an annual bonus is counted once, not folded into the monthly average", () => {
@@ -231,6 +242,45 @@ Deno.test("a client with no cashflow at all says so rather than reporting zero s
   const b = computeBaseline(makeCfpData({ cashflow: [] }), {}, NOW);
   assertEquals(b.cashflow_basis, null);
   assertEquals(b.annual_income, 0);
-  assertEquals(b.annual_expenses, 0);
+  // P2a: derived items aren't cashflow-basis-gated — the fixture's mortgage
+  // still contributes its 1,500/mo installment even with zero cashflow rows.
+  assertEquals(b.annual_expenses, 18000);
   assert(b.baseline_notes.some((n) => n.includes("未录得任何月份")), b.baseline_notes.join(" | "));
+});
+
+// ---------------------------------------------------------------------------
+// P2a — installments and premiums derived from their source (liabilities /
+// policies) feed the same income/expense totals every ratio above is built
+// on (决策 1, 5). The paper-drill client 乙 (see _shared/finance/derived.test.ts
+// for the exact rows and the -1,224.33/mo derivation): her manually-keyed
+// cashflow alone looks nearly break-even, but two loan installments and an
+// ILP premium she never re-keyed turn it into a real ~RM1,225/mo deficit.
+// ---------------------------------------------------------------------------
+
+Deno.test("P2a: 乙's derived installments/premium turn a reported near-breakeven cashflow into a real deficit", () => {
+  const f = makeCfpData({
+    cashflow: [
+      { direction: "inflow", amount: 2577, frequency: "monthly", category: "salary_basic", period_month: "2026-06-01" },
+      { direction: "outflow", amount: 1548, frequency: "monthly", category: "groceries", period_month: "2026-06-01" },
+    ],
+    liabilities: [
+      { liability_type: "car_loan", outstanding_balance: 10000, interest_rate: 3, monthly_payment: 420, rate_type: "flat", end_date: null },
+      { liability_type: "personal_loan", outstanding_balance: 130000, interest_rate: 12, monthly_payment: 1000, end_date: null },
+    ],
+    policies: [
+      { policy_type: "investment_linked", premium: 10000, premium_frequency: "annual" },
+    ],
+  });
+  const b = computeBaseline(f, {}, NOW);
+
+  // -1,224.33/mo x 12 ≈ -14,691.96, rounded.
+  assertAlmostEquals(b.annual_surplus, -14692, 1);
+  assert(b.debt_service_ratio! > 0.5, `debt_service_ratio was ${b.debt_service_ratio}`);
+  // The personal_loan's 1,000/mo payment doesn't even cover its own interest
+  // at 12% on a 130,000 balance — the D1 estimator's warning must reach the
+  // advisor verbatim.
+  assert(
+    b.baseline_notes.some((n) => n.includes("月供不足以支付当期利息")),
+    b.baseline_notes.join(" | "),
+  );
 });

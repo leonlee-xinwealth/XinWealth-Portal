@@ -6,6 +6,7 @@
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
 import { annualizeByCategory, isTransferCode } from "../../../_shared/cashflow/periods.ts";
+import { isSuperseded, type DerivedItem } from "../../../_shared/finance/derived.ts";
 
 export type EmergencyFundStatus = "sufficient" | "partial" | "insufficient";
 
@@ -42,20 +43,41 @@ export interface CashflowDet {
 
 const round = (n: number) => Math.round(n);
 
+/**
+ * P2a (决策 4, 5): manual rows superseded by a derived loan/premium item are
+ * dropped here — same rule planCashflow applies to the totals — and the
+ * derived items (outflow only; none are transfers) are merged in by
+ * category, so the breakdown always adds up to the SAME monthly total the
+ * baseline reports and shares never exceed 100%.
+ */
 function breakdown(
   rows: CfpData["cashflow"],
   basis: FinancialBaseline["cashflow_basis"],
   direction: "inflow" | "outflow",
   monthlyTotal: number,
+  liabilities: CfpData["liabilities"],
+  policies: CfpData["policies"],
+  derivedItems: DerivedItem[],
 ): CategoryBreakdown[] {
-  // Same divisor as the totals, so the categories add up to the whole.
-  return annualizeByCategory(rows, basis)
-    .map((t) => ({
-      category: t.category,
-      monthly: direction === "inflow" ? t.monthly_income : t.monthly_expenses,
-    }))
-    .filter((t) => t.monthly > 0)
-    .map(({ category, monthly }) => ({
+  // Same filter + divisor as planCashflow's totals, so the categories add up
+  // to the whole.
+  const keptRows = rows.filter((r) => !isSuperseded(r, liabilities, policies));
+
+  const merged = new Map<string, number>();
+  for (const t of annualizeByCategory(keptRows, basis)) {
+    const monthly = direction === "inflow" ? t.monthly_income : t.monthly_expenses;
+    if (monthly > 0) merged.set(t.category, (merged.get(t.category) ?? 0) + monthly);
+  }
+  if (direction === "outflow") {
+    for (const item of derivedItems) {
+      if (isTransferCode(item.category)) continue;
+      merged.set(item.category, (merged.get(item.category) ?? 0) + item.monthly_amount);
+    }
+  }
+
+  return [...merged.entries()]
+    .filter(([, monthly]) => monthly > 0)
+    .map(([category, monthly]) => ({
       category,
       monthly_amount: round(monthly),
       share: monthlyTotal > 0 ? Number((monthly / monthlyTotal).toFixed(4)) : null,
@@ -88,8 +110,8 @@ export function computeCashflow(
     annual_surplus: b.annual_surplus,
     savings_ratio: b.savings_ratio,
     debt_service_ratio: b.debt_service_ratio,
-    income_breakdown: breakdown(f.cashflow, b.cashflow_basis, "inflow", monthlyIncome),
-    expense_breakdown: breakdown(f.cashflow, b.cashflow_basis, "outflow", monthlyExpenses),
+    income_breakdown: breakdown(f.cashflow, b.cashflow_basis, "inflow", monthlyIncome, f.liabilities, f.policies, b.derived_items),
+    expense_breakdown: breakdown(f.cashflow, b.cashflow_basis, "outflow", monthlyExpenses, f.liabilities, f.policies, b.derived_items),
     asset_transfers_monthly: round(
       annualizeByCategory(f.cashflow, b.cashflow_basis, { includeTransfers: true })
         .filter((t) => isTransferCode(t.category))

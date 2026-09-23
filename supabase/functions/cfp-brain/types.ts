@@ -7,6 +7,8 @@
 // function entirely (the portal UI joins names for display/PDF).
 
 import type { CfpFinancials } from "../_shared/insurance/mapping.ts";
+import type { DerivedItem } from "../_shared/finance/derived.ts";
+import type { RateType } from "../_shared/finance/loans.ts";
 
 export type SectionType =
   | "cashflow_planning"
@@ -66,12 +68,32 @@ export interface AssetRow {
 }
 
 export interface LiabilityRow {
+  /** P2a: identifies the row for the D1 estimator's derived cash-flow item
+   *  (supabase/functions/_shared/finance/derived.ts) and its dedupe check. */
+  id?: string | null;
+  name?: string | null;
   liability_type: string;
   outstanding_balance: number;
   interest_rate: number | null;
   monthly_payment: number | null;
   end_date: string | null;
+  /** P2a loan terms the D1 estimator reads when present (migration
+   *  20260924000001_liability_loan_terms.sql) — optional because most rows
+   *  predate it and estimateLoan fills what's missing. */
+  original_principal?: number | null;
+  remaining_months?: number | null;
+  rate_type?: RateType | null;
 }
+
+/** P2a: `CfpFinancials["policies"]` (the legacy insurance-brain shape) plus
+ *  the two fields the D1 premium-derivation needs (`id` for the dedupe key,
+ *  `plan_name` for the derived item's display name) — kept as an intersection
+ *  here rather than edited into _shared/insurance/mapping.ts so this stays a
+ *  Task B-only change. */
+export type CfpPolicyRow = CfpFinancials["policies"][number] & {
+  id?: string | null;
+  plan_name?: string | null;
+};
 
 export interface InvestmentAccountRow {
   account_type: string | null;
@@ -109,7 +131,7 @@ export interface PersonSlice {
   cashflow: CashflowRow[];
   assets: AssetRow[];
   liabilities: LiabilityRow[];
-  policies: CfpFinancials["policies"];
+  policies: CfpPolicyRow[];
 }
 
 /** A row present on both spouses with identical type+amount — almost always the
@@ -134,7 +156,7 @@ export interface CfpData {
   cashflow: CashflowRow[];
   assets: AssetRow[];
   liabilities: LiabilityRow[];
-  policies: CfpFinancials["policies"];
+  policies: CfpPolicyRow[];
   investment_accounts: InvestmentAccountRow[];
   /** latest snapshot_month only */
   holdings: HoldingRow[];
@@ -216,6 +238,16 @@ export interface FinancialBaseline {
   net_worth: number;
   total_liabilities: number;
   monthly_debt_service: number;
+  /** P2a: the principal portion of monthly_debt_service (wealth-building view,
+   *  spec 决策 5 — kept separate from the cash view every ratio above uses). */
+  monthly_principal: number;
+  /** P2a: installments and premiums this generation derived from liabilities/
+   *  policies and folded into income/expenses (supabase/functions/_shared/
+   *  finance/derived.ts). Empty when the client has none. */
+  derived_items: DerivedItem[];
+  /** P2a: count of manually-keyed cashflow rows excluded from the totals
+   *  because a derived item now covers the same obligation (决策 4). */
+  superseded_manual: number;
   debt_service_ratio: number | null;
   savings_ratio: number | null;
   solvency_ratio: number | null;

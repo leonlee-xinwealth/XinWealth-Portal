@@ -15,7 +15,9 @@ Deno.test("full happy path matches hand-computed capital projection (years=24)",
   const d = det(); // default fixture: age 36, retirement_age 60 -> 24 years
   const years = 24;
 
-  const incomeNeed = 72000 * 0.66 * Math.pow(1.035, years); // annual_expenses × replacement × inflation
+  // P2a: annual_expenses is 90,000 (72,000 manual household spend + the
+  // fixture's mortgage installment auto-derived at 1,500/mo = 18,000/yr).
+  const incomeNeed = 90000 * 0.66 * Math.pow(1.035, years); // annual_expenses × replacement × inflation
   const capitalNeeded = incomeNeed / 0.04; // 4% withdrawal rule
   const annualEpfContribution = 0.23 * 132000; // employed: 11% + 12% employer
   const epfGrowth = Math.pow(1.055, years);
@@ -85,7 +87,8 @@ Deno.test("years=0 when retirement_age equals current age does not divide by zer
   assertEquals(d.years_to_retirement, 0);
   assertEquals(d.retirement_years, 49); // 85 - 36
   // (1+r)^0 = 1, so income need has no inflation growth applied
-  const incomeNeed = 72000 * 0.66; // years=0
+  // P2a: annual_expenses is 90,000 (see the happy-path test above).
+  const incomeNeed = 90000 * 0.66; // years=0
   const capitalNeeded = incomeNeed / 0.04;
   assertEquals(d.income_need_at_retirement, Math.round(incomeNeed));
   assertEquals(d.capital_needed, Math.round(capitalNeeded));
