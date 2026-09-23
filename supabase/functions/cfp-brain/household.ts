@@ -34,6 +34,7 @@ export function toPersonSlice(
     assets: data.assets,
     liabilities: data.liabilities,
     policies: data.policies,
+    items: data.items,
   };
 }
 
@@ -115,6 +116,10 @@ export function mergeHousehold(primary: CfpData, partner: CfpData): CfpData {
         partner.client.has_prs_account,
     },
     cashflow: [...primary.cashflow, ...partner.cashflow],
+    // P2b 决策 6: each item still carries its own client_id from the fetch, so
+    // planCashflow's `clients` map can split them back apart per employee —
+    // this concatenation must never be deduped or re-tagged.
+    items: [...primary.items, ...partner.items],
     assets: [...primary.assets, ...partner.assets],
     liabilities: [...primary.liabilities, ...partner.liabilities],
     policies: [...primary.policies, ...partner.policies],

@@ -16,7 +16,9 @@ export function makeCfpData(overrides: Partial<CfpData> = {}): CfpData {
       retirement_age: 60,
       has_epf_account: true,
       has_prs_account: false,
+      has_epf: false,
     },
+    items: [],
     cashflow: [
       { direction: "inflow", amount: 10000, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
       { direction: "inflow", amount: 12000, frequency: "annual", category: "bonus", period_month: "2026-06-01" },

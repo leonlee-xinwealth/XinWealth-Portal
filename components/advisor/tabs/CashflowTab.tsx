@@ -1,69 +1,56 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { Plus, X, Pencil, AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Info } from 'lucide-react';
+import { defaultBasis, type PeriodRow } from '../../../supabase/functions/_shared/cashflow/periods';
 import {
-  isTransferCode, monthlyBreakdown, recordedYears, yearToDateTotals,
-  type PeriodRow,
-} from '../../../supabase/functions/_shared/cashflow/periods';
+  annualizeItems, itemsFromMonthRows, type MonthRow, type StandingItem,
+} from '../../../supabase/functions/_shared/cashflow/items';
 import {
-  CASHFLOW_CATEGORIES, CASHFLOW_GROUPS, categoryLabel, wealthEffectOf,
-} from '../../../supabase/functions/_shared/taxonomy/cashflow';
-import {
-  deriveLoanItems, derivePremiumItems, isSuperseded,
-  type DerivedItem, type LiabilityRow, type PolicyRow,
+  planCashflow, type LiabilityRow, type PolicyRow,
 } from '../../../supabase/functions/_shared/finance/derived';
+import { fmt, Loader } from './cashflow/shared';
+import type { AssetOption } from './cashflow/shared';
+import type { StandingItemRow } from './cashflow/standingItemRows';
+import StandingItemsPanel from './cashflow/StandingItemsPanel';
+import ActualsPanel from './cashflow/ActualsPanel';
 
-// A cashflow entry records ONE MONTH'S actual figure for one category, so this
-// screen is organised by month. The totals shown here are ACTUALS — what the
-// client earned and spent — not the annualised run-rate the CFP report is built
-// on. The two are different numbers on purpose and are never mixed: see
-// _shared/cashflow/periods.ts, and the basis picker on the CFP tab.
+// CFP P2b — 现金流页. The plan (cashflow_items, "常设项目") is now the primary
+// view: a standing item is defined once (amount + frequency + effective
+// period) and a raise or a new expense either corrects it in place or opens a
+// new version from the month it actually changed — it is never "recorded"
+// into a specific month the way an actuals row is. See
+// docs/superpowers/specs/2026-09-25-cfp-p2b-standing-items-design.md.
+//
+// A client with no items yet falls back to the OLD actuals-average algorithm
+// (spec 决策 1) — the month-by-month actuals interface (ActualsPanel) still
+// exists underneath, collapsed once a client has a plan, because
+// cashflow_entries keeps recording what actually happened every month
+// (LevelUp's optional client-entered actuals, spec §5.2).
 
-const FREQ: [string,string][] = [['monthly','Monthly'],['annual','Annual'],['quarterly','Quarterly'],['semi_annual','Semi-annual'],['one_off','One-off']];
-
-const MONTH_LABELS = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-const MONTH_LABELS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-/** YYYY-MM-01 for a year/month pair — the shape period_month expects. */
-const toPeriodMonth = (year: number, month: number) =>
-  `${year}-${String(month).padStart(2, '0')}-01`;
-
-const monthOfRow = (e: { period_month?: string | null }) =>
-  Number(String(e.period_month ?? '').slice(5, 7)) || 0;
+interface ClientEpfInfo {
+  has_epf: boolean | null;
+  date_of_birth: string | null;
+}
 
 export default function CashflowTab({ clientId }: { clientId: string }) {
   const { language } = useLanguage();
-  const t = (en: string, zh: string) => language === 'zh' ? zh : en;
+  const t = (en: string, zh: string) => (language === 'zh' ? zh : en);
+
   const [entries, setEntries] = useState<any[]>([]);
-  // Installments and premiums are computed from their source (Net worth /
-  // Insurance), never re-keyed here — spec 2026-09-24-cfp-p2a decision 1.
   const [liabilities, setLiabilities] = useState<LiabilityRow[]>([]);
   const [policies, setPolicies] = useState<PolicyRow[]>([]);
+  const [items, setItems] = useState<StandingItemRow[]>([]);
+  const [assets, setAssets] = useState<AssetOption[]>([]);
+  const [client, setClient] = useState<ClientEpfInfo>({ has_epf: false, date_of_birth: null });
   const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState<'inflow'|'outflow'|null>(null);
-  const [form, setForm] = useState({
-    category: '', amount: '', frequency: 'monthly', is_recurring: true, source_note: '',
-    // Which month this figure belongs to. Used to be hardcoded to the current
-    // month with no way to change it, which is how five June expenses and one
-    // July expense ended up looking like one client's whole position.
-    month: new Date().getMonth() + 1,
-  });
-  const [saving, setSaving] = useState(false);
-  const set = (k: string, v: any) => setForm(p => ({ ...p, [k]: v }));
-
-  const now = new Date();
-  const [year, setYear] = useState<number>(now.getFullYear());
-  const [viewMonth, setViewMonth] = useState<number | 'all'>('all');
-
-  const [editingId, setEditingId] = useState<string|null>(null);
-  const [editForm, setEditForm] = useState<any>({});
-  const [savingEdit, setSavingEdit] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [ok, setOk] = useState(false);
-  const setEdit = (k: string, v: any) => setEditForm((p: any) => ({ ...p, [k]: v }));
+
+  const today = useMemo(() => new Date(), []);
 
   async function load() {
-    const [{ data: e }, { data: l }, { data: p }] = await Promise.all([
+    const [{ data: e }, { data: l }, { data: p }, { data: it }, { data: cl }, { data: as }] = await Promise.all([
       supabase.from('cashflow_entries').select('*')
         .eq('client_id', clientId).order('direction').order('category'),
       supabase.from('liabilities')
@@ -72,443 +59,149 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
       supabase.from('insurance_policies')
         .select('id, policy_type, plan_name, provider, premium, premium_frequency, end_date')
         .eq('client_id', clientId),
+      supabase.from('cashflow_items').select('*').eq('client_id', clientId),
+      supabase.from('clients').select('has_epf, date_of_birth').eq('id', clientId).maybeSingle(),
+      supabase.from('assets').select('id, name, asset_type').eq('client_id', clientId).order('asset_type'),
     ]);
-    setEntries(e || []); setLiabilities((l || []) as LiabilityRow[]); setPolicies((p || []) as PolicyRow[]); setLoading(false);
+    setEntries(e || []);
+    setLiabilities((l || []) as LiabilityRow[]);
+    setPolicies((p || []) as PolicyRow[]);
+    setItems((it || []) as StandingItemRow[]);
+    setClient((cl || { has_epf: false, date_of_birth: null }) as ClientEpfInfo);
+    setAssets((as || []) as AssetOption[]);
+    setLoading(false);
   }
   useEffect(() => { load(); }, [clientId]);
 
-  async function handleAdd() {
-    if (!form.category || !form.amount) return;
-    setSaving(true);
-    await supabase.from('cashflow_entries').insert({
-      client_id: clientId, direction: modal, category: form.category,
-      amount: parseFloat(form.amount), frequency: form.frequency,
-      is_recurring: form.is_recurring, source_note: form.source_note || null,
-      period_month: toPeriodMonth(year, form.month),
-    });
-    setSaving(false); setModal(null);
-    setForm({ category:'', amount:'', frequency:'monthly', is_recurring:true, source_note:'', month: new Date().getMonth()+1 });
-    load();
-  }
-  async function handleDelete(id: string) {
-    if (!confirm(t('Delete this entry?','确定删除？'))) return;
-    await supabase.from('cashflow_entries').delete().eq('id', id); load();
-  }
-
-  function startEdit(entry: any) {
-    setEditingId(entry.id);
-    setEditForm({
-      category: entry.category,
-      amount: String(entry.amount),
-      frequency: entry.frequency,
-      is_recurring: entry.is_recurring,
-      source_note: entry.source_note || '',
-      month: monthOfRow(entry) || new Date().getMonth() + 1,
-    });
-  }
-  function cancelEdit() {
-    setEditingId(null);
-    setEditForm({});
-  }
-  async function saveEdit(entry: any) {
-    if (!editForm.category || !editForm.amount) return;
-    setSavingEdit(true);
-    await supabase.from('cashflow_entries').update({
-      category: editForm.category,
-      amount: parseFloat(editForm.amount),
-      frequency: editForm.frequency,
-      is_recurring: editForm.is_recurring,
-      source_note: editForm.source_note || null,
-      // an advisor saving the row is the review — clear the migration's flag
-      needs_review: false,
-      review_reason: null,
-      // Re-filing an entry under the right month is the fix for data that was
-      // captured in one batch but belongs to another period.
-      period_month: toPeriodMonth(
-        Number(String(entry.period_month ?? '').slice(0, 4)) || year,
-        editForm.month,
-      ),
-    }).eq('id', entry.id);
-    setSavingEdit(false);
-    setEditingId(null);
+  function flashSaved() {
     setOk(true);
     setTimeout(() => setOk(false), 3000);
-    load();
   }
 
-  // Installments (from liabilities) and premiums (from active policies),
-  // computed at read time — not a manual row, never stored. Spec decisions 1/3.
-  const derivedItems: DerivedItem[] = useMemo(
-    () => [...deriveLoanItems(liabilities), ...derivePremiumItems(policies)],
-    [liabilities, policies],
+  // 决策 1: with any items, the plan is read from them; a client with none
+  // falls back to the actuals-average algorithm — planCashflow itself decides
+  // which, based on whether `items` is non-empty.
+  const plan = useMemo(() => planCashflow({
+    rows: entries as PeriodRow[],
+    liabilities,
+    policies,
+    basis: defaultBasis(entries as PeriodRow[]),
+    today,
+    items,
+    client: { has_epf: client.has_epf, date_of_birth: client.date_of_birth },
+  }), [entries, liabilities, policies, items, client, today]);
+
+  // planCashflow pre-filters to items active "now" before handing them to
+  // annualizeItems, which narrows its one_off window (asOf ±11/12 months) to
+  // only one-offs landing in the CURRENT month — see the note in the final
+  // report. Calling annualizeItems directly on the full (unfiltered) item
+  // list here sidesteps that and gets the window the spec actually asks for.
+  const oneOffItems: StandingItem[] = useMemo(
+    () => annualizeItems(items, today).one_off_items,
+    [items, today],
   );
-  const derivedMonthlyExpense = useMemo(
-    () => derivedItems.filter(d => !isTransferCode(d.category)).reduce((s, d) => s + d.monthly_amount, 0),
-    [derivedItems],
-  );
-  // A manual row that duplicates a derived item (决策 4) — excluded from every
-  // total below, but still shown in the table with a "replaced" chip so an
-  // advisor opening an old client sees why the number moved.
-  const supersededIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const e of entries) {
-      if (e.direction === 'outflow' && isSuperseded(e, liabilities, policies)) ids.add(e.id);
+
+  async function toggleHasEpf(checked: boolean) {
+    const prev = client;
+    setClient((c) => ({ ...c, has_epf: checked }));
+    const { error } = await supabase.from('clients').update({ has_epf: checked }).eq('id', clientId);
+    if (error) setClient(prev);
+  }
+
+  async function generateFromActuals() {
+    setGenerating(true);
+    const basis = defaultBasis(entries as PeriodRow[]);
+    const migrated = itemsFromMonthRows(entries as MonthRow[], basis);
+    if (migrated.length > 0) {
+      const rows = migrated.map(({ source_ids, divisor, ...rest }) => ({
+        ...rest,
+        client_id: clientId,
+        // This is an advisor-triggered action from the live UI, not the P2b
+        // Task E one-time backfill (which stamps source:'migrated') — flag it
+        // as an ordinary advisor entry so it reads and behaves like one.
+        source: 'advisor',
+      }));
+      await supabase.from('cashflow_items').insert(rows);
     }
-    return ids;
-  }, [entries, liabilities, policies]);
-  const totalledEntries = useMemo(
-    () => entries.filter(e => !supersededIds.has(e.id)),
-    [entries, supersededIds],
-  );
-
-  const years = useMemo(() => {
-    const found = recordedYears(totalledEntries as PeriodRow[]);
-    // Always offer the current year so a client with no history can be started.
-    return found.includes(now.getFullYear()) ? found : [now.getFullYear(), ...found];
-  }, [totalledEntries]);
-
-  // Keep the selected year on something that exists once the rows arrive.
-  useEffect(() => {
-    if (years.length && !years.includes(year)) setYear(years[0]);
-  }, [years]);
-
-  const breakdown = useMemo(
-    () => monthlyBreakdown(totalledEntries as PeriodRow[], year),
-    [totalledEntries, year],
-  );
-  const ytd = useMemo(
-    () => yearToDateTotals(totalledEntries as PeriodRow[], year),
-    [totalledEntries, year],
-  );
-
-  const visible = entries.filter(e => {
-    if (Number(String(e.period_month ?? '').slice(0, 4)) !== year) return false;
-    return viewMonth === 'all' || monthOfRow(e) === viewMonth;
-  });
-  const inflows = visible.filter(e => e.direction === 'inflow');
-  const outflows = visible.filter(e => e.direction === 'outflow');
-
-  // Actuals for the selected range. A month view shows that month; the year
-  // view shows the year's running total. Neither is an annualised run-rate —
-  // that lives on the CFP tab, where the advisor picks which months to build on.
-  // Derived installments/premiums are today's obligations (计算, 不存储 — spec
-  // decision 1), so a month view counts them once and a year view counts them
-  // for every month that year already has data for (min 1).
-  const totalIn = viewMonth === 'all'
-    ? ytd.income
-    : (breakdown.find(m => m.month === viewMonth)?.income ?? 0);
-  const totalOut = viewMonth === 'all'
-    ? ytd.expenses + derivedMonthlyExpense * Math.max(1, breakdown.length)
-    : (breakdown.find(m => m.month === viewMonth)?.expenses ?? 0) + derivedMonthlyExpense;
-  const net = totalIn - totalOut;
-
-  const monthName = (m: number) =>
-    (language === 'zh' ? MONTH_LABELS : MONTH_LABELS_EN)[m - 1] ?? String(m);
-  const rangeLabel = viewMonth === 'all'
-    ? t(`${year} total`, `${year} 年累计`)
-    : `${year} · ${monthName(viewMonth)}`;
-
-  // A month holding far fewer rows than its neighbours is usually half-entered
-  // rather than genuinely lean, and no arithmetic can tell the difference. The
-  // report's basis is built from these months, so the gap has to be visible
-  // here — this is the exact shape that turned RM 1,548 of spending into RM 128.
-  const thinMonths = breakdown.length > 1
-    ? breakdown.filter(m => m.entries === 1 && breakdown.some(o => o.entries >= 3))
-    : [];
-  const catLabel = (code: string) => categoryLabel(code, language === 'zh' ? 'zh' : 'en');
+    setGenerating(false);
+    flashSaved();
+    load();
+  }
 
   if (loading) return <Loader />;
 
+  const net = plan.totals.monthly_income - plan.totals.monthly_expenses;
+
   return (
     <div>
-      {ok && <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-700 text-sm mb-4">✓ {t('Saved successfully.','保存成功。')}</div>}
-      {/* Period selector — a row belongs to a month, so the screen is read a
-          month (or a year) at a time. */}
-      <div className="flex items-center gap-2 flex-wrap mb-4">
-        <select
-          value={year}
-          onChange={e => { setYear(Number(e.target.value)); setViewMonth('all'); }}
-          className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm font-semibold text-xin-blue focus:outline-none focus:border-xin-gold"
-        >
-          {years.map(y => <option key={y} value={y}>{y}</option>)}
-        </select>
+      {ok && <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-700 text-sm mb-4">✓ {t('Saved successfully.', '保存成功。')}</div>}
 
-        <div className="flex items-center gap-1 flex-wrap">
-          <button
-            onClick={() => setViewMonth('all')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-              viewMonth === 'all' ? 'bg-xin-blue text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {t('Full year', '全年')}
+      <label className="flex items-center gap-2 text-sm text-slate-600 mb-4 cursor-pointer select-none">
+        <input type="checkbox" checked={!!client.has_epf} onChange={(e) => toggleHasEpf(e.target.checked)} />
+        {t('Employed, EPF/SOCSO deductions apply (auto-calculates EPF, SOCSO, EIS)', '受雇，有 EPF/SOCSO 扣款（自动计算 EPF、SOCSO、EIS）')}
+      </label>
+
+      {items.length === 0 && entries.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-xs text-amber-800 flex items-center gap-2">
+            <AlertTriangle size={14} className="shrink-0" />
+            {t('This client has no standing items yet — the plan is temporarily using monthly actuals.', '此客户还没有常设项目，计划暂用按月实际数。')}
+          </div>
+          <button onClick={generateFromActuals} disabled={generating} className="px-3 py-1.5 bg-amber-600 text-white text-xs font-semibold rounded-lg disabled:opacity-50">
+            {generating ? '...' : t('Generate standing items from actuals', '从实际数生成常设项目')}
           </button>
-          {MONTH_LABELS.map((_, i) => {
-            const m = i + 1;
-            const has = breakdown.find(b => b.month === m);
-            return (
-              <button
-                key={m}
-                onClick={() => setViewMonth(m)}
-                title={has ? t(`${has.entries} entries`, `${has.entries} 笔记录`) : t('no data', '无记录')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  viewMonth === m
-                    ? 'bg-xin-blue text-white'
-                    : has
-                      ? 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      : 'bg-white text-slate-300 border border-slate-100'
-                }`}
-              >
-                {monthName(m)}
-              </button>
-            );
-          })}
         </div>
-      </div>
+      )}
 
-      <div className="grid grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-3 gap-4 mb-2">
         {[
-          { label: t('Income', '收入'), val: totalIn, c: 'text-emerald-600', bg: 'bg-emerald-50' },
-          { label: t('Expenses', '支出'), val: totalOut, c: 'text-red-500', bg: 'bg-red-50' },
-          { label: t('Net', '净现金流'), val: net, c: net >= 0 ? 'text-xin-blue' : 'text-red-500', bg: net >= 0 ? 'bg-blue-50' : 'bg-red-50' },
-        ].map(card => (
+          { label: t('Monthly income', '月收入'), val: plan.totals.monthly_income, c: 'text-emerald-600', bg: 'bg-emerald-50' },
+          { label: t('Monthly expenses', '月开销'), val: plan.totals.monthly_expenses, c: 'text-red-500', bg: 'bg-red-50' },
+          { label: t('Monthly net', '月结余'), val: net, c: net >= 0 ? 'text-xin-blue' : 'text-red-500', bg: net >= 0 ? 'bg-blue-50' : 'bg-red-50' },
+        ].map((card) => (
           <div key={card.label} className={`${card.bg} rounded-2xl p-4`}>
-            <div className="text-xs text-slate-500 font-medium mb-1">{card.label} · {rangeLabel}</div>
+            <div className="text-xs text-slate-500 font-medium mb-1">{card.label}</div>
             <div className={`text-2xl font-bold ${card.c}`}>RM {fmt(card.val)}</div>
           </div>
         ))}
       </div>
 
-      {/* Per-month record, always visible in the year view. The CFP report is
-          annualised from these months, so how much each one holds is not a
-          detail — it is the thing the advisor has to judge. */}
-      {viewMonth === 'all' && breakdown.length > 0 && (
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm mb-4 overflow-hidden">
-          <div className="px-5 py-2.5 border-b border-slate-50 flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-500">
-              {t(`Month by month · ${year}`, `${year} 年分月记录`)}
-            </span>
-            <span className="text-[11px] text-slate-400">
-              {t(`${breakdown.length} of 12 months recorded`, `12 个月中已记录 ${breakdown.length} 个`)}
-            </span>
-          </div>
-          {breakdown.map(m => (
-            <button
-              key={m.month}
-              onClick={() => setViewMonth(m.month)}
-              className="w-full flex items-center gap-3 px-5 py-2 border-b border-slate-50 last:border-0 hover:bg-slate-50 transition-colors text-left"
-            >
-              <span className="w-12 text-xs font-semibold text-xin-blue">{monthName(m.month)}</span>
-              <span className="text-xs text-emerald-600 w-28">+RM {fmt(m.income)}</span>
-              <span className="text-xs text-red-500 w-28">−RM {fmt(m.expenses)}</span>
-              <span className="text-xs text-slate-400 ml-auto">
-                {t(`${m.entries} entries`, `${m.entries} 笔`)}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {thinMonths.length > 0 && viewMonth === 'all' && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-2">
-          <AlertTriangle size={15} className="text-amber-500 shrink-0 mt-0.5" />
-          <div className="text-xs text-amber-800">
-            {t(
-              `${thinMonths.map(m => monthName(m.month)).join(', ')} holds a single entry while other months hold several. If that month is only half entered, any plan averaged across it will understate this client.`,
-              `${thinMonths.map(m => monthName(m.month)).join('、')}只有一笔记录，其他月份有好几笔。如果这个月只录了一半，任何把它平均进去的规划都会低估这位客户。`,
-            )}
-          </div>
-        </div>
-      )}
-      <div className="grid grid-cols-2 gap-4">
-        <EntryTable title={t('Income','收入')} color="text-emerald-600" borderColor="border-emerald-200" entries={inflows} direction="inflow" catLabel={catLabel} monthName={monthName} showMonth={viewMonth === 'all'} onAdd={() => setModal('inflow')} onDelete={handleDelete} addLabel={t('Add Income','添加收入')}
-          editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language} />
-        <EntryTable title={t('Expenses','支出')} color="text-red-500" borderColor="border-red-200" entries={outflows} direction="outflow" catLabel={catLabel} monthName={monthName} showMonth={viewMonth === 'all'} onAdd={() => setModal('outflow')} onDelete={handleDelete} addLabel={t('Add Expense','添加支出')}
-          editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language}
-          derivedItems={derivedItems} supersededIds={supersededIds} extraTotal={viewMonth === 'all' ? derivedMonthlyExpense * Math.max(1, breakdown.length) : derivedMonthlyExpense} />
-      </div>
-      <div className="text-[11px] text-slate-400 mt-2">
-        {t(
-          'Installments and premiums marked "Auto" are read from the Net worth and Insurance tabs, not entered here.',
-          '标记「自动」的月供和保费来自「净资产」和「保险」标签页，无需在此重复录入。',
-        )}
-      </div>
-      {modal && (
-        <Modal title={modal==='inflow'?t('Add Income','添加收入'):t('Add Expense','添加支出')} onClose={() => setModal(null)}>
-          <Fr label={t('Category','类别')}>
-            <CategorySelect direction={modal} value={form.category} onChange={v => set('category', v)} language={language} allowEmpty />
-          </Fr>
-          <Fr label={t('Amount (MYR)','金额 (MYR)')}><input type="number" value={form.amount} onChange={e => set('amount', e.target.value)} className={inp} placeholder="0.00" /></Fr>
-          <Fr label={t('Frequency','频率')}>
-            <select value={form.frequency} onChange={e => set('frequency', e.target.value)} className={inp}>
-              {FREQ.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
-          </Fr>
-          <Fr label={t('Belongs to month','归属月份')}>
-            <select value={form.month} onChange={e => set('month', Number(e.target.value))} className={inp}>
-              {MONTH_LABELS.map((_, i) => (
-                <option key={i + 1} value={i + 1}>{monthName(i + 1)}</option>
-              ))}
-            </select>
-          </Fr>
-          <Fr label={t('Note','备注')}><input value={form.source_note} onChange={e => set('source_note', e.target.value)} className={inp} /></Fr>
-          <div className="flex items-center gap-2 mb-4"><input type="checkbox" checked={form.is_recurring} onChange={e => set('is_recurring', e.target.checked)} /><label className="text-sm text-slate-600">{t('Recurring','定期')}</label></div>
-          <div className="flex gap-2">
-            <button onClick={handleAdd} disabled={saving} className="px-5 py-2.5 bg-xin-blue text-white font-semibold rounded-xl text-sm disabled:opacity-50">{saving?'...':t('Save','保存')}</button>
-            <button onClick={() => setModal(null)} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm">{t('Cancel','取消')}</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-
-function EntryTable({ title, color, borderColor, entries, direction, catLabel, monthName, showMonth, onAdd, onDelete, addLabel, editingId, editForm, setEdit, onEdit, onCancelEdit, onSaveEdit, savingEdit, t, language, derivedItems, supersededIds, extraTotal }: any) {
-  // Each row already IS one month's figure, so the total is a plain sum. The
-  // old `monthly(e)` converted every row to a monthly rate and summed those,
-  // which is what made June's and July's figures look like one position.
-  // Transfers move the client's own money between pockets (spec §1): shown,
-  // but kept out of the income / spending total.
-  const isTransfer = (e: any) => wealthEffectOf(e.category, e.direction) === 'transfer';
-  const isSupersededRow = (e: any) => !!supersededIds?.has(e.id);
-  // Superseded rows (决策 4) are shown with a chip but, like transfers, kept
-  // out of the total — the installment/premium they duplicate is now the
-  // derived row below.
-  const total = entries.filter((e: any) => !isTransfer(e) && !isSupersededRow(e)).reduce((s: number, e: any) => s + Number(e.amount ?? 0), 0) + Number(extraTotal ?? 0);
-  const transferTotal = entries.filter(isTransfer).reduce((s: number, e: any) => s + Number(e.amount ?? 0), 0);
-  const hasDerived = (derivedItems?.length ?? 0) > 0;
-  return (
-    <div className={`bg-white rounded-2xl border ${borderColor} overflow-hidden shadow-sm`}>
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-50">
-        <span className={`font-semibold text-sm ${color}`}>{title}</span>
-        <button onClick={onAdd} className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors ${color}`}><Plus size={12} />{addLabel}</button>
-      </div>
-      {entries.length === 0 && !hasDerived ? <div className="p-8 text-center text-slate-300 text-sm">—</div> : (
-        <>
-          {entries.map((e: any) => (
-            editingId === e.id ? (
-              <div key={e.id} className="px-5 py-3 border-b border-slate-50 last:border-0 bg-slate-50/60">
-                <Fr label={t('Category','类别')}>
-                  <CategorySelect direction={direction} value={editForm.category} onChange={(v: string) => setEdit('category', v)} language={language} />
-                </Fr>
-                <Fr label={t('Amount (MYR)','金额 (MYR)')}><input type="number" value={editForm.amount} onChange={ev => setEdit('amount', ev.target.value)} className={inp} placeholder="0.00" /></Fr>
-                <Fr label={t('Frequency','频率')}>
-                  <select value={editForm.frequency} onChange={ev => setEdit('frequency', ev.target.value)} className={inp}>
-                    {FREQ.map(([v,l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                </Fr>
-                <Fr label={t('Belongs to month','归属月份')}>
-                  <select value={editForm.month} onChange={ev => setEdit('month', Number(ev.target.value))} className={inp}>
-                    {MONTH_LABELS.map((_, i) => (
-                      <option key={i + 1} value={i + 1}>{monthName(i + 1)}</option>
-                    ))}
-                  </select>
-                </Fr>
-                <Fr label={t('Note','备注')}><input value={editForm.source_note} onChange={ev => setEdit('source_note', ev.target.value)} className={inp} /></Fr>
-                <div className="flex items-center gap-2 mb-3"><input type="checkbox" checked={editForm.is_recurring} onChange={ev => setEdit('is_recurring', ev.target.checked)} /><label className="text-sm text-slate-600">{t('Recurring','定期')}</label></div>
-                <div className="flex gap-2">
-                  <button onClick={() => onSaveEdit(e)} disabled={savingEdit} className="px-4 py-2 bg-xin-blue text-white font-semibold rounded-lg text-sm disabled:opacity-50">{savingEdit?'...':t('Save','保存')}</button>
-                  <button onClick={onCancelEdit} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm">{t('Cancel','取消')}</button>
-                </div>
-              </div>
-            ) : (
-              <div key={e.id} className="flex items-center justify-between px-5 py-3 border-b border-slate-50 last:border-0">
-                <div>
-                  <div className="text-sm font-medium text-xin-blue flex items-center gap-1.5 flex-wrap">
-                    {catLabel(e.category)}
-                    {isTransfer(e) && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{t('Transfer','资产转移')}</span>}
-                    {isSupersededRow(e) && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{t('Replaced by liability/policy','已由负债/保单取代')}</span>}
-                    {e.needs_review && <span title={e.review_reason || ''} className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">{t('Needs review','待分类')}</span>}
-                  </div>
-                  <div className="text-xs text-slate-400">
-                    {showMonth ? `${monthName(Number(String(e.period_month ?? '').slice(5,7)))} · ` : ''}
-                    {e.frequency !== 'monthly' ? `${e.frequency} · ` : ''}
-                    {e.source_note || t('no note','无备注')}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className={`text-sm font-semibold ${color}`}>RM {fmt(Number(e.amount ?? 0))}</span>
-                  <button onClick={() => onEdit(e)} className="text-slate-300 hover:text-xin-blue transition-colors"><Pencil size={14} /></button>
-                  <button onClick={() => onDelete(e.id)} className="text-slate-300 hover:text-red-400 transition-colors"><X size={14} /></button>
-                </div>
-              </div>
-            )
-          ))}
-          {(derivedItems ?? []).map((d: DerivedItem) => (
-            <div key={d.key} className="px-5 py-3 border-b border-slate-50 last:border-0 bg-slate-50/40">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-medium text-xin-blue flex items-center gap-1.5 flex-wrap">
-                    {catLabel(d.category)}
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{t('Auto','自动')}</span>
-                    {d.estimated.length > 0 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{t('Estimated','估算')}</span>}
-                  </div>
-                  <div className="text-xs text-slate-400 truncate">{d.source_name}</div>
-                  {d.source_type === 'liability' && (
-                    <div className="text-[11px] text-slate-400">
-                      {t(
-                        `Principal RM ${fmt(d.principal_monthly)} · Interest RM ${fmt(d.interest_monthly)}`,
-                        `本金 RM ${fmt(d.principal_monthly)} · 利息 RM ${fmt(d.interest_monthly)}`,
-                      )}
-                    </div>
-                  )}
-                </div>
-                <span className={`text-sm font-semibold shrink-0 ${color}`}>RM {fmt(d.monthly_amount)}</span>
-              </div>
-              {d.warnings.map((w: string, i: number) => (
-                <div key={i} className="text-[11px] text-amber-600 flex items-center gap-1 mt-1">
-                  <AlertTriangle size={11} className="shrink-0" />{w}
-                </div>
-              ))}
-            </div>
-          ))}
-          <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-t border-slate-100">
-            <span className="text-xs font-semibold text-slate-500">{t('Total','合计')}</span>
-            <span className={`text-sm font-bold ${color}`}>RM {fmt(total)}</span>
-          </div>
-          {transferTotal > 0 && (
-            <div className="flex items-center justify-between px-5 py-2 bg-slate-50 text-xs text-slate-500">
-              <span>{t('Transfers (not in total)','资产转移（不计入合计）')}</span>
-              <span>RM {fmt(transferTotal)}</span>
-            </div>
+      {plan.monthly_employer_epf > 0 && (
+        <div className="text-xs text-slate-500 mb-4 flex items-center gap-1.5">
+          <Info size={12} className="shrink-0" />
+          {t(
+            `Employer EPF RM ${fmt(plan.monthly_employer_epf)}/month (goes straight into EPF, not counted in income totals)`,
+            `雇主 EPF RM ${fmt(plan.monthly_employer_epf)}/月（直接进入 EPF，不计入收入合计）`,
           )}
-        </>
+        </div>
       )}
+
+      <StandingItemsPanel
+        clientId={clientId}
+        items={items}
+        plan={plan}
+        oneOffItems={oneOffItems}
+        assets={assets}
+        liabilities={liabilities}
+        policies={policies}
+        language={language}
+        t={t}
+        onReload={load}
+        onSaved={flashSaved}
+      />
+
+      <ActualsPanel
+        clientId={clientId}
+        entries={entries}
+        liabilities={liabilities}
+        policies={policies}
+        plan={plan}
+        language={language}
+        t={t}
+        defaultOpen={items.length === 0}
+        onReload={load}
+        onSaved={flashSaved}
+      />
     </div>
   );
 }
-
-const Modal = ({ title, onClose, children }: any) => (
-  <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-    <div className="bg-white rounded-2xl p-6 w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-xl">
-      <div className="flex items-center justify-between mb-5"><h3 className="font-semibold text-xin-blue">{title}</h3><button onClick={onClose} className="text-slate-300 hover:text-slate-500"><X size={18} /></button></div>
-      {children}
-    </div>
-  </div>
-);
-const Fr = ({ label, children }: any) => <div className="mb-3"><label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>{children}</div>;
-const inp = 'w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold';
-
-// Grouped by the chart of accounts (I1–I4 / O1–O10). A legacy code that is no
-// longer offered still shows as the current value, so opening an old row never
-// silently re-files it.
-function CategorySelect({ direction, value, onChange, language, allowEmpty }: {
-  direction: 'inflow' | 'outflow'; value: string; onChange: (v: string) => void; language: string; allowEmpty?: boolean;
-}) {
-  const zh = language === 'zh';
-  const known = CASHFLOW_CATEGORIES.some(c => c.code === value);
-  return (
-    <select value={value} onChange={e => onChange(e.target.value)} className={inp}>
-      {allowEmpty && <option value="">—</option>}
-      {value && !known && <option value={value}>{categoryLabel(value, zh ? 'zh' : 'en')} ({value})</option>}
-      {CASHFLOW_GROUPS.filter(g => g.direction === direction).map(g => (
-        <optgroup key={g.id} label={`${g.id} · ${zh ? g.label_zh : g.label_en}`}>
-          {CASHFLOW_CATEGORIES.filter(c => c.group === g.id).map(c => (
-            <option key={c.code} value={c.code}>{zh ? c.label_zh : c.label_en}</option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
-  );
-}
-const Loader = () => <div className="flex items-center justify-center h-40"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-xin-blue" /></div>;
-const fmt = (n: number) => n.toLocaleString('en-MY', { minimumFractionDigits: 0, maximumFractionDigits: 0 });

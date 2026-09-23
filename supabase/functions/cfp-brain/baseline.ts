@@ -12,8 +12,9 @@ import {
   isAssetTransfer,
   type CashflowBasis,
 } from "../_shared/cashflow/periods.ts";
+import { monthStart } from "../_shared/cashflow/items.ts";
 import { LIQUID_ASSET_TYPES as TAXONOMY_LIQUID } from "../_shared/taxonomy/balance.ts";
-import { planCashflow } from "../_shared/finance/derived.ts";
+import { planCashflow, type PlanCashflowInput } from "../_shared/finance/derived.ts";
 import type {
   BaselineAssumptions,
   CfpData,
@@ -110,19 +111,45 @@ export function computeBaseline(
   const basis: CashflowBasis | null = inputs.cashflow_basis ??
     defaultBasis(f.cashflow);
 
-  // P2a (决策 1, 5): installments and premiums are derived from the liabilities
-  // and policies themselves — never re-keyed by hand — and folded into the
-  // same income/expense totals every ratio below is built on. This ONE call
-  // replaces the old annualizeCashflow(...) + liabilities.monthly_payment sum:
-  // manual rows that duplicate a derived item (决策 4) are dropped from the
-  // manual side so the total counts each obligation once.
-  const plan = planCashflow({
+  // P2b 决策 6: per-employee statutory info. A joint report's SOCSO/EIS wage
+  // ceiling and EPF employer-rate threshold each apply PER EMPLOYEE, so the
+  // household path is keyed by client_id (each spouse's items keep their own
+  // client_id through the household merge — see household.ts) instead of a
+  // single pooled `client`.
+  const clientsInfo: Record<string, { has_epf?: boolean | null; date_of_birth?: string | null }> | undefined =
+    f.household
+      ? {
+        [f.household.primary.client.id]: {
+          has_epf: f.household.primary.client.has_epf,
+          date_of_birth: f.household.primary.client.date_of_birth,
+        },
+        [f.household.partner.client.id]: {
+          has_epf: f.household.partner.client.has_epf,
+          date_of_birth: f.household.partner.client.date_of_birth,
+        },
+      }
+      : undefined;
+
+  // P2a (决策 1, 5) / P2b (决策 1, 6): installments and premiums are derived
+  // from the liabilities and policies themselves — never re-keyed by hand —
+  // and folded into the same income/expense totals every ratio below is built
+  // on. This ONE call replaces the old annualizeCashflow(...) +
+  // liabilities.monthly_payment sum: manual rows that duplicate a derived
+  // item (决策 4) are dropped from the manual side so the total counts each
+  // obligation once. When the client has any standing items, the same call
+  // reads the PLAN instead of averaging actuals (P2b 决策 1) and also derives
+  // EPF/SOCSO/EIS from the standing salary items (决策 6).
+  const planInput: PlanCashflowInput = {
     rows: f.cashflow,
     liabilities: f.liabilities,
     policies: f.policies,
     basis,
     today: now,
-  });
+    items: f.items,
+    client: { has_epf: f.client.has_epf, date_of_birth: f.client.date_of_birth },
+    ...(clientsInfo ? { clients: clientsInfo } : {}),
+  };
+  const plan = planCashflow(planInput);
   const cf = plan.totals;
   const annualIncome = cf.annual_income;
   const annualExpenses = cf.annual_expenses;
@@ -133,7 +160,13 @@ export function computeBaseline(
   // honest rather than optimistic.
   const monthlyEssential = cf.monthly_expenses;
   notes.push("紧急预备金按全部经常性月支出为「必要支出」口径计算");
-  if (basis) {
+
+  const itemsAsOf = plan.source === "items" ? monthStart(now) : null;
+  if (plan.source === "items") {
+    // P2b 决策 1: the plan comes from standing items, not a chosen window of
+    // actuals — there is no basis to state, only the month it was read as of.
+    notes.push(`现金流依据：常设项目（截至 ${itemsAsOf!.slice(0, 7)}）`);
+  } else if (basis) {
     notes.push(
       `收支按 ${basis.year} 年 ${basis.from_month}–${basis.to_month} 月的实际记录年化`,
     );
@@ -149,6 +182,18 @@ export function computeBaseline(
     notes.push("未录得任何月份的收支记录,收入与支出按零处理");
   }
   notes.push("储蓄/投资转入、资产变现与借入视为资产转移，不计入收入或支出；贷款月供仍计入支出");
+
+  // P2b 决策 6: statutory EPF/SOCSO/EIS notes, verbatim from the derived
+  // items' own warnings (「按法定比例估算」) — deduped, since every employee's
+  // statutory items carry the identical note.
+  const statutoryItems = plan.derived.filter((d) => d.source_type === "statutory");
+  if (statutoryItems.length > 0) {
+    const statutoryNotes = new Set<string>();
+    for (const item of statutoryItems) {
+      for (const w of item.warnings) statutoryNotes.add(w);
+    }
+    for (const w of statutoryNotes) notes.push(w);
+  }
 
   // P2a: which installments/premiums were auto-included, which of their
   // fields were estimated rather than given, every loan warning verbatim, and
@@ -241,6 +286,17 @@ export function computeBaseline(
     monthly_income: round(monthlyIncome),
     monthly_essential_expenses: round(monthlyEssential),
     annual_surplus: round(annualIncome - annualExpenses),
+    cashflow_source: plan.source,
+    monthly_employee_epf: plan.monthly_employee_epf,
+    monthly_employer_epf: plan.monthly_employer_epf,
+    monthly_socso_eis: plan.monthly_socso_eis,
+    // P2b 决策 6: forced EPF savings can't be redirected by the budget
+    // waterfall — subtract it from the surplus every allocation is measured
+    // against. 0 employee EPF (actuals path, or no has_epf) leaves this equal
+    // to annual_surplus.
+    annual_disposable_surplus: round(annualIncome - annualExpenses) - round(12 * plan.monthly_employee_epf),
+    one_off_items: plan.one_off_items,
+    items_as_of: itemsAsOf,
     emergency_fund_need_low: round(emergencyNeedLow),
     emergency_fund_need_high: round(emergencyNeedHigh),
     emergency_fund_actual: round(liquidTotal),

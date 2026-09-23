@@ -48,6 +48,7 @@ const CLIENT = {
   retirement_age: 50,
   epf_account_number: "12345678",
   ppa_account_number: null,
+  has_epf: true,
 };
 
 /**
@@ -75,9 +76,26 @@ function db(over: Record<string, unknown[]> = {}) {
     investment_accounts: [],
     portfolio_holdings: [],
     client_goals: [],
+    cashflow_items: [],
     ...over,
   });
 }
+
+const SALARY_ITEM = {
+  id: "i-1",
+  client_id: "c-1",
+  direction: "inflow",
+  category: "salary_basic",
+  name: "Salary",
+  amount: 8000,
+  frequency: "monthly",
+  effective_from: "2026-04-01",
+  effective_to: null,
+  linked_asset_id: null,
+  linked_liability_id: null,
+  linked_policy_id: null,
+  needs_review: false,
+};
 
 Deno.test("every month's rows survive the fetch", async () => {
   // The regression. cfp-brain used to keep only each direction's most recent
@@ -159,4 +177,53 @@ Deno.test("account numbers degrade to booleans at the fetch boundary", async () 
     Object.keys(f!.client).some((k) => k.includes("account_number")),
     false,
   );
+});
+
+// ---------------------------------------------------------------------------
+// P2b — cashflow_items (常设项目) and clients.has_epf
+// ---------------------------------------------------------------------------
+
+Deno.test("cashflow_items: every version is fetched for the client", async () => {
+  const f = await fetchCfpData(db({ cashflow_items: [SALARY_ITEM] }), "c-1");
+  assertEquals(f!.items.length, 1);
+  assertEquals(f!.items[0].category, "salary_basic");
+  assertEquals(f!.items[0].effective_from, "2026-04-01");
+});
+
+Deno.test("cashflow_items: a client with none yields an empty list, not a throw", async () => {
+  const f = await fetchCfpData(db(), "c-1");
+  assertEquals(f!.items, []);
+});
+
+Deno.test("clients.has_epf reaches CfpClient.has_epf verbatim (true/false/null)", async () => {
+  const truthy = await fetchCfpData(db(), "c-1");
+  assertEquals(truthy!.client.has_epf, true);
+
+  const falsy = await fetchCfpData(db({ clients: [{ ...CLIENT, has_epf: false }] }), "c-1");
+  assertEquals(falsy!.client.has_epf, false);
+
+  const unset = await fetchCfpData(db({ clients: [{ ...CLIENT, has_epf: null }] }), "c-1");
+  assertEquals(unset!.client.has_epf, null);
+});
+
+Deno.test("cashflow_items select includes every column planCashflow/statutory need", async () => {
+  const d = db();
+  await fetchCfpData(d, "c-1");
+  for (
+    const col of [
+      "client_id",
+      "direction",
+      "category",
+      "amount",
+      "frequency",
+      "effective_from",
+      "effective_to",
+      "linked_asset_id",
+      "linked_liability_id",
+      "linked_policy_id",
+      "needs_review",
+    ]
+  ) {
+    assertEquals(d.selects.cashflow_items.includes(col), true, `missing column: ${col}`);
+  }
 });

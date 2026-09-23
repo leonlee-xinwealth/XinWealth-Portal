@@ -32,13 +32,13 @@ async function fetchPerson(
   const { data: client, error } = await db
     .from("clients")
     .select(
-      "id, date_of_birth, marital_status, number_of_dependants, employment_status, occupation, tax_residency, risk_profile, retirement_age, epf_account_number, ppa_account_number",
+      "id, date_of_birth, marital_status, number_of_dependants, employment_status, occupation, tax_residency, risk_profile, retirement_age, epf_account_number, ppa_account_number, has_epf",
     )
     .eq("id", clientId)
     .single();
   if (error || !client) return null;
 
-  const [cashflowRes, assetsRes, liabilitiesRes, policiesRes, acctRes, holdingsRes, goalsRes] =
+  const [cashflowRes, assetsRes, liabilitiesRes, policiesRes, acctRes, holdingsRes, goalsRes, itemsRes] =
     await Promise.all([
       db
         .from("cashflow_entries")
@@ -84,6 +84,15 @@ async function fetchPerson(
         )
         .eq("client_id", clientId)
         .order("priority", { ascending: true }),
+      db
+        .from("cashflow_items")
+        // P2b 决策 1: every version of every standing item — planCashflow
+        // itself decides which are active (决策 2) and picks a mode via
+        // isSuperseded (决策 8). None of these are identifying fields.
+        .select(
+          "id, client_id, direction, category, name, amount, frequency, effective_from, effective_to, linked_asset_id, linked_liability_id, linked_policy_id, needs_review",
+        )
+        .eq("client_id", clientId),
     ]);
 
   // EVERY row, across every month. Selecting a period here is exactly the bug
@@ -111,6 +120,7 @@ async function fetchPerson(
       retirement_age: client.retirement_age,
       has_epf_account: !!client.epf_account_number,
       has_prs_account: !!client.ppa_account_number,
+      has_epf: client.has_epf ?? null,
     },
     cashflow,
     assets: assetsRes.data ?? [],
@@ -119,6 +129,7 @@ async function fetchPerson(
     investment_accounts: acctRes.data ?? [],
     holdings: latestSnapshotOnly(holdingsRes.data ?? [], "snapshot_month"),
     goals: goalsRes.data ?? [],
+    items: itemsRes.data ?? [],
   };
 }
 

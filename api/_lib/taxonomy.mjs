@@ -778,6 +778,15 @@ function amountOf(r) {
   const n = Number(r.amount);
   return Number.isFinite(n) ? n : 0;
 }
+function recordedYears(rows) {
+  const years = /* @__PURE__ */ new Set();
+  for (const r of rows ?? []) {
+    const y = yearOf(r.period_month);
+    if (y != null)
+      years.add(y);
+  }
+  return [...years].sort((a, b) => b - a);
+}
 function normalise(basis, fallbackYear) {
   if (!basis)
     return { year: fallbackYear, from_month: 1, to_month: 12 };
@@ -839,8 +848,387 @@ function annualizeCashflow(rows, basis) {
   };
 }
 
-// supabase/functions/_shared/finance/derived.ts
+// supabase/functions/_shared/cashflow/items.ts
+function monthStart(d) {
+  if (typeof d === "string") {
+    const m = /^(\d{4})-(\d{2})/.exec(d);
+    if (m)
+      return `${m[1]}-${m[2]}-01`;
+    const parsed = new Date(d);
+    if (isNaN(parsed.getTime())) {
+      throw new Error(`monthStart: unusable date "${d}"`);
+    }
+    return monthStart(parsed);
+  }
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}-${mo}-01`;
+}
+function monthIndex(month) {
+  const y = Number(month.slice(0, 4));
+  const mo = Number(month.slice(5, 7));
+  return y * 12 + (mo - 1);
+}
+function monthFromIndex(idx) {
+  const y = Math.floor(idx / 12);
+  const mo = idx - y * 12 + 1;
+  return `${y}-${String(mo).padStart(2, "0")}-01`;
+}
+function monthBefore(month) {
+  return monthFromIndex(monthIndex(month) - 1);
+}
 function round22(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function isActiveAt(item, asOf) {
+  const asOfMonth = monthStart(asOf);
+  if (item.effective_from > asOfMonth)
+    return false;
+  if (item.effective_to != null && item.effective_to < asOfMonth)
+    return false;
+  return true;
+}
+function activeItems(items, asOf) {
+  return (items ?? []).filter((it) => isActiveAt(it, asOf));
+}
+function itemMonthlyAmount(item) {
+  const occurrences = ANNUAL_OCCURRENCES[item.frequency] ?? 12;
+  const amount = Number(item.amount);
+  const n = Number.isFinite(amount) ? amount : 0;
+  return n * occurrences / 12;
+}
+function annualizeItems(items, asOf) {
+  const asOfMonth = monthStart(asOf);
+  const active = activeItems(items ?? [], asOfMonth);
+  let monthlyIncome = 0;
+  let monthlyExpenses = 0;
+  let annualItemsIncome = 0;
+  let annualItemsExpenses = 0;
+  for (const item of active) {
+    if (item.frequency === "one_off")
+      continue;
+    if (isTransferCode(item.category))
+      continue;
+    const inflow = item.direction === "inflow";
+    const monthlyAmount = itemMonthlyAmount(item);
+    if ((item.frequency ?? "monthly") === "monthly") {
+      if (inflow)
+        monthlyIncome += monthlyAmount;
+      else
+        monthlyExpenses += monthlyAmount;
+    } else {
+      const annual = monthlyAmount * 12;
+      if (inflow)
+        annualItemsIncome += annual;
+      else
+        annualItemsExpenses += annual;
+    }
+  }
+  const annualIncome = monthlyIncome * 12 + annualItemsIncome;
+  const annualExpenses = monthlyExpenses * 12 + annualItemsExpenses;
+  const asOfIdx = monthIndex(asOfMonth);
+  const lowIdx = asOfIdx - 11;
+  const highIdx = asOfIdx + 12;
+  const one_off_items = (items ?? []).filter((it) => {
+    if (it.frequency !== "one_off")
+      return false;
+    const idx = monthIndex(monthStart(it.effective_from));
+    return idx >= lowIdx && idx <= highIdx;
+  });
+  return {
+    annual_income: annualIncome,
+    annual_expenses: annualExpenses,
+    monthly_income: annualIncome / 12,
+    monthly_expenses: annualExpenses / 12,
+    basis_months: 12,
+    months_with_data: [],
+    annual_items_income: annualItemsIncome,
+    annual_items_expenses: annualItemsExpenses,
+    one_off_items
+  };
+}
+function annualizeItemsByCategory(items, asOf, opts = {}) {
+  const asOfMonth = monthStart(asOf);
+  const active = activeItems(items ?? [], asOfMonth);
+  const acc = /* @__PURE__ */ new Map();
+  for (const item of active) {
+    if (item.frequency === "one_off")
+      continue;
+    if (!opts.includeTransfers && isTransferCode(item.category))
+      continue;
+    const key = item.category;
+    const a = acc.get(key) ?? { mi: 0, me: 0, ai: 0, ae: 0 };
+    const inflow = item.direction === "inflow";
+    const monthlyAmount = itemMonthlyAmount(item);
+    if ((item.frequency ?? "monthly") === "monthly") {
+      if (inflow)
+        a.mi += monthlyAmount;
+      else
+        a.me += monthlyAmount;
+    } else {
+      const annual = monthlyAmount * 12;
+      if (inflow)
+        a.ai += annual;
+      else
+        a.ae += annual;
+    }
+    acc.set(key, a);
+  }
+  return [...acc.entries()].map(([category, a]) => {
+    const annual_income = a.mi * 12 + a.ai;
+    const annual_expenses = a.me * 12 + a.ae;
+    return {
+      category,
+      annual_income,
+      annual_expenses,
+      monthly_income: annual_income / 12,
+      monthly_expenses: annual_expenses / 12
+    };
+  });
+}
+function reviseItem(item, changes, fromMonth) {
+  const fm = monthStart(fromMonth);
+  if (item.frequency === "one_off") {
+    const update = { ...changes };
+    if (update.effective_from != null) {
+      const ef = monthStart(update.effective_from);
+      update.effective_from = ef;
+      update.effective_to = ef;
+    }
+    return { mode: "correct", update };
+  }
+  if (fm <= item.effective_from) {
+    return { mode: "correct", update: { ...changes } };
+  }
+  const { id: _oldId, ...rest } = item;
+  const insert = {
+    ...rest,
+    ...changes,
+    effective_from: fm,
+    effective_to: item.effective_to ?? null,
+    previous_id: item.id
+  };
+  return {
+    mode: "version",
+    close: { id: item.id, effective_to: monthBefore(fm) },
+    insert
+  };
+}
+function endItem(item, lastMonth) {
+  const lm = monthStart(lastMonth);
+  const effective_to = lm < item.effective_from ? item.effective_from : lm;
+  return { id: item.id, effective_to };
+}
+function normaliseNote(note) {
+  return (note ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+function itemsFromMonthRows(rows, basis) {
+  const allRows = rows ?? [];
+  const year = recordedYears(allRows)[0];
+  if (year == null)
+    return [];
+  const eligible = allRows.filter((r) => yearOf(r.period_month) === year).slice().sort((x, y) => x.period_month !== y.period_month ? x.period_month < y.period_month ? -1 : 1 : x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+  const groups = /* @__PURE__ */ new Map();
+  for (const r of eligible) {
+    const freq = r.frequency ?? "monthly";
+    const note = normaliseNote(r.source_note);
+    const linkedAsset = r.linked_asset_id ?? null;
+    const linkedLiability = r.linked_liability_id ?? null;
+    const month = monthStart(r.period_month);
+    const key = JSON.stringify([r.direction, r.category, freq, note, linkedAsset, linkedLiability]);
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        client_id: r.client_id ?? null,
+        direction: r.direction,
+        category: r.category,
+        frequency: freq,
+        note,
+        linked_asset_id: linkedAsset,
+        linked_liability_id: linkedLiability,
+        allIds: [],
+        earliestMonth: month,
+        latestMonth: month,
+        latestMonthAmount: 0,
+        latestMonthIds: [],
+        latestNote: null,
+        needsReview: false,
+        reviewReason: null
+      };
+      groups.set(key, g);
+    }
+    g.allIds.push(r.id);
+    if (month < g.earliestMonth)
+      g.earliestMonth = month;
+    const amount = Number(r.amount);
+    const amt = Number.isFinite(amount) ? amount : 0;
+    if (month > g.latestMonth) {
+      g.latestMonth = month;
+      g.latestMonthAmount = amt;
+      g.latestMonthIds = [r.id];
+      g.latestNote = r.source_note ?? null;
+    } else {
+      g.latestMonthAmount += amt;
+      g.latestMonthIds.push(r.id);
+      g.latestNote = r.source_note ?? g.latestNote;
+    }
+    if (r.needs_review)
+      g.needsReview = true;
+    if (!g.reviewReason && r.review_reason)
+      g.reviewReason = r.review_reason;
+  }
+  const items = [];
+  for (const g of groups.values()) {
+    const isOneOff = g.frequency === "one_off";
+    const amount = round22(g.latestMonthAmount);
+    const effective_from = g.earliestMonth;
+    const effective_to = isOneOff ? effective_from : null;
+    items.push({
+      client_id: g.client_id ?? void 0,
+      direction: g.direction,
+      category: g.category,
+      name: g.latestNote ?? void 0,
+      amount,
+      frequency: g.frequency,
+      effective_from,
+      effective_to,
+      linked_asset_id: g.linked_asset_id ?? void 0,
+      linked_liability_id: g.linked_liability_id ?? void 0,
+      source: "migrated",
+      needs_review: g.needsReview,
+      review_reason: g.reviewReason ?? void 0,
+      source_ids: g.allIds.slice().sort(),
+      amount_ids: g.latestMonthIds.slice().sort(),
+      divisor: 1
+    });
+  }
+  return items.sort((a, b2) => {
+    if (a.direction !== b2.direction)
+      return a.direction < b2.direction ? -1 : 1;
+    if (a.category !== b2.category)
+      return a.category < b2.category ? -1 : 1;
+    const an = normaliseNote(a.name);
+    const bn = normaliseNote(b2.name);
+    if (an !== bn)
+      return an < bn ? -1 : 1;
+    if (a.frequency !== b2.frequency)
+      return a.frequency < b2.frequency ? -1 : 1;
+    return 0;
+  });
+}
+
+// supabase/functions/_shared/finance/statutory.ts
+var EPF_EMPLOYEE_RATE = 0.11;
+var EPF_EMPLOYEE_RATE_SENIOR = 0;
+var EPF_EMPLOYER_RATE_LOW = 0.13;
+var EPF_EMPLOYER_RATE_HIGH = 0.12;
+var EPF_EMPLOYER_RATE_SENIOR = 0.04;
+var EPF_EMPLOYER_WAGE_THRESHOLD = 5e3;
+var SOCSO_EMPLOYEE_RATE = 5e-3;
+var EIS_EMPLOYEE_RATE = 2e-3;
+var SOCSO_EIS_WAGE_CEILING = 6e3;
+var STATUTORY_SENIOR_AGE = 60;
+var STATUTORY_NOTE = "\u6309\u6CD5\u5B9A\u6BD4\u4F8B\u4F30\u7B97";
+var EPF_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission", "bonus"];
+var REGULAR_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission"];
+var SOCSO_EIS_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission", "overtime"];
+function round23(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function roundUpToRinggit(n) {
+  return Math.ceil(n - 1e-9);
+}
+function ageAt(dob, asOf) {
+  if (!dob)
+    return null;
+  const d = new Date(dob);
+  if (isNaN(d.getTime()))
+    return null;
+  let age = asOf.getUTCFullYear() - d.getUTCFullYear();
+  const beforeBirthdayThisYear = asOf.getUTCMonth() < d.getUTCMonth() || asOf.getUTCMonth() === d.getUTCMonth() && asOf.getUTCDate() < d.getUTCDate();
+  if (beforeBirthdayThisYear)
+    age -= 1;
+  return age;
+}
+function sumWage(items, asOf, categories) {
+  let total = 0;
+  for (const item of activeItems(items ?? [], asOf)) {
+    if (item.direction !== "inflow")
+      continue;
+    if (!categories.includes(item.category))
+      continue;
+    total += itemMonthlyAmount(item);
+  }
+  return total;
+}
+function deriveStatutoryItems(items, client, asOf = /* @__PURE__ */ new Date()) {
+  const nothing = {
+    items: [],
+    employee_epf_monthly: 0,
+    employer_epf_monthly: 0,
+    socso_eis_monthly: 0,
+    epf_wage_monthly: 0,
+    notes: []
+  };
+  if (client?.has_epf !== true)
+    return nothing;
+  const epfWage = sumWage(items, asOf, EPF_WAGE_CATEGORIES);
+  if (epfWage <= 0)
+    return nothing;
+  const regularWage = sumWage(items, asOf, REGULAR_WAGE_CATEGORIES);
+  const socsoEisWage = Math.min(sumWage(items, asOf, SOCSO_EIS_WAGE_CATEGORIES), SOCSO_EIS_WAGE_CEILING);
+  const age = ageAt(client.date_of_birth, asOf);
+  const isSenior = age != null && age >= STATUTORY_SENIOR_AGE;
+  const employeeRate = isSenior ? EPF_EMPLOYEE_RATE_SENIOR : EPF_EMPLOYEE_RATE;
+  const employerRate = isSenior ? EPF_EMPLOYER_RATE_SENIOR : regularWage <= EPF_EMPLOYER_WAGE_THRESHOLD ? EPF_EMPLOYER_RATE_LOW : EPF_EMPLOYER_RATE_HIGH;
+  const employeeEpf = roundUpToRinggit(epfWage * employeeRate);
+  const employerEpf = roundUpToRinggit(epfWage * employerRate);
+  const socsoRate = isSenior ? 0 : SOCSO_EMPLOYEE_RATE;
+  const eisRate = isSenior ? 0 : EIS_EMPLOYEE_RATE;
+  const socsoEis = round23(socsoEisWage * (socsoRate + eisRate));
+  const resultItems = [];
+  if (employeeEpf > 0) {
+    resultItems.push({
+      key: "statutory:epf_employee",
+      source_type: "statutory",
+      source_id: null,
+      source_name: "EPF\uFF08\u96C7\u5458\uFF09",
+      category: "epf_employee",
+      direction: "outflow",
+      monthly_amount: employeeEpf,
+      interest_monthly: 0,
+      principal_monthly: 0,
+      estimated: ["statutory_rate"],
+      warnings: [STATUTORY_NOTE]
+    });
+  }
+  if (socsoEis > 0) {
+    resultItems.push({
+      key: "statutory:socso_eis",
+      source_type: "statutory",
+      source_id: null,
+      source_name: "SOCSO/EIS",
+      category: "socso_eis",
+      direction: "outflow",
+      monthly_amount: socsoEis,
+      interest_monthly: 0,
+      principal_monthly: 0,
+      estimated: ["statutory_rate"],
+      warnings: [STATUTORY_NOTE]
+    });
+  }
+  return {
+    items: resultItems,
+    employee_epf_monthly: employeeEpf,
+    employer_epf_monthly: employerEpf,
+    socso_eis_monthly: socsoEis,
+    epf_wage_monthly: round23(epfWage),
+    notes: resultItems.length > 0 ? [STATUTORY_NOTE] : []
+  };
+}
+
+// supabase/functions/_shared/finance/derived.ts
+function round24(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 var PREMIUM_OCCURRENCES = {
@@ -895,7 +1283,7 @@ function deriveLoanItems(liabilities, today = /* @__PURE__ */ new Date()) {
       source_name: l.name ?? meta.label_zh,
       category,
       direction: "outflow",
-      monthly_amount: round22(amount),
+      monthly_amount: round24(amount),
       interest_monthly: est.interest_monthly,
       principal_monthly: est.principal_monthly,
       estimated: est.estimated,
@@ -910,7 +1298,7 @@ function derivePremiumItems(policies, today = /* @__PURE__ */ new Date()) {
     if (isExpired(p.end_date, today))
       continue;
     const occurrences = PREMIUM_OCCURRENCES[p.premium_frequency ?? "annual"] ?? 12;
-    const monthly = round22((p.premium ?? 0) * occurrences / 12);
+    const monthly = round24((p.premium ?? 0) * occurrences / 12);
     if (monthly === 0)
       continue;
     items.push({
@@ -957,6 +1345,9 @@ function isSuperseded(row, liabilities, policies) {
   return false;
 }
 function planCashflow(input) {
+  return input.items && input.items.length > 0 ? planCashflowFromItems(input) : planCashflowFromActuals(input);
+}
+function planCashflowFromActuals(input) {
   const { rows, liabilities, policies, basis } = input;
   const today = input.today ?? /* @__PURE__ */ new Date();
   const superseded = [];
@@ -977,8 +1368,8 @@ function planCashflow(input) {
       continue;
     derivedMonthlyExpense += item.monthly_amount;
   }
-  const monthly_expenses = round22(baseTotals.monthly_expenses + derivedMonthlyExpense);
-  const annual_expenses = round22(baseTotals.annual_expenses + derivedMonthlyExpense * 12);
+  const monthly_expenses = round24(baseTotals.monthly_expenses + derivedMonthlyExpense);
+  const annual_expenses = round24(baseTotals.annual_expenses + derivedMonthlyExpense * 12);
   const totals = {
     ...baseTotals,
     monthly_expenses,
@@ -1003,10 +1394,116 @@ function planCashflow(input) {
     totals,
     derived,
     superseded,
-    monthly_debt_service: round22(monthly_debt_service),
-    monthly_principal: round22(monthly_principal),
-    monthly_interest: round22(monthly_interest),
-    monthly_premiums: round22(monthly_premiums)
+    monthly_debt_service: round24(monthly_debt_service),
+    monthly_principal: round24(monthly_principal),
+    monthly_interest: round24(monthly_interest),
+    monthly_premiums: round24(monthly_premiums),
+    source: "actuals",
+    monthly_employee_epf: 0,
+    monthly_employer_epf: 0,
+    monthly_socso_eis: 0,
+    one_off_items: []
+  };
+}
+function deriveStatutoryForHousehold(items, clientInfo, clients, today) {
+  if (!clients)
+    return deriveStatutoryItems(items, clientInfo ?? {}, today);
+  const byClient = /* @__PURE__ */ new Map();
+  for (const it of items ?? []) {
+    const cid = it.client_id ?? "";
+    const group = byClient.get(cid);
+    if (group)
+      group.push(it);
+    else
+      byClient.set(cid, [it]);
+  }
+  let employee_epf_monthly = 0;
+  let employer_epf_monthly = 0;
+  let socso_eis_monthly = 0;
+  let epf_wage_monthly = 0;
+  const items_out = [];
+  const notes = /* @__PURE__ */ new Set();
+  for (const [cid, groupItems] of byClient) {
+    const result = deriveStatutoryItems(groupItems, clients[cid] ?? {}, today);
+    employee_epf_monthly += result.employee_epf_monthly;
+    employer_epf_monthly += result.employer_epf_monthly;
+    socso_eis_monthly += result.socso_eis_monthly;
+    epf_wage_monthly += result.epf_wage_monthly;
+    for (const it of result.items) {
+      items_out.push({ ...it, key: cid ? `${it.key}:${cid}` : it.key });
+    }
+    for (const n of result.notes)
+      notes.add(n);
+  }
+  return {
+    items: items_out,
+    employee_epf_monthly: round24(employee_epf_monthly),
+    employer_epf_monthly: round24(employer_epf_monthly),
+    socso_eis_monthly: round24(socso_eis_monthly),
+    epf_wage_monthly: round24(epf_wage_monthly),
+    notes: [...notes]
+  };
+}
+function planCashflowFromItems(input) {
+  const { liabilities, policies, client, clients } = input;
+  const items = input.items ?? [];
+  const today = input.today ?? /* @__PURE__ */ new Date();
+  const active = activeItems(items, today);
+  const superseded = [];
+  const kept = [];
+  for (const it of active) {
+    if (isSuperseded(it, liabilities, policies))
+      superseded.push(it);
+    else
+      kept.push(it);
+  }
+  const itemTotals = annualizeItems(kept, today);
+  const loanItems = deriveLoanItems(liabilities, today);
+  const premiumItems = derivePremiumItems(policies, today);
+  const statutory = deriveStatutoryForHousehold(items, client, clients, today);
+  const derived = [...loanItems, ...premiumItems, ...statutory.items];
+  let derivedMonthlyExpense = 0;
+  for (const item of derived) {
+    if (isTransferCode(item.category))
+      continue;
+    derivedMonthlyExpense += item.monthly_amount;
+  }
+  const monthly_expenses = round24(itemTotals.monthly_expenses + derivedMonthlyExpense);
+  const annual_expenses = round24(itemTotals.annual_expenses + derivedMonthlyExpense * 12);
+  const { one_off_items, ...itemTotalsRest } = itemTotals;
+  const totals = {
+    ...itemTotalsRest,
+    monthly_expenses,
+    annual_expenses
+  };
+  let monthly_debt_service = 0;
+  let monthly_principal = 0;
+  let monthly_interest = 0;
+  for (const l of liabilities ?? []) {
+    const meta = liabilityTypeMeta(l.liability_type);
+    if (!meta || meta.installment_category == null)
+      continue;
+    const est = estimateLoan(l, today);
+    monthly_debt_service += est.monthly_payment;
+    monthly_principal += est.principal_monthly;
+    monthly_interest += est.interest_monthly;
+  }
+  let monthly_premiums = 0;
+  for (const item of premiumItems)
+    monthly_premiums += item.monthly_amount;
+  return {
+    totals,
+    derived,
+    superseded,
+    monthly_debt_service: round24(monthly_debt_service),
+    monthly_principal: round24(monthly_principal),
+    monthly_interest: round24(monthly_interest),
+    monthly_premiums: round24(monthly_premiums),
+    source: "items",
+    monthly_employee_epf: statutory.employee_epf_monthly,
+    monthly_employer_epf: statutory.employer_epf_monthly,
+    monthly_socso_eis: statutory.socso_eis_monthly,
+    one_off_items
   };
 }
 
@@ -1020,13 +1517,27 @@ export {
   CASHFLOW_CATEGORIES,
   CASHFLOW_GROUPS,
   CATEGORY_BY_CODE,
+  EIS_EMPLOYEE_RATE,
   EPF_ASSET_TYPES,
+  EPF_EMPLOYEE_RATE,
+  EPF_EMPLOYEE_RATE_SENIOR,
+  EPF_EMPLOYER_RATE_HIGH,
+  EPF_EMPLOYER_RATE_LOW,
+  EPF_EMPLOYER_RATE_SENIOR,
+  EPF_EMPLOYER_WAGE_THRESHOLD,
   LEGACY_CATEGORY_MAP,
   LIABILITY_TYPES,
   LIQUID_ASSET_TYPES,
   LOAN_DEFAULTS,
+  SOCSO_EIS_WAGE_CEILING,
+  SOCSO_EMPLOYEE_RATE,
+  STATUTORY_NOTE,
+  STATUTORY_SENIOR_AGE,
   TRANSFER_CATEGORY_CODES,
+  activeItems,
   allocationBucketOf,
+  annualizeItems,
+  annualizeItemsByCategory,
   assetClassOf,
   assetTypeLabel,
   assetTypeMeta,
@@ -1036,19 +1547,26 @@ export {
   classifyCashflowRow,
   deriveLoanItems,
   derivePremiumItems,
+  deriveStatutoryItems,
+  endItem,
   estimateLoan,
   groupOf,
+  isActiveAt,
   isLiquid,
   isRetirementCapital,
   isSuperseded,
   isTransferCategory,
+  itemMonthlyAmount,
+  itemsFromMonthRows,
   levelUpAsset,
   levelUpLiabilityType,
   liabilityTypeLabel,
   liabilityTypeMeta,
   liquidityLevel,
+  monthStart,
   planCashflow,
   premiumCategoryOf,
   resolveCategory,
+  reviseItem,
   wealthEffectOf
 };

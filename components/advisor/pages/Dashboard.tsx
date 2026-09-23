@@ -40,13 +40,20 @@ export default function Dashboard() {
 
       const clientIds = (cls || []).map((c: any) => c.id);
       if (clientIds.length > 0) {
-        const [{ data: cf }, { data: a }, { data: ip }] = await Promise.all([
+        const [{ data: cf }, { data: ci }, { data: a }, { data: ip }] = await Promise.all([
           supabase.from('cashflow_entries').select('client_id').in('client_id', clientIds),
+          // Standing items (P2b 计划) count as having cash flow too — a client
+          // whose plan lives entirely in cashflow_items should not be flagged
+          // as an incomplete profile just because cashflow_entries is empty.
+          supabase.from('cashflow_items').select('client_id').in('client_id', clientIds),
           supabase.from('assets').select('client_id').in('client_id', clientIds),
           supabase.from('insurance_policies').select('client_id').in('client_id', clientIds),
         ]);
 
-        const hasCashflow = new Set((cf || []).map((r: any) => r.client_id));
+        const hasCashflow = new Set([
+          ...(cf || []).map((r: any) => r.client_id),
+          ...(ci || []).map((r: any) => r.client_id),
+        ]);
         const hasAssets = new Set((a || []).map((r: any) => r.client_id));
         const hasInsurance = new Set((ip || []).map((r: any) => r.client_id));
 

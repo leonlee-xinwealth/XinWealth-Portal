@@ -18,25 +18,52 @@ export default function ReviewTab({ client, clientId, onNavigateTab }: { client:
   const [assets, setAssets] = useState<any[]>([]);
   const [liabilities, setLiabilities] = useState<any[]>([]);
   const [cashflow, setCashflow] = useState<any[]>([]);
+  // Standing items (P2b 常设项目/计划) — their own needs_review rows join the
+  // same 待分类队列 as cashflow_entries, clearly labelled so an advisor knows
+  // which table a "confirm" will write back to.
+  const [items, setItems] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [openSection, setOpenSection] = useState<string | null>('profile');
+  const [openSection, setOpenSection] = useState<string | null>('review_queue');
+  const [resolveDrafts, setResolveDrafts] = useState<Record<string, string>>({});
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      const [{ data: a }, { data: l }, { data: e }, { data: c }] = await Promise.all([
-        supabase.from('assets').select('*').eq('client_id', clientId).order('asset_type'),
-        supabase.from('liabilities').select('*').eq('client_id', clientId).order('liability_type'),
-        supabase.from('cashflow_entries').select('*').eq('client_id', clientId).order('direction').order('category'),
-        supabase.from('cashflow_categories').select('*').order('sort_order'),
-      ]);
-      setAssets(a || []); setLiabilities(l || []); setCashflow(e || []); setCategories(c || []);
-      setLoading(false);
-    }
-    load();
-  }, [clientId]);
+  async function load() {
+    const [{ data: a }, { data: l }, { data: e }, { data: i }, { data: c }] = await Promise.all([
+      supabase.from('assets').select('*').eq('client_id', clientId).order('asset_type'),
+      supabase.from('liabilities').select('*').eq('client_id', clientId).order('liability_type'),
+      supabase.from('cashflow_entries').select('*').eq('client_id', clientId).order('direction').order('category'),
+      supabase.from('cashflow_items').select('*').eq('client_id', clientId).order('direction').order('category'),
+      supabase.from('cashflow_categories').select('*').order('sort_order'),
+    ]);
+    setAssets(a || []); setLiabilities(l || []); setCashflow(e || []); setItems(i || []); setCategories(c || []);
+    setLoading(false);
+  }
+  useEffect(() => { load(); }, [clientId]);
 
   const catLabel = (code: string) => { const c = categories.find(x => x.code === code); if (!c) return code; return language === 'zh' && c.label_zh ? c.label_zh : c.label; };
+
+  const pendingEntries = cashflow.filter(e => e.needs_review);
+  const pendingItems = items.filter(i => i.needs_review);
+  const pendingCount = pendingEntries.length + pendingItems.length;
+
+  // Resolving = picking the right category and saving; clears needs_review on
+  // whichever table the row actually lives in (决策 4 in the P2b design: an
+  // item's review is settled on cashflow_items, never on cashflow_entries).
+  async function resolvePending(row: any, table: 'cashflow_entries' | 'cashflow_items') {
+    const category = resolveDrafts[row.id] ?? row.category;
+    if (!category) return;
+    setResolvingId(row.id);
+    await supabase.from(table).update({ category, needs_review: false, review_reason: null }).eq('id', row.id);
+    setResolvingId(null);
+    setResolveDrafts(prev => {
+      if (!(row.id in prev)) return prev;
+      const next = { ...prev };
+      delete next[row.id];
+      return next;
+    });
+    load();
+  }
   const monthly = (e: any) => { const m: any = {monthly:1,quarterly:1/3,semi_annual:1/6,annual:1/12,one_off:0}; return e.amount * (m[e.frequency]??1); };
   const inflows = cashflow.filter(e => e.direction === 'inflow');
   const outflows = cashflow.filter(e => e.direction === 'outflow');
@@ -54,6 +81,43 @@ export default function ReviewTab({ client, clientId, onNavigateTab }: { client:
       <p className="text-xs text-slate-400 mb-2">
         {t('Go through each section with the client and confirm everything is correct. Use the links to jump to a tab and fix anything wrong.', '请与客户逐项核对以下资料是否正确。如有错误，可点击链接跳转到对应页面修改。')}
       </p>
+
+      <Section id="review_queue" open={openSection} setOpen={setOpenSection} icon="🏷️" title={t('Needs Review','待分类队列')} count={pendingCount} onEdit={() => onNavigateTab('cashflow')} t={t}>
+        {pendingCount === 0 ? (
+          <div className="py-6 text-center text-emerald-500 text-sm">✓ {t('Nothing pending classification.','没有待分类的项目。')}</div>
+        ) : (
+          <>
+            {pendingItems.map(row => (
+              <PendingRow
+                key={`item-${row.id}`}
+                row={row}
+                badge={t('Standing item','常设项目')}
+                categories={categories}
+                language={language}
+                t={t}
+                resolving={resolvingId === row.id}
+                draftValue={resolveDrafts[row.id]}
+                onDraftChange={(v: string) => setResolveDrafts(p => ({ ...p, [row.id]: v }))}
+                onResolve={() => resolvePending(row, 'cashflow_items')}
+              />
+            ))}
+            {pendingEntries.map(row => (
+              <PendingRow
+                key={`entry-${row.id}`}
+                row={row}
+                badge={null}
+                categories={categories}
+                language={language}
+                t={t}
+                resolving={resolvingId === row.id}
+                draftValue={resolveDrafts[row.id]}
+                onDraftChange={(v: string) => setResolveDrafts(p => ({ ...p, [row.id]: v }))}
+                onResolve={() => resolvePending(row, 'cashflow_entries')}
+              />
+            ))}
+          </>
+        )}
+      </Section>
 
       <Section id="profile" open={openSection} setOpen={setOpenSection} icon="👤" title={t('Profile','个人资料')} onEdit={() => onNavigateTab('profile')} t={t}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -175,6 +239,40 @@ const ReviewRow = ({ title, sub, value, color }: any) => (
     <span className={`text-sm font-semibold ${color}`}>{value}</span>
   </div>
 );
+// One row of the 待分类队列 (Needs Review queue): a category picker plus a
+// confirm button. `badge` marks rows sourced from cashflow_items (常设项目)
+// so the advisor knows resolving it writes cashflow_items, not cashflow_entries.
+const PendingRow = ({ row, badge, categories, language, t, resolving, draftValue, onDraftChange, onResolve }: any) => {
+  const opts = categories.filter((c: any) => c.direction === row.direction);
+  const label = row.name || row.source_note || (row.direction === 'inflow' ? t('Income','收入') : t('Expense','支出'));
+  return (
+    <div className="flex items-center justify-between gap-2 py-2.5 border-b border-slate-50 last:border-0">
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-xin-blue flex items-center gap-1.5 flex-wrap">
+          <span className="truncate">{label}</span>
+          {badge && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 shrink-0">{badge}</span>}
+        </div>
+        <div className="text-xs text-amber-600 truncate">{row.review_reason || t('Needs review','待分类')}</div>
+      </div>
+      <select
+        value={draftValue ?? row.category}
+        onChange={e => onDraftChange(e.target.value)}
+        className="text-xs px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg shrink-0 max-w-[9rem]"
+      >
+        {opts.map((c: any) => (
+          <option key={c.code} value={c.code}>{language === 'zh' && c.label_zh ? c.label_zh : c.label}</option>
+        ))}
+      </select>
+      <button
+        onClick={onResolve}
+        disabled={resolving}
+        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-xin-blue text-white disabled:opacity-50 shrink-0"
+      >
+        {resolving ? '...' : t('Confirm','确认')}
+      </button>
+    </div>
+  );
+};
 const Total = ({ label, value, color }: any) => (
   <div className="flex items-center justify-between pt-2 mt-1 border-t border-slate-100">
     <span className="text-xs font-semibold text-slate-500">{label}</span>

@@ -9,6 +9,7 @@
 import type { CfpFinancials } from "../_shared/insurance/mapping.ts";
 import type { DerivedItem } from "../_shared/finance/derived.ts";
 import type { RateType } from "../_shared/finance/loans.ts";
+import type { StandingItem } from "../_shared/cashflow/items.ts";
 
 export type SectionType =
   | "cashflow_planning"
@@ -120,6 +121,12 @@ export interface CfpClient {
   retirement_age: number | null;
   has_epf_account: boolean;
   has_prs_account: boolean;
+  /** P2b 决策 6: `clients.has_epf` — the client is a salaried employee whose
+   *  pay runs through EPF/SOCSO/EIS, as opposed to `has_epf_account` above
+   *  (merely "an EPF account number is on file"). Only when this is `true`
+   *  does planCashflow derive the statutory items; `null`/`false`/unset never
+   *  guesses "yes". */
+  has_epf: boolean | null;
 }
 
 /** One spouse's own figures, kept alongside the merged household view for the
@@ -132,6 +139,10 @@ export interface PersonSlice {
   assets: AssetRow[];
   liabilities: LiabilityRow[];
   policies: CfpPolicyRow[];
+  /** P2b: this spouse's own standing items — still tagged with their own
+   *  client_id after the household merge, so per-employee statutory (决策 6)
+   *  can group them back apart. */
+  items: StandingItem[];
 }
 
 /** A row present on both spouses with identical type+amount — almost always the
@@ -161,6 +172,10 @@ export interface CfpData {
   /** latest snapshot_month only */
   holdings: HoldingRow[];
   goals: ClientGoalRow[];
+  /** P2b 决策 1: every standing item, every version — the plan. Empty for a
+   *  client who has never used items, in which case planCashflow falls back
+   *  to averaging `cashflow` actuals (source:'actuals'). */
+  items: StandingItem[];
   /** present only on joint household reports */
   household?: {
     primary: PersonSlice;
@@ -227,6 +242,33 @@ export interface FinancialBaseline {
   monthly_income: number;
   monthly_essential_expenses: number;
   annual_surplus: number;
+  /** P2b 决策 1: which of cashflow_items / cashflow_entries every figure
+   *  above was built from. */
+  cashflow_source: "items" | "actuals";
+  /** P2b 决策 6: employee EPF — a transfer (O1), already excluded from
+   *  annual_expenses; kept here so retirement/tax can use the exact
+   *  statutory figure instead of re-deriving it. 0 when has_epf isn't true. */
+  monthly_employee_epf: number;
+  /** P2b 决策 6: employer EPF — never in the client's own cash flow at all
+   *  (it doesn't reach their pocket), surfaced only for net-worth reconciliation. */
+  monthly_employer_epf: number;
+  /** P2b 决策 6: SOCSO + EIS — a real expense (O9), already folded into
+   *  annual_expenses like any other derived item. */
+  monthly_socso_eis: number;
+  /** P2b 决策 6: annual_surplus minus the employee EPF that's forced savings
+   *  and can't be redirected — what the budget waterfall actually allocates.
+   *  Equals annual_surplus when there's no statutory EPF (monthly_employee_epf
+   *  is 0 on the actuals path and whenever has_epf isn't true). */
+  annual_disposable_surplus: number;
+  /** P2b 决策 4: one_off items near "now"; always empty on the actuals path
+   *  (periods.ts has no such concept). */
+  one_off_items: StandingItem[];
+  /** P2b: the 'YYYY-MM-01' month items were evaluated "as of" when
+   *  cashflow_source is 'items' (null on the actuals path). Threaded through
+   *  so a module needing an items-path breakdown (modules/cashflow/calc.ts)
+   *  re-filters the SAME active items this baseline was built from, instead
+   *  of a fresh `new Date()` that could disagree with it. */
+  items_as_of: string | null;
   // emergency fund (resolves the double-count coupling with insurance CNA)
   emergency_fund_need_low: number;
   emergency_fund_need_high: number;

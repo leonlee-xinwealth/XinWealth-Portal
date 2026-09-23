@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
-import { fmtRM, safeNumber } from '../utils/finance';
+import { fmtRM, planAnnualIncomeExpenses, safeNumber } from '../utils/finance';
 import {
-  annualizeCashflow, defaultBasis, type PeriodRow,
+  defaultBasis, type PeriodRow,
 } from '../../../supabase/functions/_shared/cashflow/periods';
+import type { LiabilityRow, PolicyRow } from '../../../supabase/functions/_shared/finance/derived';
+import type { StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
 
 type Row = {
   label: string;
@@ -36,17 +38,29 @@ export default function InsuranceGapPanel({ clientId, refreshKey }: { clientId: 
     setLoading(true);
     setErr('');
     try {
-      const [{ data: cashflow, error: cErr }, { data: policies, error: pErr }] = await Promise.all([
-        supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category').eq('client_id', clientId),
-        supabase.from('insurance_policies').select('sum_assured, policy_type, end_date, policy_riders(category, sum_assured, room_board_daily, annual_limit)').eq('client_id', clientId),
+      const [{ data: cashflow, error: cErr }, { data: policies, error: pErr }, { data: liabilities, error: lErr }, { data: items, error: iErr }, { data: clientRow, error: clErr }] = await Promise.all([
+        supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category, linked_asset_id').eq('client_id', clientId),
+        supabase.from('insurance_policies').select('id, policy_type, plan_name, provider, premium, premium_frequency, end_date, sum_assured, policy_riders(category, sum_assured, room_board_daily, annual_limit)').eq('client_id', clientId),
+        supabase.from('liabilities').select('id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, remaining_months, rate_type, original_principal, end_date').eq('client_id', clientId),
+        supabase.from('cashflow_items').select('*').eq('client_id', clientId),
+        supabase.from('clients').select('has_epf, date_of_birth').eq('id', clientId).maybeSingle(),
       ]);
-      if (cErr || pErr) throw (cErr || pErr);
+      if (cErr || pErr || lErr || iErr || clErr) throw (cErr || pErr || lErr || iErr || clErr);
 
-      // Same 口径 as the CFP report and the health score: average the months on
-      // record rather than treating each row as a standing monthly commitment.
+      // Same 口径 as the CFP report and the health score: read the plan
+      // (cashflow_items when the client has any, otherwise the months on
+      // record averaged) rather than treating each row as a standing monthly
+      // commitment — spec 2026-09-25-cfp-p2b decision 1.
       const rows = (cashflow || []) as PeriodRow[];
-      const monthlyIncome = annualizeCashflow(rows, defaultBasis(rows)).monthly_income;
-      const incomeAnnual = monthlyIncome > 0 ? monthlyIncome * 12 : null;
+      const { annualIncome: incomeAnnualRaw } = planAnnualIncomeExpenses({
+        rows,
+        liabilities: (liabilities || []) as LiabilityRow[],
+        policies: (policies || []) as PolicyRow[],
+        items: (items || []) as StandingItem[],
+        basis: defaultBasis(rows),
+        client: { has_epf: clientRow?.has_epf, date_of_birth: clientRow?.date_of_birth },
+      });
+      const incomeAnnual = incomeAnnualRaw > 0 ? incomeAnnualRaw : null;
       setAnnualIncome(incomeAnnual);
 
       const activePolicies = (policies || []).filter((p: any) => !p.end_date || p.end_date >= today);

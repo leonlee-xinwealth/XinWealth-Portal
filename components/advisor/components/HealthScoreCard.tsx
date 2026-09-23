@@ -10,6 +10,7 @@ import { isLiquid } from '../../../supabase/functions/_shared/taxonomy/balance';
 import {
   planCashflow, type LiabilityRow, type PolicyRow,
 } from '../../../supabase/functions/_shared/finance/derived';
+import type { StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
 
 type Tone = 'good' | 'warn' | 'bad' | 'na';
 
@@ -48,14 +49,16 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
     setErr('');
     try {
       const today = new Date().toISOString().split('T')[0];
-      const [{ data: assets, error: aErr }, { data: liabilities, error: lErr }, { data: cashflow, error: cErr }, { data: policies, error: pErr }] = await Promise.all([
+      const [{ data: assets, error: aErr }, { data: liabilities, error: lErr }, { data: cashflow, error: cErr }, { data: policies, error: pErr }, { data: items, error: iErr }, { data: clientRow, error: clErr }] = await Promise.all([
         supabase.from('assets').select('current_value, asset_type').eq('client_id', clientId),
         supabase.from('liabilities').select('id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, remaining_months, rate_type, original_principal, end_date').eq('client_id', clientId),
         supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category').eq('client_id', clientId),
         supabase.from('insurance_policies').select('id, policy_type, plan_name, provider, premium, premium_frequency, sum_assured, end_date').eq('client_id', clientId),
+        supabase.from('cashflow_items').select('*').eq('client_id', clientId),
+        supabase.from('clients').select('has_epf, date_of_birth').eq('id', clientId).maybeSingle(),
       ]);
 
-      const combinedError = aErr || lErr || cErr || pErr;
+      const combinedError = aErr || lErr || cErr || pErr || iErr || clErr;
       if (combinedError) throw combinedError;
 
       // A row records ONE MONTH'S actual figure, so the run-rate these ratios
@@ -66,10 +69,20 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
       // installments/premiums a liability or policy implies — those never
       // live in cashflow_entries (spec 2026-09-24-cfp-p2a decision 1), so the
       // old plain monthly_payment sum silently undercounted debt service.
+      // When the client has standing items (P2b), the plan is read from those
+      // instead of averaged actuals — see _shared/finance/derived.ts decision 1.
       const rows = (cashflow || []) as PeriodRow[];
       const liabilityRows = (liabilities || []) as LiabilityRow[];
       const policyRows = (policies || []) as PolicyRow[];
-      const plan = planCashflow({ rows, liabilities: liabilityRows, policies: policyRows, basis: defaultBasis(rows) });
+      const itemRows = (items || []) as StandingItem[];
+      const plan = planCashflow({
+        rows,
+        liabilities: liabilityRows,
+        policies: policyRows,
+        basis: defaultBasis(rows),
+        items: itemRows,
+        client: { has_epf: clientRow?.has_epf, date_of_birth: clientRow?.date_of_birth },
+      });
       const monthlyIncome = plan.totals.monthly_income;
       const monthlyExpenses = plan.totals.monthly_expenses;
       const monthlySurplus = monthlyIncome - monthlyExpenses;

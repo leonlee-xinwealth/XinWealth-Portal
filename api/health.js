@@ -2,7 +2,7 @@ import { applyCors, configError, getAuthUser, supabaseAdmin } from './_lib/supab
 import { assetCategory, cashflowLabel } from './_lib/portalLabels.js';
 import { categoryLabel, isTransferCategory } from './_lib/taxonomy.mjs';
 import {
-  MONTH_NAMES, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear,
+  MONTH_NAMES, buildCurrentPlan, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear,
 } from './_lib/portalDerived.js';
 
 const monthName = (dateStr) => {
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
 
   const { data: clientRow, error: clientErr } = await supabaseAdmin
     .from('clients')
-    .select('id')
+    .select('id, has_epf, date_of_birth')
     .ilike('email', email)
     .maybeSingle();
 
@@ -54,7 +54,8 @@ export default async function handler(req, res) {
       expenses: [],
       investments: [],
       insurances: [],
-      snapshots: []
+      snapshots: [],
+      current: null
     });
   }
 
@@ -66,14 +67,18 @@ export default async function handler(req, res) {
     { data: cashflows, error: cashflowErr },
     { data: insurances, error: insuranceErr },
     { data: snapshots, error: snapshotsErr },
-    { data: holdings, error: holdingsErr }
+    { data: holdings, error: holdingsErr },
+    { data: items, error: itemsErr }
   ] = await Promise.all([
     supabaseAdmin.from('assets').select('*').eq('client_id', clientId),
     supabaseAdmin.from('liabilities').select('*').eq('client_id', clientId),
     supabaseAdmin.from('cashflow_entries').select('*').eq('client_id', clientId),
     supabaseAdmin.from('insurance_policies').select('*').eq('client_id', clientId),
     supabaseAdmin.from('health_snapshots').select('*').eq('client_id', clientId),
-    supabaseAdmin.from('portfolio_holdings').select('*').eq('client_id', clientId)
+    supabaseAdmin.from('portfolio_holdings').select('*').eq('client_id', clientId),
+    // Standing items (P2b 常设项目) — when present, they're what "current"
+    // ratios/position are read from below, not the latest recorded month.
+    supabaseAdmin.from('cashflow_items').select('*').eq('client_id', clientId)
   ]);
 
   if (assetsErr) return res.status(500).json({ error: 'Failed to fetch assets', details: assetsErr.message });
@@ -82,6 +87,7 @@ export default async function handler(req, res) {
   if (insuranceErr) return res.status(500).json({ error: 'Failed to fetch insurance', details: insuranceErr.message });
   if (snapshotsErr) return res.status(500).json({ error: 'Failed to fetch snapshots', details: snapshotsErr.message });
   if (holdingsErr) return res.status(500).json({ error: 'Failed to fetch holdings', details: holdingsErr.message });
+  if (itemsErr) return res.status(500).json({ error: 'Failed to fetch cashflow items', details: itemsErr.message });
 
   const assetRecords = (assets || []).map((a) => {
     if (a?.metadata && typeof a.metadata === 'object' && a.metadata.is_investment) return null;

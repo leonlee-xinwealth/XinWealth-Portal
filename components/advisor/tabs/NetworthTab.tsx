@@ -7,6 +7,7 @@ import {
   liabilityTypeLabel, liquidityLevel,
 } from '../../../supabase/functions/_shared/taxonomy/balance';
 import { estimateLoan } from '../../../supabase/functions/_shared/finance/loans';
+import { isActiveAt, itemMonthlyAmount, type StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
 import { AlertTriangle } from 'lucide-react';
 
 // Exported so pdf/cfpReport/labels/__tests__/enums.test.ts can assert the
@@ -37,6 +38,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   const lang: 'zh' | 'en' = language === 'zh' ? 'zh' : 'en';
   const [assets, setAssets] = useState<any[]>([]);
   const [liabilities, setLiabilities] = useState<any[]>([]);
+  const [items, setItems] = useState<StandingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'asset'|'liability'|null>(null);
   const [aForm, setAForm] = useState({ asset_type:'', name:'', institution:'', current_value:'', cost_value:'', ownership_type:'sole', purpose:'', ownership_pct:'100' });
@@ -49,13 +51,36 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   const [ok, setOk] = useState(false);
 
   async function load() {
-    const [{ data: a }, { data: l }] = await Promise.all([
+    const [{ data: a }, { data: l }, { data: it }] = await Promise.all([
       supabase.from('assets').select('*').eq('client_id', clientId).order('asset_type'),
       supabase.from('liabilities').select('*').eq('client_id', clientId).order('liability_type'),
+      supabase.from('cashflow_items').select('*').eq('client_id', clientId),
     ]);
-    setAssets(a || []); setLiabilities(l || []); setLoading(false);
+    setAssets(a || []); setLiabilities(l || []); setItems((it || []) as StandingItem[]); setLoading(false);
   }
   useEffect(() => { load(); }, [clientId]);
+
+  // Spec 2026-09-25-cfp-p2b decision 7: an asset's row surfaces the net monthly
+  // cashflow its links imply — standing items pointed at it (rent, dividends,
+  // its own upkeep) minus the estimated installment of any liability financing
+  // it (the loan payment isn't "spending against the asset" in isolation, but
+  // netting it here is what tells an advisor at a glance whether this asset is
+  // cash-flow positive). Returns null (hidden) when nothing links to it.
+  function linkedCashflowForAsset(assetId: string): number | null {
+    const now = new Date();
+    const linkedItems = items.filter(i => i.linked_asset_id === assetId && isActiveAt(i, now));
+    const linkedLiabilities = liabilities.filter(l => l.linked_asset_id === assetId);
+    if (linkedItems.length === 0 && linkedLiabilities.length === 0) return null;
+    let net = 0;
+    for (const it of linkedItems) {
+      const monthly = itemMonthlyAmount(it);
+      net += it.direction === 'inflow' ? monthly : -monthly;
+    }
+    for (const l of linkedLiabilities) {
+      net -= estimateLoan(l as any).monthly_payment;
+    }
+    return net;
+  }
 
   async function addAsset() {
     if (!aForm.name || !aForm.current_value) return;
@@ -134,11 +159,34 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
       </div>
       <div className="grid grid-cols-2 gap-4">
         <NwTable title={t('Assets','资产')} color="text-emerald-600" addLabel={t('Add Asset','添加资产')} onAdd={() => setModal('asset')}>
-          {assets.map(a => editing?.table==='assets' && editing.id===a.id ? (
-            <AssetEditRow key={a.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} />
-          ) : (
-            <Item key={a.id} title={a.name} sub={assetTypeLabel(a.asset_type, lang) + (a.institution ? ` · ${a.institution}` : '') + (Number(a.ownership_pct ?? 100) < 100 ? ` · ${Number(a.ownership_pct)}%` : '')} flag={a.needs_review ? (a.review_reason || t('Needs review','待确认')) : null} value={fmt(a.current_value)} color="text-emerald-600" onEdit={() => startEditAsset(a)} onDel={() => del('assets',a.id)} />
-          ))}
+          {assets.map(a => {
+            if (editing?.table==='assets' && editing.id===a.id) {
+              return <AssetEditRow key={a.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} />;
+            }
+            // Net monthly cashflow linked to this asset (spec 2026-09-25-cfp-p2b
+            // decision 7) — hidden entirely when nothing links to the asset.
+            const linked = linkedCashflowForAsset(a.id);
+            return (
+              <Item
+                key={a.id}
+                title={a.name}
+                sub={assetTypeLabel(a.asset_type, lang) + (a.institution ? ` · ${a.institution}` : '') + (Number(a.ownership_pct ?? 100) < 100 ? ` · ${Number(a.ownership_pct)}%` : '')}
+                flag={a.needs_review ? (a.review_reason || t('Needs review','待确认')) : null}
+                value={fmt(a.current_value)}
+                color="text-emerald-600"
+                onEdit={() => startEditAsset(a)}
+                onDel={() => del('assets',a.id)}
+                extra={linked != null ? (
+                  <div className="mt-0.5 text-[11px] text-slate-400">
+                    {t('Linked cashflow','关联现金流')}{' '}
+                    <span className={`font-semibold ${linked >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                      {linked >= 0 ? '+' : '−'}RM {fmt(Math.abs(linked))}{t('/mo','/月')}
+                    </span>
+                  </div>
+                ) : null}
+              />
+            );
+          })}
           {assets.length > 0 && <Total label={t('Total','合计')} value={fmt(totalA)} color="text-emerald-600" />}
         </NwTable>
         <NwTable title={t('Liabilities','负债')} color="text-red-500" addLabel={t('Add Liability','添加负债')} onAdd={() => setModal('liability')}>
