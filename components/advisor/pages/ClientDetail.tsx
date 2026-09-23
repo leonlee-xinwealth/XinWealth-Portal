@@ -10,6 +10,7 @@ import ReviewTab from '../tabs/ReviewTab';
 import CashflowTab from '../tabs/CashflowTab';
 import NetworthTab from '../tabs/NetworthTab';
 import InsuranceTab from '../tabs/InsuranceTab';
+import MonitorTab from '../tabs/MonitorTab';
 import ActivityTab from '../tabs/ActivityTab';
 import FormKitTab from '../tabs/FormKitTab';
 import CfpTab from '../tabs/CfpTab';
@@ -18,9 +19,9 @@ import HealthScoreCard from '../components/HealthScoreCard';
 import { fetchFamilyRelations, type FamilyRelation } from '../FamilyLinkCard';
 import { getCaseTemplate, CASE_TYPE_LABELS } from '../cases/caseTemplates';
 
-type Tab = 'activity' | 'profile' | 'review' | 'cashflow' | 'networth' | 'insurance' | 'portfolio' | 'cfp' | 'formkit';
+type Tab = 'activity' | 'profile' | 'review' | 'cashflow' | 'networth' | 'insurance' | 'portfolio' | 'monitor' | 'cfp' | 'formkit';
 
-const TABS: Tab[] = ['activity', 'profile', 'review', 'cashflow', 'networth', 'insurance', 'portfolio', 'cfp', 'formkit'];
+const TABS: Tab[] = ['activity', 'profile', 'review', 'cashflow', 'networth', 'insurance', 'portfolio', 'monitor', 'cfp', 'formkit'];
 
 /** ?tab= lets another page hand the advisor back to a specific tab — the CFP
  *  review route returns here, and dropping them on Activity would make them
@@ -198,6 +199,7 @@ export default function ClientDetail() {
     { key: 'networth', en: 'Net Worth', zh: '净资产', icon: '📈' },
     { key: 'insurance', en: 'Insurance', zh: '保险', icon: '🛡️' },
     { key: 'portfolio', en: 'Portfolio', zh: '投资组合', icon: '📊' },
+    { key: 'monitor', en: 'Monitor', zh: '监控', icon: '📡' },
     { key: 'cfp', en: 'CFP Report', zh: 'CFP 报告', icon: '🧭' },
     { key: 'formkit', en: 'Form Kit', zh: '表格资料', icon: '📋' },
   ];
@@ -320,6 +322,7 @@ export default function ClientDetail() {
       {tab === 'networth' && <NetworthTab clientId={client.id} />}
       {tab === 'insurance' && <InsuranceTab clientId={client.id} />}
       {tab === 'portfolio' && <PortfolioTab clientId={client.id} />}
+      {tab === 'monitor' && <MonitorTab clientId={client.id} />}
       {tab === 'cfp' && <CfpTab clientId={client.id} advisorId={client.advisor_id} />}
       {tab === 'formkit' && <FormKitTab client={client} />}
 
