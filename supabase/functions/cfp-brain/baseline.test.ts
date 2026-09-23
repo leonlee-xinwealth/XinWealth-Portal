@@ -210,10 +210,17 @@ Deno.test("asset_quality is computed additively — quadrant reflects an asset's
   assertEquals(b.asset_quality!.assets.length, 1);
   assertEquals(b.asset_quality!.assets[0].asset_id, "house-1");
   // class D (property), no linked items/liabilities and no valuation history:
-  // net cash flow 0, value change treated as 0 (not a vehicle, no history) —
-  // both >= 0, so the quadrant rule (assetQuality.ts quadrantFor) says "productive".
-  assertEquals(b.asset_quality!.assets[0].quadrant, "productive");
+  // withheld from a quadrant entirely rather than defaulting to "productive"
+  // on a net cash flow of 0 (prod incident fix — assetQuality.ts 决策 3).
+  assertEquals(b.asset_quality!.assets[0].quadrant, null);
+  assertEquals(b.asset_quality!.assets[0].unlinked, true);
   assert(b.asset_quality!.assets[0].notes.includes("缺少估值历史"));
+  assert(
+    b.asset_quality!.assets[0].notes.includes(
+      "自用资产通常有持有成本（贷款、保险、保养、税费），请先关联相关贷款或收支",
+    ),
+  );
+  assertEquals(b.asset_quality!.by_quadrant.unlinked, { count: 1, value: 500000 });
 });
 
 Deno.test("asset transfers are excluded from income and expenses (小会计口径)", () => {

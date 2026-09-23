@@ -173,6 +173,83 @@ Deno.test("return_pct is null when current_value is 0", () => {
   assertEquals(r.return_pct, null);
 });
 
+// ---------------------------------------------------------------------------
+// Prod incident fix: a class D (personal use) asset with NO linked standing
+// items and NO linked liabilities was falling through to net_cash_flow_monthly
+// === 0 -> quadrantFor(0, 0) -> "productive" — a personal-use house with a
+// RM 3,298/mo mortgage that simply hadn't been linked yet was mislabeled 生财
+// 资产, and an unlinked car came out 收益但贬值. Neither has any real cash
+// flow data behind it; the fix withholds the quadrant entirely until the
+// advisor links something.
+// ---------------------------------------------------------------------------
+
+Deno.test("class D asset with zero linked items and zero linked liabilities gets no quadrant, flagged unlinked", () => {
+  const house: AssetInput = { id: "house-1", asset_type: "own_residence", current_value: 800000 };
+  const r = assessAsset(house, {}, ASOF);
+  assertEquals(r.linked_items.length, 0);
+  assertEquals(r.linked_liabilities.length, 0);
+  assertEquals(r.quadrant, null);
+  assertEquals(r.unlinked, true);
+  assert(r.notes.includes("自用资产通常有持有成本（贷款、保险、保养、税费），请先关联相关贷款或收支"));
+});
+
+Deno.test("the same house, once its mortgage is linked, gets a real quadrant again", () => {
+  const house: AssetInput = { id: "house-1", asset_type: "own_residence", current_value: 800000 };
+  const liabilities: LiabilityInput[] = [
+    {
+      id: "mortgage-1",
+      liability_type: "mortgage",
+      outstanding_balance: 600000,
+      interest_rate: 4.0,
+      monthly_payment: 3298,
+      remaining_months: 300,
+      linked_asset_id: "house-1",
+    },
+  ];
+  const r = assessAsset(house, { liabilities, valuations: [] }, ASOF);
+  assertEquals(r.linked_liabilities.length, 1);
+  assertEquals(r.net_cash_flow_monthly, -3298);
+  assertEquals(r.unlinked, false);
+  // no offsetting inflow -> cash negative; no valuation history -> value
+  // change treated as 0 (>= 0) -> appreciating_cash_consuming.
+  assertEquals(r.quadrant, "appreciating_cash_consuming");
+  assert(!r.notes.includes("自用资产通常有持有成本（贷款、保险、保养、税费），请先关联相关贷款或收支"));
+});
+
+Deno.test("an unlinked car (class D, no links) also gets no quadrant instead of defaulting to yielding_depreciating", () => {
+  const car: AssetInput = { id: "car-1", asset_type: "vehicle", current_value: 90000 };
+  const r = assessAsset(car, {}, ASOF);
+  assertEquals(r.quadrant, null);
+  assertEquals(r.unlinked, true);
+});
+
+Deno.test("class C asset with no links keeps its computed quadrant but is flagged unlinked", () => {
+  const gold: AssetInput = { id: "gold-1", asset_type: "gold", current_value: 20000 };
+  const r = assessAsset(gold, {}, ASOF);
+  assertEquals(r.linked_items.length, 0);
+  assertEquals(r.linked_liabilities.length, 0);
+  assertEquals(r.unlinked, true);
+  // 0 net cash flow, 0 value change (gold isn't a vehicle, no history) -> still classified.
+  assertEquals(r.quadrant, "productive");
+  assert(r.notes.includes("未关联任何收支"));
+});
+
+Deno.test("by_quadrant.unlinked tallies class-D unlinked assets separately from the four quadrants", () => {
+  const assets: AssetInput[] = [
+    { id: "house-1", asset_type: "own_residence", current_value: 800000 }, // unlinked D
+    { id: "car-1", asset_type: "vehicle", current_value: 90000 }, // unlinked D
+    { id: "p1", asset_type: "stock", current_value: 50000 }, // productive (has a linked item)
+  ];
+  const items: StandingItem[] = [
+    item({ direction: "inflow", category: "dividend_investment", amount: 200, linked_asset_id: "p1" }),
+  ];
+  const { assets: results, by_quadrant } = assessAssets(assets, { items }, ASOF);
+  assertEquals(results.find((r) => r.asset_id === "house-1")!.quadrant, null);
+  assertEquals(results.find((r) => r.asset_id === "car-1")!.quadrant, null);
+  assertEquals(by_quadrant.unlinked, { count: 2, value: 890000 });
+  assertEquals(by_quadrant.productive.count, 1);
+});
+
 Deno.test("an item that is not active at asOf is excluded", () => {
   const asset: AssetInput = { id: "p1", asset_type: "stock", current_value: 10000 };
   const items: StandingItem[] = [

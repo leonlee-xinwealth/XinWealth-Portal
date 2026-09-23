@@ -97,6 +97,29 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
     [assets],
   );
 
+  // Prod incident fix (assessAsset unlinked): an un-linked liability is very
+  // often exactly why a personal-use asset shows up in 「待关联」 below —
+  // linkAsset.ts already knows which liability types finance which asset
+  // types, so surface a one-click 「关联」 suggestion instead of making the
+  // advisor go find and edit the liability manually.
+  const linkSuggestions = useMemo(() => {
+    return liabilities
+      .filter(l => !l.linked_asset_id)
+      .map(l => {
+        const assetId = defaultLinkedAssetId(l.liability_type, assets);
+        if (!assetId) return null;
+        const asset = assetById.get(assetId);
+        if (!asset) return null;
+        return { liabilityId: l.id as string, liabilityName: l.name as string, assetId, assetName: asset.name as string };
+      })
+      .filter((s): s is { liabilityId: string; liabilityName: string; assetId: string; assetName: string } => s != null);
+  }, [liabilities, assets, assetById]);
+
+  async function linkLiabilityToAsset(liabilityId: string, assetId: string) {
+    await supabase.from('liabilities').update({ linked_asset_id: assetId }).eq('id', liabilityId);
+    load();
+  }
+
   async function addAsset() {
     if (!aForm.name || !aForm.current_value) return;
     setSaving(true);
@@ -173,7 +196,14 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
         ))}
       </div>
 
-      <AssetQualityPanel assessment={assessment} assets={assets} t={t} lang={lang} />
+      <AssetQualityPanel
+        assessment={assessment}
+        assets={assets}
+        suggestions={linkSuggestions}
+        onLink={linkLiabilityToAsset}
+        t={t}
+        lang={lang}
+      />
 
       <div className="grid grid-cols-2 gap-4">
         <NwTable title={t('Assets','资产')} color="text-emerald-600" addLabel={t('Add Asset','添加资产')} onAdd={() => setModal('asset')}>
@@ -375,52 +405,122 @@ const AssetQualityExtra = ({ row, t, lang }: { row: AssetAssessment | undefined;
 // P3 决策 3 — 「资产质量」2×2 panel: rows = net monthly cashflow (≥0 top,
 // <0 bottom), columns = value change (≥0 left, <0 right), each cell listing
 // the class C/D assets that landed there plus the quadrant's totals.
-const AssetQualityPanel = ({ assessment, assets, t, lang }: {
-  assessment: ReturnType<typeof assessAssets>; assets: any[]; t: (en: string, zh: string) => string; lang: 'zh' | 'en';
+//
+// Prod incident fix: a class-D (自用) asset with nothing linked used to
+// silently default into "productive"/"yielding_depreciating" on a false 0
+// net cash flow — a house with an unlinked RM 3,298/mo mortgage read as 生财
+// 资产. assessAsset now withholds the quadrant for that case (quadrant: null,
+// unlinked: true) instead, so this panel surfaces it as its own 「待关联」
+// group rather than letting it disappear, plus one-click 「建议关联」
+// suggestions (from linkAsset.ts's defaultLinkedAssetId) for the liability
+// that's probably the missing link.
+const AssetQualityPanel = ({ assessment, assets, suggestions, onLink, t, lang }: {
+  assessment: ReturnType<typeof assessAssets>;
+  assets: any[];
+  suggestions: Array<{ liabilityId: string; liabilityName: string; assetId: string; assetName: string }>;
+  onLink: (liabilityId: string, assetId: string) => void;
+  t: (en: string, zh: string) => string;
+  lang: 'zh' | 'en';
 }) => {
-  const hasLabeled = assessment.assets.some(a => a.quadrant != null);
-  if (!hasLabeled) return null;
+  const hasLabeled = assessment.assets.some(a => a.quadrant != null || a.unlinked);
+  if (!hasLabeled && suggestions.length === 0) return null;
   const assetById = new Map(assets.map(a => [a.id, a]));
+  // Class-D assets with quadrant: null + unlinked: true — the 「待关联」
+  // group. (A class-C unlinked asset keeps its computed quadrant and still
+  // shows in the normal grid above, just flagged via its own notes.)
+  const unlinkedRows = assessment.assets.filter(a => a.unlinked && a.quadrant == null);
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-6">
       <div className="text-sm font-semibold text-xin-blue mb-3">{t('Asset Quality','资产质量')}</div>
-      <div className="grid grid-cols-2 gap-3">
-        {QUADRANT_GRID.map((q: Quadrant) => {
-          const rows = assessment.assets.filter(a => a.quadrant === q);
-          const total = assessment.by_quadrant[q];
-          const style = QUADRANT_STYLES[q];
-          return (
-            <div key={q} className={`rounded-xl p-3 ${style.bg}`}>
-              <div className={`flex items-center justify-between mb-1`}>
-                <span className={`text-xs font-bold ${style.text}`}>{quadrantLabel(q, lang)}</span>
-                <span className={`text-xs font-bold ${style.text}`}>{total.count > 0 ? `RM ${fmt(total.value)}` : '—'}</span>
+      {hasLabeled && (
+        <div className="grid grid-cols-2 gap-3">
+          {QUADRANT_GRID.map((q: Quadrant) => {
+            const rows = assessment.assets.filter(a => a.quadrant === q);
+            const total = assessment.by_quadrant[q];
+            const style = QUADRANT_STYLES[q];
+            return (
+              <div key={q} className={`rounded-xl p-3 ${style.bg}`}>
+                <div className={`flex items-center justify-between mb-1`}>
+                  <span className={`text-xs font-bold ${style.text}`}>{quadrantLabel(q, lang)}</span>
+                  <span className={`text-xs font-bold ${style.text}`}>{total.count > 0 ? `RM ${fmt(total.value)}` : '—'}</span>
+                </div>
+                <div className="text-[11px] text-slate-500 mb-2">{quadrantExplanation(q, lang)}</div>
+                {rows.length === 0 ? (
+                  <div className="text-[11px] text-slate-300">—</div>
+                ) : (
+                  <div className="space-y-0.5">
+                    {rows.map(r => {
+                      const a = assetById.get(r.asset_id);
+                      if (!a) return null;
+                      return (
+                        <div key={r.asset_id} className="flex items-center justify-between text-[11px] text-slate-600">
+                          <span className="truncate">{a.name}</span>
+                          <span className="font-semibold shrink-0 ml-2">RM {fmt(a.current_value)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {total.count > 0 && (
+                  <div className={`mt-2 pt-2 border-t border-white/60 text-[11px] font-semibold ${style.text}`}>
+                    {t('Net monthly cashflow','月净现金流')}: {total.net_cash_flow_monthly >= 0 ? '+' : '−'}RM {fmt(Math.abs(total.net_cash_flow_monthly))}
+                  </div>
+                )}
               </div>
-              <div className="text-[11px] text-slate-500 mb-2">{quadrantExplanation(q, lang)}</div>
-              {rows.length === 0 ? (
-                <div className="text-[11px] text-slate-300">—</div>
-              ) : (
-                <div className="space-y-0.5">
-                  {rows.map(r => {
-                    const a = assetById.get(r.asset_id);
-                    if (!a) return null;
-                    return (
-                      <div key={r.asset_id} className="flex items-center justify-between text-[11px] text-slate-600">
-                        <span className="truncate">{a.name}</span>
-                        <span className="font-semibold shrink-0 ml-2">RM {fmt(a.current_value)}</span>
-                      </div>
-                    );
-                  })}
+            );
+          })}
+        </div>
+      )}
+
+      {unlinkedRows.length > 0 && (
+        <div className={`rounded-xl p-3 bg-slate-50 ${hasLabeled ? 'mt-3' : ''}`}>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-bold text-slate-500">{t('Pending link','待关联')}</span>
+            <span className="text-xs font-bold text-slate-500">
+              RM {fmt(unlinkedRows.reduce((s, r) => s + (assetById.get(r.asset_id)?.current_value || 0), 0))}
+            </span>
+          </div>
+          <div className="text-[11px] text-slate-500 mb-2">
+            {t(
+              'Personal-use assets usually carry a holding cost (loan, insurance, upkeep, tax) — link it first.',
+              '自用资产通常有持有成本（贷款、保险、保养、税费），请先关联相关贷款或收支。',
+            )}
+          </div>
+          <div className="space-y-1.5">
+            {unlinkedRows.map(r => {
+              const a = assetById.get(r.asset_id);
+              if (!a) return null;
+              return (
+                <div key={r.asset_id} className="text-[11px] text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <span className="truncate">{a.name}</span>
+                    <span className="font-semibold shrink-0 ml-2">RM {fmt(a.current_value)}</span>
+                  </div>
                 </div>
-              )}
-              {total.count > 0 && (
-                <div className={`mt-2 pt-2 border-t border-white/60 text-[11px] font-semibold ${style.text}`}>
-                  {t('Net monthly cashflow','月净现金流')}: {total.net_cash_flow_monthly >= 0 ? '+' : '−'}RM {fmt(Math.abs(total.net_cash_flow_monthly))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {suggestions.length > 0 && (
+        <div className={`rounded-xl p-3 bg-blue-50/60 ${hasLabeled || unlinkedRows.length > 0 ? 'mt-3' : ''}`}>
+          <div className="text-xs font-bold text-xin-blue mb-2">{t('Suggested links','建议关联')}</div>
+          <div className="space-y-1.5">
+            {suggestions.map(s => (
+              <div key={s.liabilityId} className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
+                <span className="truncate">{s.liabilityName} → {s.assetName}</span>
+                <button
+                  onClick={() => onLink(s.liabilityId, s.assetId)}
+                  className="shrink-0 text-[10px] font-semibold px-2 py-1 rounded-lg bg-xin-blue text-white hover:opacity-90"
+                >
+                  {t('Link','关联')}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

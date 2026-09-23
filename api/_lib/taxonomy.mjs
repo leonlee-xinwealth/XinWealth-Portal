@@ -1655,6 +1655,8 @@ var QUADRANTS = [
   { id: "consuming", label_zh: "\u6D88\u8017\u578B\u8D44\u4EA7", label_en: "Consuming" }
 ];
 var NOTE_MISSING_VALUATION_HISTORY = "\u7F3A\u5C11\u4F30\u503C\u5386\u53F2";
+var NOTE_UNLINKED_PERSONAL_USE = "\u81EA\u7528\u8D44\u4EA7\u901A\u5E38\u6709\u6301\u6709\u6210\u672C\uFF08\u8D37\u6B3E\u3001\u4FDD\u9669\u3001\u4FDD\u517B\u3001\u7A0E\u8D39\uFF09\uFF0C\u8BF7\u5148\u5173\u8054\u76F8\u5173\u8D37\u6B3E\u6216\u6536\u652F";
+var NOTE_UNLINKED_INVESTMENT = "\u672A\u5173\u8054\u4EFB\u4F55\u6536\u652F";
 function round26(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
@@ -1709,13 +1711,24 @@ function assessAsset(asset, ctx, asOf) {
     effectiveValueChange = vc.annual_change;
   }
   const labeled = asset_class === "C" || asset_class === "D";
-  const quadrant = labeled ? quadrantFor(net_cash_flow_monthly, effectiveValueChange) : null;
+  const hasLinks = linked_items.length > 0 || linked_liabilities.length > 0;
+  const unlinked = labeled && !hasLinks;
+  let quadrant = labeled ? quadrantFor(net_cash_flow_monthly, effectiveValueChange) : null;
+  if (unlinked) {
+    if (asset_class === "D") {
+      quadrant = null;
+      notes.push(NOTE_UNLINKED_PERSONAL_USE);
+    } else {
+      notes.push(NOTE_UNLINKED_INVESTMENT);
+    }
+  }
   const total_return_annual = round26(net_cash_flow_monthly * 12 + effectiveValueChange);
   const return_pct = currentValue > 0 ? round4(total_return_annual / currentValue) : null;
   return {
     asset_id: asset.id,
     asset_class,
     quadrant,
+    unlinked,
     net_cash_flow_monthly,
     linked_items,
     linked_liabilities,
@@ -1733,10 +1746,16 @@ function assessAssets(assets, ctx, asOf) {
     productive: { count: 0, value: 0, net_cash_flow_monthly: 0 },
     yielding_depreciating: { count: 0, value: 0, net_cash_flow_monthly: 0 },
     appreciating_cash_consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
-    consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 }
+    consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+    unlinked: { count: 0, value: 0 }
   };
   for (let i = 0; i < list.length; i++) {
     const r = results[i];
+    if (r.unlinked && r.asset_class === "D") {
+      by_quadrant.unlinked.count += 1;
+      by_quadrant.unlinked.value = round26(by_quadrant.unlinked.value + (Number(list[i].current_value) || 0));
+      continue;
+    }
     if (r.quadrant == null)
       continue;
     const bucket = by_quadrant[r.quadrant];
@@ -2169,6 +2188,23 @@ function computeAlerts(input) {
         `${estimatedNames.length} liabilit${estimatedNames.length === 1 ? "y has" : "ies have"} an estimated interest rate (${estimatedNames.join(", ")}) \u2014 update it at the next review`
       );
     }
+  }
+  const policies = input.policies ?? [];
+  const missingPremiumCount = policies.filter((p) => {
+    const inForce = p.status == null || p.status === "in_force";
+    if (!inForce)
+      return false;
+    if (p.premium_frequency === "single_premium")
+      return false;
+    return p.premium == null || p.premium === 0;
+  }).length;
+  if (missingPremiumCount > 0) {
+    push(
+      "policy_missing_premium",
+      "medium",
+      `${missingPremiumCount} \u4EFD\u751F\u6548\u4FDD\u5355\u672A\u8BB0\u5F55\u4FDD\u8D39\uFF0C\u73B0\u91D1\u6D41\u53EF\u80FD\u5C11\u7B97`,
+      `${missingPremiumCount} in-force polic${missingPremiumCount === 1 ? "y" : "ies"} ${missingPremiumCount === 1 ? "has" : "have"} no premium recorded \u2014 cash flow may be understated`
+    );
   }
   for (const r of reviews) {
     if (r.status !== "submitted")

@@ -32,6 +32,18 @@ export const QUADRANTS: readonly QuadrantMeta[] = [
 ];
 
 const NOTE_MISSING_VALUATION_HISTORY = "缺少估值历史";
+// A class-D (personal use) asset with zero linked standing items AND zero
+// linked liabilities isn't actually cash-flow-neutral — it almost certainly
+// carries a loan, insurance, upkeep or tax that just hasn't been linked yet.
+// Labeling it "productive" (net_cash_flow 0 >= 0) would be actively wrong, so
+// this case gets no quadrant at all (决策 3 fix, prod incident: an unlinked
+// house/car defaulted to 生财资产/收益但贬值).
+const NOTE_UNLINKED_PERSONAL_USE =
+  "自用资产通常有持有成本（贷款、保险、保养、税费），请先关联相关贷款或收支";
+// A class-C (investment) asset with no links keeps its computed quadrant —
+// unlike class D, "no cash flow" is a plausible real state for e.g. gold —
+// but is still flagged so the advisor knows to check for a missed link.
+const NOTE_UNLINKED_INVESTMENT = "未关联任何收支";
 
 export interface AssetInput {
   id: string;
@@ -80,6 +92,11 @@ export interface AssetAssessment {
    *  get a 2×2 label, their "return" is interest/dividends and balance
    *  movement, not a productive-asset judgement. */
   quadrant: Quadrant | null;
+  /** true for a class C or D asset with zero linked standing items AND zero
+   *  linked liabilities — a class D one also gets `quadrant: null` (see
+   *  NOTE_UNLINKED_PERSONAL_USE); a class C one keeps its computed quadrant.
+   *  Always false for class A/B (they're never labeled either way). */
+  unlinked: boolean;
   net_cash_flow_monthly: number;
   linked_items: LinkedItemSummary[];
   linked_liabilities: LinkedLiabilitySummary[];
@@ -96,9 +113,17 @@ export interface QuadrantTotal {
   net_cash_flow_monthly: number;
 }
 
+export interface UnlinkedTotal {
+  count: number;
+  value: number;
+}
+
 export interface AssessAssetsResult {
   assets: AssetAssessment[];
-  by_quadrant: Record<Quadrant, QuadrantTotal>;
+  /** the four framework quadrants, plus `unlinked` — class-D assets with no
+   *  linked items/liabilities, which get no quadrant at all (see
+   *  AssetAssessment.unlinked). */
+  by_quadrant: Record<Quadrant, QuadrantTotal> & { unlinked: UnlinkedTotal };
 }
 
 function round2(n: number): number {
@@ -176,7 +201,21 @@ export function assessAsset(
   }
 
   const labeled = asset_class === "C" || asset_class === "D";
-  const quadrant = labeled ? quadrantFor(net_cash_flow_monthly, effectiveValueChange) : null;
+  const hasLinks = linked_items.length > 0 || linked_liabilities.length > 0;
+  const unlinked = labeled && !hasLinks;
+  let quadrant = labeled ? quadrantFor(net_cash_flow_monthly, effectiveValueChange) : null;
+
+  if (unlinked) {
+    if (asset_class === "D") {
+      // Zero-cost personal use is not a real state — don't hand out a
+      // quadrant (previously defaulted to "productive"/"yielding_depreciating"
+      // via net_cash_flow_monthly === 0) until it's actually linked.
+      quadrant = null;
+      notes.push(NOTE_UNLINKED_PERSONAL_USE);
+    } else {
+      notes.push(NOTE_UNLINKED_INVESTMENT);
+    }
+  }
 
   const total_return_annual = round2(net_cash_flow_monthly * 12 + effectiveValueChange);
   const return_pct = currentValue > 0 ? round4(total_return_annual / currentValue) : null;
@@ -185,6 +224,7 @@ export function assessAsset(
     asset_id: asset.id,
     asset_class,
     quadrant,
+    unlinked,
     net_cash_flow_monthly,
     linked_items,
     linked_liabilities,
@@ -206,15 +246,23 @@ export function assessAssets(
   const list = assets ?? [];
   const results = list.map((a) => assessAsset(a, ctx, asOf));
 
-  const by_quadrant: Record<Quadrant, QuadrantTotal> = {
+  const by_quadrant: Record<Quadrant, QuadrantTotal> & { unlinked: UnlinkedTotal } = {
     productive: { count: 0, value: 0, net_cash_flow_monthly: 0 },
     yielding_depreciating: { count: 0, value: 0, net_cash_flow_monthly: 0 },
     appreciating_cash_consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
     consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+    unlinked: { count: 0, value: 0 },
   };
 
   for (let i = 0; i < list.length; i++) {
     const r = results[i];
+    // Class-D unlinked assets carry quadrant: null — tallied into their own
+    // bucket instead of one of the four quadrants (they aren't classified).
+    if (r.unlinked && r.asset_class === "D") {
+      by_quadrant.unlinked.count += 1;
+      by_quadrant.unlinked.value = round2(by_quadrant.unlinked.value + (Number(list[i].current_value) || 0));
+      continue;
+    }
     if (r.quadrant == null) continue;
     const bucket = by_quadrant[r.quadrant];
     bucket.count += 1;

@@ -16,6 +16,9 @@ const QUADRANT_META: Record<AssetQualityQuadrant, { label: string; color: string
   consuming: { label: 'Consuming', color: 'text-red-700', bg: 'bg-red-50 border-red-200' },
 };
 const QUADRANT_ORDER: AssetQualityQuadrant[] = ['productive', 'yielding_depreciating', 'appreciating_cash_consuming', 'consuming'];
+// A personal-use asset (own_residence/vehicle/etc.) with nothing linked yet —
+// no quadrant, no cash-flow judgement, just a prompt to go link its loan.
+const UNLINKED_META = { label: 'Pending Link', color: 'text-slate-500', bg: 'bg-slate-100 border-slate-200' };
 const ALLOCATION_BUCKET_LABEL: Record<string, string> = { equity: 'Equity', bond: 'Bonds', cash: 'Cash', alternatives: 'Alternatives' };
 
 type TabType = 'assets' | 'liabilities' | 'networth';
@@ -357,6 +360,18 @@ const NetWorth: React.FC = () => {
     });
     return map;
   }, [assetQuality]);
+  // Fix: a personal-use asset with nothing linked used to fall through to
+  // quadrant "productive"/"yielding_depreciating" on a false 0 net cash flow.
+  // It now comes back as quadrant: null + unlinked: true instead — tracked
+  // here so the Details list can still flag it (待关联) rather than showing
+  // nothing at all.
+  const unlinkedAssetIds = useMemo(() => {
+    const set = new Set<string>();
+    (assetQuality?.assets || []).forEach((a) => {
+      if (a.unlinked && a.quadrant == null) set.add(a.asset_id);
+    });
+    return set;
+  }, [assetQuality]);
 
   // Pre-calculate data for Tabs 1 & 2 (Assets/Liabilities)
   const dataValues = useMemo(() => {
@@ -545,6 +560,11 @@ const NetWorth: React.FC = () => {
                                                                     {QUADRANT_META[assetQuadrantById.get(item.id)!].label}
                                                                 </span>
                                                             )}
+                                                            {activeTab === 'assets' && !assetQuadrantById.has(item.id) && unlinkedAssetIds.has(item.id) && (
+                                                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold border ${UNLINKED_META.bg} ${UNLINKED_META.color}`}>
+                                                                    {UNLINKED_META.label}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                     <div className="flex flex-col items-end">
@@ -720,8 +740,11 @@ const NetWorth: React.FC = () => {
         </div>
       </div>
 
-      {/* P3 决策 3: Asset Quality 2×2 — count/value/net cash flow per quadrant */}
-      {assetQuality && assetQuality.assets.some((a) => a.quadrant) && (
+      {/* P3 决策 3: Asset Quality 2×2 — count/value/net cash flow per quadrant.
+          Also shows a "Pending Link" tile for class-D assets with nothing
+          linked yet (quadrant withheld rather than defaulted — see
+          assetQuality.ts's unlinked fix), so those RM aren't just missing. */}
+      {assetQuality && assetQuality.assets.some((a) => a.quadrant || a.unlinked) && (
         <div className="mb-8">
           <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Asset Quality</h4>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -736,6 +759,15 @@ const NetWorth: React.FC = () => {
                 </div>
               );
             })}
+            {(assetQuality.by_quadrant?.unlinked?.count || 0) > 0 && (
+              <div className={`rounded-2xl p-4 border ${UNLINKED_META.bg}`}>
+                <p className={`text-xs font-bold ${UNLINKED_META.color}`}>{UNLINKED_META.label}</p>
+                <p className="text-lg font-extrabold text-slate-800 mt-1">{formatCurrency(assetQuality.by_quadrant.unlinked.value || 0)}</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {assetQuality.by_quadrant.unlinked.count} asset{assetQuality.by_quadrant.unlinked.count === 1 ? '' : 's'}
+                </p>
+              </div>
+            )}
           </div>
         </div>
       )}
