@@ -143,6 +143,79 @@ Deno.test("holdings count toward total assets", () => {
   assertEquals(b.total_assets, 675000);
 });
 
+// ---------------------------------------------------------------------------
+// P3 决策 1 — `assets` is the single source of truth. A holding whose account
+// has been folded into an asset (asset_id set) must not ALSO count here.
+// ---------------------------------------------------------------------------
+
+Deno.test("a holding with no matching account is legacy and still counts (today's behaviour, pre-migration)", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      investment_accounts: [],
+      holdings: [{ account_id: "acct-1", snapshot_month: "2026-07-01", instrument_code: "F1", market_value: 25000, cost_basis: 20000 }],
+    }),
+    {},
+    NOW,
+  );
+  assertEquals(b.total_assets, 675000);
+});
+
+Deno.test("a holding whose account has an asset_id is excluded — already folded into assets", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      investment_accounts: [
+        { id: "acct-1", asset_id: "asset-1", account_type: "unit_trust", prs_sub_account_a: null, prs_sub_account_b: null },
+      ],
+      holdings: [{ account_id: "acct-1", snapshot_month: "2026-07-01", instrument_code: "F1", market_value: 25000, cost_basis: 20000 }],
+    }),
+    {},
+    NOW,
+  );
+  // 650,000 base (see "ratios, net worth and demographics" above) unchanged —
+  // the holding would have added 25,000 pre-P3.
+  assertEquals(b.total_assets, 650000);
+});
+
+Deno.test("mixed: only the holding backed by a migrated account is excluded, the other (legacy) still counts", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      investment_accounts: [
+        { id: "acct-1", asset_id: "asset-1", account_type: "unit_trust", prs_sub_account_a: null, prs_sub_account_b: null },
+        { id: "acct-2", asset_id: null, account_type: "prs", prs_sub_account_a: null, prs_sub_account_b: null },
+      ],
+      holdings: [
+        { account_id: "acct-1", snapshot_month: "2026-07-01", instrument_code: "F1", market_value: 25000, cost_basis: 20000 },
+        { account_id: "acct-2", snapshot_month: "2026-07-01", instrument_code: "F2", market_value: 9000, cost_basis: 9000 },
+      ],
+    }),
+    {},
+    NOW,
+  );
+  assertEquals(b.total_assets, 659000); // 650,000 + 9,000 legacy; the 25,000 migrated one is dropped
+});
+
+Deno.test("asset_quality is computed additively — quadrant reflects an asset's linked item/liability + value history", () => {
+  const b = computeBaseline(
+    makeCfpData({
+      assets: [
+        { id: "house-1", asset_type: "property", current_value: 500000, cost_value: null, ownership_type: null },
+      ],
+      liabilities: [],
+      items: [],
+    }),
+    {},
+    NOW,
+  );
+  assert(b.asset_quality);
+  assertEquals(b.asset_quality!.assets.length, 1);
+  assertEquals(b.asset_quality!.assets[0].asset_id, "house-1");
+  // class D (property), no linked items/liabilities and no valuation history:
+  // net cash flow 0, value change treated as 0 (not a vehicle, no history) —
+  // both >= 0, so the quadrant rule (assetQuality.ts quadrantFor) says "productive".
+  assertEquals(b.asset_quality!.assets[0].quadrant, "productive");
+  assert(b.asset_quality!.assets[0].notes.includes("缺少估值历史"));
+});
+
 Deno.test("asset transfers are excluded from income and expenses (小会计口径)", () => {
   const b = computeBaseline(
     makeCfpData({

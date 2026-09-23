@@ -10,6 +10,7 @@ import type { CfpFinancials } from "../_shared/insurance/mapping.ts";
 import type { DerivedItem } from "../_shared/finance/derived.ts";
 import type { RateType } from "../_shared/finance/loans.ts";
 import type { StandingItem } from "../_shared/cashflow/items.ts";
+import type { AssessAssetsResult } from "../_shared/finance/assetQuality.ts";
 
 export type SectionType =
   | "cashflow_planning"
@@ -62,6 +63,11 @@ export interface CashflowRow {
 }
 
 export interface AssetRow {
+  /** P3: needed to match this asset against its linked standing items/
+   *  liabilities/valuations for the 2×2 (assessAssets). Optional so existing
+   *  fixtures that build AssetRow literals by hand (predating P3) keep
+   *  compiling — assessAssets treats a missing id as "matches nothing". */
+  id?: string | null;
   asset_type: string;
   current_value: number;
   cost_value: number | null;
@@ -84,6 +90,10 @@ export interface LiabilityRow {
   original_principal?: number | null;
   remaining_months?: number | null;
   rate_type?: RateType | null;
+  /** P3: which asset this liability's debt service is charged against
+   *  (assessAssets's 2×2 net-cash-flow, e.g. a mortgage against the house
+   *  it financed). Optional — predates this on most rows. */
+  linked_asset_id?: string | null;
 }
 
 /** P2a: `CfpFinancials["policies"]` (the legacy insurance-brain shape) plus
@@ -97,16 +107,36 @@ export type CfpPolicyRow = CfpFinancials["policies"][number] & {
 };
 
 export interface InvestmentAccountRow {
+  /** P3 决策 1: with `asset_id` these two identify whether this account has
+   *  been folded into `assets` (see legacyHoldings in baseline.ts) — optional
+   *  so pre-P3 fixtures that omit them keep compiling and behave as "not yet
+   *  migrated" (the safe default: nothing gets dropped from a total). */
+  id?: string | null;
+  asset_id?: string | null;
   account_type: string | null;
   prs_sub_account_a: number | null;
   prs_sub_account_b: number | null;
 }
 
 export interface HoldingRow {
+  /** P3 决策 1: the investment_accounts row this snapshot belongs to — used
+   *  by legacyHoldings (baseline.ts) to tell whether the account already has
+   *  an asset (in which case this holding must NOT also be added to totals). */
+  account_id?: string | null;
   snapshot_month: string;
   instrument_code: string | null;
   market_value: number | null;
   cost_basis: number | null;
+}
+
+/** One row of `asset_valuations` (P3 决策 2) — the per-asset valuation
+ *  history table, which may not exist yet in every environment (db.ts reads
+ *  it gracefully). Feeds assessAssets's value-change/2×2 calculation. */
+export interface AssetValuationRow {
+  asset_id: string;
+  valuation_date: string;
+  value: number;
+  net_contribution: number | null;
 }
 
 export interface CfpClient {
@@ -171,6 +201,11 @@ export interface CfpData {
   investment_accounts: InvestmentAccountRow[];
   /** latest snapshot_month only */
   holdings: HoldingRow[];
+  /** P3 决策 2: every asset's valuation history, unfiltered by asset — each
+   *  per-asset assessment (assessAssets) picks out its own rows via asset_id.
+   *  Optional: db.ts reads this table gracefully (it may not exist yet in
+   *  every environment) and pre-P3 fixtures simply omit it. */
+  asset_valuations?: AssetValuationRow[];
   goals: ClientGoalRow[];
   /** P2b 决策 1: every standing item, every version — the plan. Empty for a
    *  client who has never used items, in which case planCashflow falls back
@@ -328,6 +363,11 @@ export interface FinancialBaseline {
     }>;
   };
   baseline_notes: string[];
+  /** P3 决策 3: per-asset 2×2 (quadrant, net cash flow, value change) — see
+   *  _shared/finance/assetQuality.ts. Optional/additive: absent only for a
+   *  FinancialBaseline built by hand (tests) rather than via computeBaseline,
+   *  which always fills it in. */
+  asset_quality?: AssessAssetsResult;
 }
 
 // ---------------------------------------------------------------- modules

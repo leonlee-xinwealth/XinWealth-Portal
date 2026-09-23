@@ -81,6 +81,83 @@ export interface FinancialHealthData {
   analytics?: FinancialAnalytics;
 }
 
+// ── P3: per-asset 2×2 quality + portfolio allocation vs target ──
+// Shapes returned additively by api/health.js (decisions 3/4, spec
+// docs/superpowers/specs/2026-09-26-cfp-p3-assets-portfolio-design.md),
+// mirroring supabase/functions/_shared/finance/assetQuality.ts and
+// allocation.ts's result types on the Deno side. fetchRawHealthData() stays
+// loosely typed (`any`) for its existing consumers; components that read
+// these two fields cast to these types instead.
+
+export type AssetQualityQuadrant =
+  | 'productive'
+  | 'yielding_depreciating'
+  | 'appreciating_cash_consuming'
+  | 'consuming';
+
+export interface AssetQualityAssessment {
+  asset_id: string;
+  asset_class: 'A' | 'B' | 'C' | 'D';
+  /** null for class A/B — they don't get a 2×2 label. */
+  quadrant: AssetQualityQuadrant | null;
+  net_cash_flow_monthly: number;
+  value_change_annual: number | null;
+  value_change_source: 'history' | 'default_depreciation' | 'none';
+  total_return_annual: number;
+  return_pct: number | null;
+  notes: string[];
+}
+
+export interface AssetQualityQuadrantTotal {
+  count: number;
+  value: number;
+  net_cash_flow_monthly: number;
+}
+
+export interface AssetQualitySummary {
+  assets: AssetQualityAssessment[];
+  by_quadrant: Record<AssetQualityQuadrant, AssetQualityQuadrantTotal>;
+}
+
+export type PortfolioAllocationBucket = 'equity' | 'bond' | 'cash' | 'alternatives';
+
+export interface PortfolioAllocationRow {
+  bucket: PortfolioAllocationBucket;
+  amount: number;
+  pct: number | null;
+}
+
+export interface PortfolioDriftRow {
+  bucket: PortfolioAllocationBucket;
+  current_pct: number | null;
+  target_pct: number;
+  drift_pp: number | null;
+}
+
+export interface PortfolioRebalancingAction {
+  bucket: PortfolioAllocationBucket;
+  action: 'increase' | 'reduce';
+  amount: number;
+}
+
+export interface PortfolioAllocationSummary {
+  /** risk band the target allocation is drawn from (e.g. "growth") — falls
+   *  back to "balanced" when neither a suitability result nor
+   *  clients.risk_profile resolves to a known band (see risk_band_defaulted). */
+  risk_band: string;
+  /** true when risk_band fell back to "balanced" rather than being resolved
+   *  from suitability or clients.risk_profile. */
+  risk_band_defaulted: boolean;
+  /** which source won: the client's latest suitability result, or the
+   *  advisor-set clients.risk_profile — null when risk_band_defaulted. */
+  risk_band_source: 'suitability' | 'profile' | null;
+  investable_total: number;
+  current_allocation: PortfolioAllocationRow[];
+  target_allocation: PortfolioAllocationRow[];
+  drift: PortfolioDriftRow[];
+  rebalancing_actions: PortfolioRebalancingAction[];
+}
+
 export interface ClientProfile {
   name: string;
   totalValue: number;
@@ -284,6 +361,16 @@ export interface Portfolio {
   capital_injection: number;
   injection_date: string;    // ISO date e.g. "2025-12-01"
   portfolio_history: PortfolioSnapshot[];
+  // P3 (CFP assets & portfolio, decision 1): api/portfolios.js now reads
+  // investment assets (class C + PRS) with their asset_valuations history,
+  // falling back to the legacy portfolios/portfolio_history row when an
+  // asset has no valuations yet. Both fields are additive/optional so
+  // existing callers built before P3 keep compiling unchanged.
+  /** taxonomy asset_type code (e.g. "unit_trust", "prs") — absent on a
+   *  legacy-sourced row. */
+  asset_type?: string;
+  /** which table this row was shaped from. */
+  source?: 'asset' | 'legacy';
 }
 
 export interface PortfolioSnapshot {

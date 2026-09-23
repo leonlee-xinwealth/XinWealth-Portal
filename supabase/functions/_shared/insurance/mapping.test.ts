@@ -155,3 +155,114 @@ Deno.test("buildCfpCnaInput baseline overrides: after-emergency liquid assets + 
   const plain = buildCfpCnaInput(cfpFixture);
   assertEquals("education_need_override" in plain, false);
 });
+
+// ---------------------------------------------------------------------------
+// P5 决策 1/2: buildCoverageDetail via buildCfpCnaInput — status filtering,
+// group-employer exclusion, MRTA/MLTA offset, TPD/PA/medical-limit detail.
+// cna.test.ts covers the arithmetic that consumes this; these tests pin what
+// mapping.ts aggregates from raw policy/liability rows.
+// ---------------------------------------------------------------------------
+
+Deno.test("buildCfpCnaInput: an unset policy status counts exactly like in_force (every pre-P5 row)", () => {
+  const input = buildCfpCnaInput(cfpFixture);
+  assertEquals(input.coverage?.death_cover, 400000);
+  assertEquals(input.coverage?.ci_cover, 150000);
+});
+
+Deno.test("buildCfpCnaInput: lapsed/surrendered/matured policies drop out of cover; paid_up still counts", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      { ...cfpFixture.policies[0], status: "lapsed" },
+      { ...cfpFixture.policies[1], status: "paid_up" },
+    ],
+  });
+  assertEquals(input.life_cover, 0); // the lapsed life policy no longer counts
+  assertEquals(input.ci_cover, 150000); // paid_up CI policy still covers
+  assertEquals(input.coverage?.death_cover, 0);
+  assertEquals(input.coverage?.ci_cover, 150000);
+});
+
+Deno.test("buildCfpCnaInput: is_group_employer cover is included in `coverage` but dropped from `coverage_excluding_group`", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      { ...cfpFixture.policies[0], is_group_employer: true },
+      cfpFixture.policies[1],
+    ],
+  });
+  assertEquals(input.coverage?.death_cover, 400000);
+  assertEquals(input.coverage?.death_has_group, true);
+  assertEquals(input.coverage_excluding_group?.death_cover, 0);
+  assertEquals(input.coverage_excluding_group?.death_has_group, false);
+  // The non-group CI policy is unaffected either way.
+  assertEquals(input.coverage_excluding_group?.ci_cover, 150000);
+});
+
+Deno.test("buildCfpCnaInput: an in-force MRTA/MLTA policy's covers_liability_id offsets that liability's balance", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    liabilities: [{ ...cfpFixture.liabilities[0], id: "liab-1" }],
+    policies: [
+      { ...cfpFixture.policies[0], covers_liability_id: "liab-1" },
+      cfpFixture.policies[1],
+    ],
+  });
+  assertEquals(input.coverage?.liabilities_covered_by_policy, 300000);
+});
+
+Deno.test("buildCfpCnaInput: a lapsed MRTA policy does not offset the liability (status filter applies first)", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    liabilities: [{ ...cfpFixture.liabilities[0], id: "liab-1" }],
+    policies: [
+      { ...cfpFixture.policies[0], covers_liability_id: "liab-1", status: "lapsed" },
+      cfpFixture.policies[1],
+    ],
+  });
+  assertEquals(input.coverage?.liabilities_covered_by_policy, 0);
+});
+
+Deno.test("buildCfpCnaInput: disability riders add to TPD cover on top of the base death/TPD sum", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      {
+        ...cfpFixture.policies[0],
+        policy_riders: [{ category: "disability", sum_assured: 100000 }],
+      },
+      cfpFixture.policies[1],
+    ],
+  });
+  assertEquals(input.coverage?.death_cover, 400000);
+  assertEquals(input.coverage?.tpd_cover, 500000);
+  assertEquals(input.coverage?.tpd_assumed_from_life, true);
+});
+
+Deno.test("buildCfpCnaInput: medical rider annual_limit and accident rider (PA) are aggregated", () => {
+  const input = buildCfpCnaInput({
+    ...cfpFixture,
+    policies: [
+      {
+        ...cfpFixture.policies[0],
+        policy_riders: [
+          { category: "medical", sum_assured: null, annual_limit: 500000 },
+          { category: "accident", sum_assured: 250000 },
+        ],
+      },
+      cfpFixture.policies[1],
+    ],
+  });
+  assertEquals(input.coverage?.has_medical, true);
+  assertEquals(input.coverage?.medical_annual_limit, 500000);
+  assertEquals(input.coverage?.pa_cover, 250000);
+});
+
+Deno.test("buildCfpCnaInput: no coverage detail at all still returns a fully-populated (zeroed) coverage set", () => {
+  const input = buildCfpCnaInput({ ...cfpFixture, policies: [] });
+  assertEquals(input.coverage?.death_cover, 0);
+  assertEquals(input.coverage?.ci_early_cover, 0);
+  assertEquals(input.coverage?.pa_cover, 0);
+  assertEquals(input.coverage?.liabilities_covered_by_policy, 0);
+  assertEquals(input.coverage, input.coverage_excluding_group);
+});

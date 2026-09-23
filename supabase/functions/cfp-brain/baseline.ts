@@ -15,10 +15,13 @@ import {
 import { monthStart } from "../_shared/cashflow/items.ts";
 import { LIQUID_ASSET_TYPES as TAXONOMY_LIQUID } from "../_shared/taxonomy/balance.ts";
 import { planCashflow, type PlanCashflowInput } from "../_shared/finance/derived.ts";
+import { assessAssets } from "../_shared/finance/assetQuality.ts";
 import type {
   BaselineAssumptions,
   CfpData,
   FinancialBaseline,
+  HoldingRow,
+  InvestmentAccountRow,
   PlanningInputs,
 } from "./types.ts";
 
@@ -52,6 +55,37 @@ export const CASHFLOW_ANNUALIZE = ANNUAL_OCCURRENCES;
 export const LIQUID_ASSET_TYPES: readonly string[] = TAXONOMY_LIQUID;
 
 const round = (n: number) => Math.round(n);
+
+/**
+ * P3 决策 1: `assets` is the single source of truth for net worth / the
+ * investable total. An `investment_accounts` row with `asset_id` set has
+ * already been folded into `assets` — its own value now lives on that asset,
+ * and its historical snapshots moved to `asset_valuations` (migration
+ * 20260926000003_investment_consolidation_backfill.sql). Summing its
+ * `portfolio_holdings` on top of `assets` would double-count it.
+ *
+ * A holding is still "legacy" — and must still be counted — when its account
+ * either isn't in `accounts` at all, or is but has no `asset_id` yet (not
+ * migrated). This is exactly today's behaviour (no account carries an
+ * asset_id until the migration runs, so every holding still counts) and
+ * flips to excluding a holding the moment ITS OWN account is migrated —
+ * without any caller needing to know why. Exported so
+ * modules/investment/calc.ts's allocation total applies the identical rule.
+ */
+export function legacyHoldings<H extends Pick<HoldingRow, "account_id">>(
+  holdings: readonly H[],
+  accounts: ReadonlyArray<Pick<InvestmentAccountRow, "id" | "asset_id">>,
+): H[] {
+  const migratedAccountIds = new Set(
+    accounts
+      .filter((a) => a.id != null && a.asset_id != null)
+      .map((a) => a.id as string),
+  );
+  if (migratedAccountIds.size === 0) return holdings.slice();
+  return holdings.filter(
+    (h) => h.account_id == null || !migratedAccountIds.has(h.account_id),
+  );
+}
 
 /** Chinese label for a D1-estimated loan field, for baseline_notes. */
 const ESTIMATED_FIELD_LABEL_ZH: Record<string, string> = {
@@ -229,8 +263,11 @@ export function computeBaseline(
     `可抵扣流动资产已预留 ${assumptions.emergency_months_high} 个月紧急预备金`,
   );
 
+  // P3 决策 1: only holdings not yet folded into an asset count on top of
+  // assets — see legacyHoldings above.
+  const investableHoldings = legacyHoldings(f.holdings, f.investment_accounts);
   const totalAssets = f.assets.reduce((s, a) => s + (a.current_value ?? 0), 0) +
-    f.holdings.reduce((s, h) => s + (h.market_value ?? 0), 0);
+    investableHoldings.reduce((s, h) => s + (h.market_value ?? 0), 0);
   const totalLiabilities = f.liabilities.reduce(
     (s, l) => s + (l.outstanding_balance ?? 0),
     0,
@@ -242,6 +279,16 @@ export function computeBaseline(
   const monthlyDebtService = plan.monthly_debt_service;
   const monthlyPrincipal = plan.monthly_principal;
   const netWorth = totalAssets - totalLiabilities;
+
+  // P3 决策 3: per-asset 2×2 — net monthly cash flow (linked standing items
+  // minus linked liabilities' estimated installments) × annualised value
+  // change (from asset_valuations history, or a vehicle's default
+  // depreciation). Additive: nothing above reads this back.
+  const assetQuality = assessAssets(
+    f.assets.map((a) => ({ id: a.id ?? "", asset_type: a.asset_type, current_value: a.current_value })),
+    { items: f.items, liabilities: f.liabilities, valuations: f.asset_valuations ?? [] },
+    now,
+  );
 
   const age = ageFromDob(f.client.date_of_birth, now);
   const retirementAge = f.client.retirement_age ??
@@ -333,5 +380,6 @@ export function computeBaseline(
       : {}),
     assumptions,
     baseline_notes: notes,
+    asset_quality: assetQuality,
   };
 }

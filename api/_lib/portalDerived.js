@@ -76,6 +76,37 @@ export function buildDerivedExpenseRecords({ liabilities, policies, month, year,
  * Kept as a thin, independently-testable wrapper around planCashflow so
  * api/health.js stays a plain fetch-and-shape handler.
  */
+/**
+ * P3 决策 1 (spec docs/superpowers/specs/2026-09-26-cfp-p3-assets-portfolio-design.md):
+ * `assets` is the single source of truth for net worth / investment totals.
+ * An `investment_accounts` row with `asset_id` set has already been folded
+ * into `assets` (its value now lives on that asset, and its history moved to
+ * `asset_valuations` — migration 20260926000003_investment_consolidation_backfill.sql).
+ * Summing its `portfolio_holdings` on top of `assets` would double-count it.
+ *
+ * A holding is still "legacy" — and stays in the total — when its account
+ * either doesn't appear in `accounts` at all, or does but has no `asset_id`
+ * yet (not migrated). That is exactly today's state (no account carries an
+ * asset_id until the migration runs), so every client's figures are
+ * unchanged until then, and only THAT account's own holdings drop out the
+ * moment it is migrated — no other code needs to know why.
+ *
+ * Same rule, independently implemented, as legacyHoldings in
+ * supabase/functions/cfp-brain/baseline.ts — this file is plain JS consumed
+ * by the Vercel functions runtime and cannot import that Deno/TS module.
+ */
+export function legacyHoldings(holdings, accounts) {
+  const migratedAccountIds = new Set(
+    (accounts || [])
+      .filter((a) => a && a.id != null && a.asset_id != null)
+      .map((a) => a.id),
+  );
+  if (migratedAccountIds.size === 0) return holdings || [];
+  return (holdings || []).filter(
+    (h) => h.account_id == null || !migratedAccountIds.has(h.account_id),
+  );
+}
+
 export function buildCurrentPlan({ rows, liabilities, policies, items, client, basis = null, today = new Date() }) {
   const plan = planCashflow({
     rows: rows || [],

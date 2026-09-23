@@ -128,6 +128,9 @@ export function mergeHousehold(primary: CfpData, partner: CfpData): CfpData {
       ...partner.investment_accounts,
     ],
     holdings: [...primary.holdings, ...partner.holdings],
+    // P3: optional field (db.ts always sets it; hand-built fixtures may not) —
+    // default to [] on each side so the merge never throws on `undefined`.
+    asset_valuations: [...(primary.asset_valuations ?? []), ...(partner.asset_valuations ?? [])],
     goals: mergeGoals(primary.goals, partner.goals),
     household: {
       primary: toPersonSlice(primary, "primary"),

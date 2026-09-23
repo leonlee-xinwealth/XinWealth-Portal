@@ -1,8 +1,12 @@
 import { applyCors, configError, getAuthUser, supabaseAdmin } from './_lib/supabase.js';
 import { assetCategory, cashflowLabel } from './_lib/portalLabels.js';
-import { categoryLabel, isTransferCategory } from './_lib/taxonomy.mjs';
+import {
+  MODEL_PORTFOLIOS, allocationOf, assessAssets, categoryLabel, currentAllocationRows, driftAgainst,
+  isLiquid, isTransferCategory, riskBandFromSuitability,
+} from './_lib/taxonomy.mjs';
 import {
   MONTH_NAMES, buildCurrentPlan, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear,
+  legacyHoldings,
 } from './_lib/portalDerived.js';
 
 const monthName = (dateStr) => {
@@ -25,6 +29,46 @@ const toMs = (dateStr) => {
 
 const record = (id, fields) => ({ id, record_id: id, fields });
 
+/**
+ * P3 决策 2: `asset_valuations` may not exist yet in every environment (the
+ * migration ships separately from this code) — every read degrades to an
+ * empty array instead of failing the whole /api/health response.
+ */
+async function fetchAssetValuationsGraceful(clientId) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('asset_valuations')
+      .select('asset_id, valuation_date, value, net_contribution')
+      .eq('client_id', clientId);
+    if (error || !data) return [];
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Latest Investor Suitability Assessment result for this client (决策 4:
+ * suitability's risk band, mapped via riskBandFromSuitability, wins over
+ * clients.risk_profile when present). Degrades to null on any error — the
+ * caller falls back to clients.risk_profile, never a 500.
+ */
+async function fetchLatestSuitabilityGraceful(clientId) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('suitability_results')
+      .select('final_profile, created_at, suitability_assessments!inner(client_id)')
+      .eq('suitability_assessments.client_id', clientId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) return null;
+    return data;
+  } catch {
+    return null;
+  }
+}
+
 export default async function handler(req, res) {
   applyCors(res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -41,7 +85,7 @@ export default async function handler(req, res) {
 
   const { data: clientRow, error: clientErr } = await supabaseAdmin
     .from('clients')
-    .select('id, has_epf, date_of_birth')
+    .select('id, has_epf, date_of_birth, risk_profile')
     .ilike('email', email)
     .maybeSingle();
 
@@ -55,7 +99,9 @@ export default async function handler(req, res) {
       investments: [],
       insurances: [],
       snapshots: [],
-      current: null
+      current: null,
+      asset_quality: { assets: [], by_quadrant: {} },
+      portfolio: null
     });
   }
 
@@ -68,7 +114,10 @@ export default async function handler(req, res) {
     { data: insurances, error: insuranceErr },
     { data: snapshots, error: snapshotsErr },
     { data: holdings, error: holdingsErr },
-    { data: items, error: itemsErr }
+    { data: items, error: itemsErr },
+    { data: investmentAccounts, error: investmentAccountsErr },
+    assetValuations,
+    latestSuitability
   ] = await Promise.all([
     supabaseAdmin.from('assets').select('*').eq('client_id', clientId),
     supabaseAdmin.from('liabilities').select('*').eq('client_id', clientId),
@@ -78,7 +127,14 @@ export default async function handler(req, res) {
     supabaseAdmin.from('portfolio_holdings').select('*').eq('client_id', clientId),
     // Standing items (P2b 常设项目) — when present, they're what "current"
     // ratios/position are read from below, not the latest recorded month.
-    supabaseAdmin.from('cashflow_items').select('*').eq('client_id', clientId)
+    supabaseAdmin.from('cashflow_items').select('*').eq('client_id', clientId),
+    // P3 决策 1: id/asset_id feed legacyHoldings below — whether an account's
+    // value already lives on an asset.
+    supabaseAdmin.from('investment_accounts').select('id, asset_id').eq('client_id', clientId),
+    // P3 决策 2: asset_valuations may not exist yet in every environment —
+    // degrade to [] instead of a 500 (never blocks the rest of the response).
+    fetchAssetValuationsGraceful(clientId),
+    fetchLatestSuitabilityGraceful(clientId)
   ]);
 
   if (assetsErr) return res.status(500).json({ error: 'Failed to fetch assets', details: assetsErr.message });
@@ -88,6 +144,7 @@ export default async function handler(req, res) {
   if (snapshotsErr) return res.status(500).json({ error: 'Failed to fetch snapshots', details: snapshotsErr.message });
   if (holdingsErr) return res.status(500).json({ error: 'Failed to fetch holdings', details: holdingsErr.message });
   if (itemsErr) return res.status(500).json({ error: 'Failed to fetch cashflow items', details: itemsErr.message });
+  if (investmentAccountsErr) return res.status(500).json({ error: 'Failed to fetch investment accounts', details: investmentAccountsErr.message });
 
   const assetRecords = (assets || []).map((a) => {
     if (a?.metadata && typeof a.metadata === 'object' && a.metadata.is_investment) return null;
@@ -167,8 +224,19 @@ export default async function handler(req, res) {
     year: latestYear,
   }).map((r) => record(r.id, r.fields));
 
+  // P3 决策 1: `assets` is the single source of truth for net worth/investment
+  // totals. An investment_accounts row with asset_id set has already been
+  // folded into `assets` (its value now lives on that asset, created by the
+  // investment-consolidation backfill with metadata.is_investment=true, which
+  // investmentAssetRecords below already counts) — summing its
+  // portfolio_holdings on top here would double-count it. A holding whose
+  // account isn't migrated yet (no asset_id, or no matching account at all)
+  // is "legacy" and still counts, exactly as before, so figures don't drop
+  // before the migration runs and don't double-count once it has.
+  const investmentHoldings = legacyHoldings(holdings, investmentAccounts);
+
   const holdingsByMonth = new Map();
-  for (const h of holdings || []) {
+  for (const h of investmentHoldings) {
     const date = h.snapshot_month || h.created_at;
     const key = String(date || '');
     const current = holdingsByMonth.get(key) || { id: key, date, marketValue: 0 };
@@ -241,6 +309,47 @@ export default async function handler(req, res) {
     client: { has_epf: clientRow.has_epf, date_of_birth: clientRow.date_of_birth },
   });
 
+  // P3 决策 3: per-asset 2×2 — net monthly cash flow (linked standing items
+  // minus linked liabilities' estimated installments) × annualised value
+  // change (asset_valuations history, or a vehicle's default depreciation).
+  const assetsForQuality = (assets || []).map((a) => ({
+    id: a.id, asset_type: a.asset_type, current_value: a.current_value,
+  }));
+  const assetQuality = assessAssets(
+    assetsForQuality,
+    { items: items || [], liabilities: liabilities || [], valuations: assetValuations },
+    new Date(),
+  );
+
+  // P3 决策 4: portfolio allocation vs the model portfolio for the client's
+  // risk band — latest suitability result wins over clients.risk_profile
+  // (决策 4), reported so the UI can show which one it is.
+  const cash = (assets || [])
+    .filter((a) => isLiquid(a.asset_type))
+    .reduce((s, a) => s + (Number(a.current_value) || 0), 0);
+  const allocationAmounts = allocationOf(assets || [], investmentHoldings, cash);
+  const { investable_total: investableTotal, rows: currentAllocation } = currentAllocationRows(allocationAmounts);
+  const suitabilityBand = riskBandFromSuitability(latestSuitability?.final_profile);
+  const rawBand = suitabilityBand || clientRow.risk_profile || null;
+  // Same fallback as cfp-brain's modules/investment/calc.ts: an unrecognized
+  // or missing band still gets a target line to compare against, "balanced",
+  // flagged via risk_band_defaulted rather than left with no target at all.
+  const riskBandDefaulted = !rawBand || !MODEL_PORTFOLIOS[rawBand];
+  const riskBand = !riskBandDefaulted ? rawBand : 'balanced';
+  const riskBandSource = suitabilityBand ? 'suitability' : (clientRow.risk_profile ? 'profile' : null);
+  const { target_allocation: targetAllocation, drift, rebalancing_actions: rebalancingActions } =
+    driftAgainst(MODEL_PORTFOLIOS[riskBand], currentAllocation);
+  const portfolio = {
+    risk_band: riskBand,
+    risk_band_defaulted: riskBandDefaulted,
+    risk_band_source: riskBandSource,
+    investable_total: investableTotal,
+    current_allocation: currentAllocation,
+    target_allocation: targetAllocation,
+    drift,
+    rebalancing_actions: rebalancingActions,
+  };
+
   return res.status(200).json({
     assets: assetRecords,
     liabilities: liabilityRecords,
@@ -249,6 +358,8 @@ export default async function handler(req, res) {
     investments: [...investmentRecords, ...investmentAssetRecords],
     insurances: insuranceRecords,
     snapshots: snapshotRecords,
-    current
+    current,
+    asset_quality: assetQuality,
+    portfolio
   });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  MONTH_NAMES, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear,
+  MONTH_NAMES, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear, legacyHoldings,
 } from "../../api/_lib/portalDerived.js";
 
 describe("latestMonthYear", () => {
@@ -43,6 +43,42 @@ describe("isSupersededOutflow", () => {
   });
   it("leaves an unrelated category alone", () => {
     expect(isSupersededOutflow({ direction: "outflow", category: "groceries" }, liabilities, [])).toBe(false);
+  });
+});
+
+describe("legacyHoldings", () => {
+  it("keeps a holding whose account isn't in the accounts list at all", () => {
+    const holdings = [{ account_id: "acct-1", market_value: 100 }];
+    expect(legacyHoldings(holdings, [])).toEqual(holdings);
+  });
+
+  it("keeps a holding whose account has no asset_id yet (not migrated)", () => {
+    const holdings = [{ account_id: "acct-1", market_value: 100 }];
+    const accounts = [{ id: "acct-1", asset_id: null }];
+    expect(legacyHoldings(holdings, accounts)).toEqual(holdings);
+  });
+
+  it("drops a holding whose account has an asset_id — already folded into assets", () => {
+    const holdings = [{ account_id: "acct-1", market_value: 100 }];
+    const accounts = [{ id: "acct-1", asset_id: "asset-1" }];
+    expect(legacyHoldings(holdings, accounts)).toEqual([]);
+  });
+
+  it("mixed: only the migrated account's holding is dropped", () => {
+    const holdings = [
+      { account_id: "acct-1", market_value: 100 },
+      { account_id: "acct-2", market_value: 200 },
+    ];
+    const accounts = [
+      { id: "acct-1", asset_id: "asset-1" },
+      { id: "acct-2", asset_id: null },
+    ];
+    expect(legacyHoldings(holdings, accounts)).toEqual([{ account_id: "acct-2", market_value: 200 }]);
+  });
+
+  it("handles null/undefined holdings and accounts without throwing", () => {
+    expect(legacyHoldings(undefined, undefined)).toEqual([]);
+    expect(legacyHoldings(null, null)).toEqual([]);
   });
 });
 

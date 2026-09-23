@@ -63,6 +63,76 @@ Deno.test("derivePremiumItems keeps a policy ending in the future", () => {
   assertEquals(items[0].category, "medical_card");
 });
 
+// ---------------------------------------------------------------------------
+// derivePremiumItems: P5 决策 3 — status filtering (paid_up carries cover but
+// no premium; lapsed/surrendered/matured carry neither).
+// ---------------------------------------------------------------------------
+
+Deno.test("derivePremiumItems: an unset status behaves exactly like in_force (pre-P5 rows)", () => {
+  const items = derivePremiumItems(
+    [{ policy_type: "life", premium: 100, premium_frequency: "monthly" }],
+    TODAY,
+  );
+  assertEquals(items.length, 1);
+});
+
+Deno.test("derivePremiumItems: in_force keeps producing a premium item", () => {
+  const items = derivePremiumItems(
+    [{ policy_type: "life", premium: 100, premium_frequency: "monthly", status: "in_force" }],
+    TODAY,
+  );
+  assertEquals(items.length, 1);
+});
+
+Deno.test("derivePremiumItems: paid_up is skipped — no further premium is owed", () => {
+  const items = derivePremiumItems(
+    [{ policy_type: "life", premium: 100, premium_frequency: "monthly", status: "paid_up" }],
+    TODAY,
+  );
+  assertEquals(items.length, 0);
+});
+
+Deno.test("derivePremiumItems: lapsed/surrendered/matured are all skipped", () => {
+  for (const status of ["lapsed", "surrendered", "matured"]) {
+    const items = derivePremiumItems(
+      [{ policy_type: "medical", premium: 100, premium_frequency: "monthly", status }],
+      TODAY,
+    );
+    assertEquals(items.length, 0, `status=${status} must produce no premium item`);
+  }
+});
+
+Deno.test("derivePremiumItems: a mixed book only derives items for the active policies", () => {
+  const items = derivePremiumItems(
+    [
+      { policy_type: "life", premium: 100, premium_frequency: "monthly", status: "in_force" },
+      { policy_type: "medical", premium: 200, premium_frequency: "monthly", status: "paid_up" },
+      { policy_type: "critical_illness", premium: 50, premium_frequency: "monthly", status: "lapsed" },
+    ],
+    TODAY,
+  );
+  assertEquals(items.length, 1);
+  assertEquals(items[0].category, "life_takaful");
+});
+
+Deno.test("isSuperseded (O3, P5 决策 3): a lapsed policy does not supersede a manual protection row — nothing derives its premium any more", () => {
+  const row: PeriodRow = { direction: "outflow", amount: 100, frequency: "monthly", period_month: "2026-06-01", category: "life_takaful" };
+  const lapsedOnly: PolicyRow[] = [{ policy_type: "life", premium: 100, premium_frequency: "monthly", status: "lapsed" }];
+  assert(!isSuperseded(row, [], lapsedOnly));
+
+  const genericRow: PeriodRow = { direction: "outflow", amount: 100, frequency: "monthly", period_month: "2026-06-01", category: "protection_other" };
+  assert(!isSuperseded(genericRow, [], lapsedOnly));
+});
+
+Deno.test("isSuperseded (O3): an in_force policy among lapsed ones still supersedes its own category", () => {
+  const row: PeriodRow = { direction: "outflow", amount: 100, frequency: "monthly", period_month: "2026-06-01", category: "life_takaful" };
+  const mixed: PolicyRow[] = [
+    { policy_type: "life", premium: 100, premium_frequency: "monthly", status: "in_force" },
+    { policy_type: "medical", premium: 200, premium_frequency: "monthly", status: "lapsed" },
+  ];
+  assert(isSuperseded(row, [], mixed));
+});
+
 Deno.test("derivePremiumItems annualises quarterly/semi_annual/annual correctly", () => {
   const [q] = derivePremiumItems([{ policy_type: "life", premium: 300, premium_frequency: "quarterly" }], TODAY);
   assertAlmostEquals(q.monthly_amount, 100, 0.01); // 300*4/12

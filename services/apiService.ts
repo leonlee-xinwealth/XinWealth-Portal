@@ -1,4 +1,8 @@
-import { PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics, AnalyticsItem, Portfolio, PortfolioSnapshot, PortfolioMetrics, PortfolioMonthlyPoint } from '../types';
+import {
+  PortfolioDataPoint, Transaction, ClientProfile, KYCData, FinancialHealthData, UserSession, FinancialAnalytics,
+  AnalyticsItem, Portfolio, PortfolioSnapshot, PortfolioMetrics, PortfolioMonthlyPoint,
+  AssetQualitySummary, PortfolioAllocationSummary,
+} from '../types';
 
 import { getAccessToken, supabase } from '../lib/supabase';
 
@@ -437,6 +441,20 @@ export const calculateAnalytics = (data: any): FinancialAnalytics => {
     netWorthTrend
   };
 };
+
+/**
+ * P3 (spec docs/superpowers/specs/2026-09-26-cfp-p3-assets-portfolio-design.md
+ * 决策 3/4): api/health.js now returns two additive fields alongside the
+ * existing ones — the per-asset 2×2 (`asset_quality`) and the portfolio
+ * allocation vs the target model (`portfolio`). These are plain pick helpers
+ * over an already-fetched fetchRawHealthData() response (no extra network
+ * call) so callers (NetWorth.tsx) get typed access instead of `data.asset_quality`.
+ */
+export const pickAssetQuality = (data: any): AssetQualitySummary | null =>
+  (data?.asset_quality as AssetQualitySummary) ?? null;
+
+export const pickPortfolioAllocation = (data: any): PortfolioAllocationSummary | null =>
+  (data?.portfolio as PortfolioAllocationSummary) ?? null;
 
 export const fetchRawHealthData = async (): Promise<any> => {
   const accessToken = await getAccessToken();

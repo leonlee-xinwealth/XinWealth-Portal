@@ -1265,6 +1265,9 @@ function isExpired(endDate, today) {
   const cutoff = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
   return end.getTime() < cutoff.getTime();
 }
+function isPremiumActive(status) {
+  return status == null || status === "in_force";
+}
 function deriveLoanItems(liabilities, today = /* @__PURE__ */ new Date()) {
   const items = [];
   for (const l of liabilities ?? []) {
@@ -1296,6 +1299,8 @@ function derivePremiumItems(policies, today = /* @__PURE__ */ new Date()) {
   const items = [];
   for (const p of policies ?? []) {
     if (isExpired(p.end_date, today))
+      continue;
+    if (!isPremiumActive(p.status))
       continue;
     const occurrences = PREMIUM_OCCURRENCES[p.premium_frequency ?? "annual"] ?? 12;
     const monthly = round24((p.premium ?? 0) * occurrences / 12);
@@ -1335,10 +1340,11 @@ function isSuperseded(row, liabilities, policies) {
     return false;
   }
   if (cat.group === "O3") {
-    const policyCategories = new Set((policies ?? []).map((p) => premiumCategoryOf(p.policy_type)));
+    const activePolicies = (policies ?? []).filter((p) => isPremiumActive(p.status));
+    const policyCategories = new Set(activePolicies.map((p) => premiumCategoryOf(p.policy_type)));
     if (policyCategories.has(code))
       return true;
-    if (code === "protection_other" && (policies?.length ?? 0) > 0)
+    if (code === "protection_other" && activePolicies.length > 0)
       return true;
     return false;
   }
@@ -1711,6 +1717,388 @@ function assessAssets(assets, ctx, asOf) {
   return { assets: results, by_quadrant };
 }
 
+// supabase/functions/_shared/insurance/cna.ts
+var CNA_DEFAULTS = {
+  income_replacement_years: 10,
+  education_per_child: 8e4,
+  education_inflation: 0.04,
+  education_years: 10,
+  ci_income_multiple: 3,
+  rounding: 1e3
+};
+var round = (n) => Math.round(n / CNA_DEFAULTS.rounding) * CNA_DEFAULTS.rounding;
+function incomeBandMidpoint(band) {
+  const map = {
+    "RM3,000 \u4EE5\u4E0B": 2e3,
+    "RM3,000-5,000": 4e3,
+    "RM5,000-8,000": 6500,
+    "RM8,000-12,000": 1e4,
+    "RM12,000 \u4EE5\u4E0A": 15e3
+  };
+  return map[(band ?? "").trim()] ?? 0;
+}
+var NOTE_GROUP_COVER = "\u542B\u56E2\u4FDD\uFF0C\u79BB\u804C\u5373\u5931\u6548 / Includes group-employer cover, which lapses once employment ends";
+var NOTE_TPD_ASSUMED = "\u5047\u8BBE\u5BFF\u9669\u542B TPD\uFF0C\u4FDD\u5355\u672A\u5355\u72EC\u5217\u660E\u5168\u6B8B\u4FDD\u969C / Assumes the life plan's sum assured also covers TPD (no separate TPD benefit on file)";
+var NOTE_MEDICAL_LOW_LIMIT = "\u533B\u7597\u5361\u5E74\u9650\u989D\u504F\u4F4E\uFF08\u4F4E\u4E8E RM1,000,000\uFF09 / Medical card annual limit is low (below RM1,000,000)";
+var NOTE_MEDICAL_NO_COVER = "\u672A\u89C1\u533B\u7597\u5361\u4FDD\u969C / No medical card cover on file";
+var NOTE_CI_EARLY_NOT_TRACKED = "\u7CFB\u7EDF\u672A\u5355\u72EC\u8BB0\u5F55\u65E9\u671F/\u665A\u671F\u91CD\u75BE\u8D54\u4ED8\u6BD4\u4F8B\uFF0C\u5982\u4FDD\u5355\u542B\u6B64\u9879\u8BF7\u4EBA\u5DE5\u6838\u5BF9 / Early-stage critical illness payout isn't tracked separately \u2014 verify manually if the policy includes one";
+var noteMrtaOffset = (amount) => `\u5DF2\u6263\u9664 MRTA/MLTA \u4FDD\u5355\u8986\u76D6\u7684\u623F\u8D37\u4F59\u989D RM${amount.toLocaleString()} / Excludes RM${amount.toLocaleString()} of mortgage balance already covered by an MRTA/MLTA policy`;
+function defaultCoverageDetail(input) {
+  return {
+    death_cover: input.life_cover,
+    death_has_group: false,
+    tpd_cover: input.life_cover,
+    tpd_has_group: false,
+    tpd_assumed_from_life: true,
+    ci_cover: input.ci_cover,
+    ci_has_group: false,
+    ci_early_cover: 0,
+    ci_early_has_group: false,
+    has_medical: input.has_medical,
+    medical_annual_limit: 0,
+    medical_has_group: false,
+    pa_cover: 0,
+    pa_has_group: false,
+    liabilities_covered_by_policy: 0
+  };
+}
+function lineItem(need, cover, notes) {
+  const item = { cover: round(cover), notes };
+  if (need != null) {
+    item.need = round(need);
+    item.gap = round(Math.max(0, need - cover));
+  }
+  return item;
+}
+function buildProtectionSet(cov, needBasis) {
+  const netLiabilities = Math.max(
+    0,
+    needBasis.liabilitiesGross - cov.liabilities_covered_by_policy
+  );
+  const lifeNeed = needBasis.incomeReplacement + netLiabilities + needBasis.education - needBasis.liquidAssets;
+  const deathNotes = [];
+  if (cov.death_has_group)
+    deathNotes.push(NOTE_GROUP_COVER);
+  if (cov.liabilities_covered_by_policy > 0) {
+    deathNotes.push(noteMrtaOffset(cov.liabilities_covered_by_policy));
+  }
+  const tpdNotes = [];
+  if (cov.tpd_has_group)
+    tpdNotes.push(NOTE_GROUP_COVER);
+  if (cov.tpd_assumed_from_life)
+    tpdNotes.push(NOTE_TPD_ASSUMED);
+  if (cov.liabilities_covered_by_policy > 0) {
+    tpdNotes.push(noteMrtaOffset(cov.liabilities_covered_by_policy));
+  }
+  const ciNotes = [];
+  if (cov.ci_has_group)
+    ciNotes.push(NOTE_GROUP_COVER);
+  const ciEarlyNotes = [NOTE_CI_EARLY_NOT_TRACKED];
+  if (cov.ci_early_has_group)
+    ciEarlyNotes.push(NOTE_GROUP_COVER);
+  const lowLimit = cov.has_medical && cov.medical_annual_limit < 1e6;
+  const medicalNotes = [];
+  if (!cov.has_medical)
+    medicalNotes.push(NOTE_MEDICAL_NO_COVER);
+  if (lowLimit)
+    medicalNotes.push(NOTE_MEDICAL_LOW_LIMIT);
+  if (cov.medical_has_group)
+    medicalNotes.push(NOTE_GROUP_COVER);
+  const paNotes = [];
+  if (cov.pa_has_group)
+    paNotes.push(NOTE_GROUP_COVER);
+  return {
+    death: lineItem(lifeNeed, cov.death_cover, deathNotes),
+    tpd: lineItem(lifeNeed, cov.tpd_cover, tpdNotes),
+    ci: lineItem(needBasis.ciNeed, cov.ci_cover, ciNotes),
+    ci_early_cover: lineItem(void 0, cov.ci_early_cover, ciEarlyNotes),
+    medical: {
+      ...lineItem(void 0, cov.medical_annual_limit, medicalNotes),
+      has_cover: cov.has_medical,
+      annual_limit: round(cov.medical_annual_limit),
+      low_limit: lowLimit
+    },
+    pa: lineItem(void 0, cov.pa_cover, paNotes)
+  };
+}
+function computeCna(input) {
+  const d = CNA_DEFAULTS;
+  const useEducationOverride = input.education_need_override != null;
+  const assumptions = [
+    `\u6536\u5165\u66FF\u4EE3\u5E74\u6570\u6309 ${d.income_replacement_years} \u5E74\u8BA1\u7B97`,
+    useEducationOverride ? "\u6559\u80B2\u91D1\u9700\u6C42\u53D6\u81EA\u5BA2\u6237\u7684\u771F\u5B9E\u6559\u80B2\u76EE\u6807\uFF08\u76EE\u6807\u89C4\u5212\u6A21\u5757\u63A8\u7B97\u7684\u672A\u6765\u6210\u672C\uFF09" : `\u6559\u80B2\u91D1\u6309\u6BCF\u540D\u53D7\u629A\u517B\u4EBA RM${d.education_per_child.toLocaleString()}\u3001\u6BCF\u5E74 ${d.education_inflation * 100}% \u901A\u80C0\u3001${d.education_years} \u5E74\u671F\u4F30\u7B97`,
+    `\u91CD\u75BE\u4FDD\u969C\u9700\u6C42\u6309\u5E74\u6536\u5165 ${d.ci_income_multiple} \u500D\u4F30\u7B97`,
+    `\u6240\u6709\u91D1\u989D\u53D6\u6574\u5230\u6700\u8FD1 RM${d.rounding.toLocaleString()}`
+  ];
+  if (input.income_estimated) {
+    assumptions.push("\u5E74\u6536\u5165\u6309\u8868\u5355\u6536\u5165\u533A\u95F4\u4E2D\u503C\u4F30\u7B97\uFF0C\u5B9E\u9645\u6570\u5B57\u53EF\u80FD\u6709\u51FA\u5165");
+  }
+  if (input.liabilities_total === null) {
+    assumptions.push("\u672A\u63D0\u4F9B\u8D1F\u503A\u8D44\u6599\uFF0C\u6682\u6309 RM0 \u8BA1\u7B97\uFF0C\u5B9E\u9645\u7F3A\u53E3\u53EF\u80FD\u66F4\u5927");
+  }
+  if (input.liquid_assets === null) {
+    assumptions.push("\u672A\u63D0\u4F9B\u6D41\u52A8\u8D44\u4EA7\u8D44\u6599\uFF0C\u6682\u6309 RM0 \u8BA1\u7B97");
+  }
+  const liabilities = input.liabilities_total ?? 0;
+  const liquidAssets = input.liquid_assets ?? 0;
+  const incomeReplacement = input.annual_income * d.income_replacement_years;
+  const education = useEducationOverride ? input.education_need_override : input.dependents * d.education_per_child * Math.pow(1 + d.education_inflation, d.education_years);
+  const ciNeed = input.annual_income * d.ci_income_multiple;
+  const mainCoverage = input.coverage ?? defaultCoverageDetail(input);
+  const exGroupCoverage = input.coverage_excluding_group ?? mainCoverage;
+  const netLiabilitiesMain = Math.max(
+    0,
+    liabilities - mainCoverage.liabilities_covered_by_policy
+  );
+  const totalLifeNeed = incomeReplacement + netLiabilitiesMain + education;
+  const lifeCovered = input.life_cover + liquidAssets;
+  const lifeGap = Math.max(0, totalLifeNeed - lifeCovered);
+  const ciGap = Math.max(0, ciNeed - input.ci_cover);
+  const needBasis = {
+    incomeReplacement,
+    liabilitiesGross: liabilities,
+    education,
+    liquidAssets,
+    ciNeed
+  };
+  const mainSet = buildProtectionSet(mainCoverage, needBasis);
+  const exGroupSet = buildProtectionSet(exGroupCoverage, needBasis);
+  return {
+    assumptions,
+    inputs: input,
+    needs: {
+      income_replacement: round(incomeReplacement),
+      liabilities: round(netLiabilitiesMain),
+      education: round(education),
+      total_life: round(totalLifeNeed),
+      ci: round(ciNeed)
+    },
+    resources: {
+      life_cover: round(input.life_cover),
+      ci_cover: round(input.ci_cover),
+      liquid_assets: round(liquidAssets)
+    },
+    gaps: [
+      {
+        key: "life",
+        label: "\u4EBA\u5BFF\u4FDD\u969C",
+        need: round(totalLifeNeed),
+        covered: round(lifeCovered),
+        gap: round(lifeGap)
+      },
+      {
+        key: "ci",
+        label: "\u91CD\u75BE\u4FDD\u969C",
+        need: round(ciNeed),
+        covered: round(input.ci_cover),
+        gap: round(ciGap)
+      },
+      {
+        key: "medical",
+        label: "\u533B\u7597\u4FDD\u969C",
+        flag_only: true,
+        has_cover: input.has_medical
+      }
+    ],
+    insufficient: input.annual_income <= 0,
+    death: mainSet.death,
+    tpd: mainSet.tpd,
+    ci: mainSet.ci,
+    ci_early_cover: mainSet.ci_early_cover,
+    medical: mainSet.medical,
+    pa: mainSet.pa,
+    excluding_group: exGroupSet
+  };
+}
+
+// supabase/functions/_shared/insurance/mapping.ts
+function parseAmount(raw) {
+  if (typeof raw === "number")
+    return isFinite(raw) ? raw : 0;
+  if (typeof raw !== "string")
+    return 0;
+  const cleaned = raw.replace(/[^0-9.]/g, "");
+  if (!cleaned)
+    return 0;
+  const n = parseFloat(cleaned);
+  return isFinite(n) ? n : 0;
+}
+function parseDependents(raw) {
+  if (typeof raw === "number")
+    return Math.max(0, Math.floor(raw));
+  if (typeof raw !== "string")
+    return 0;
+  const m = raw.match(/\d+/);
+  return m ? parseInt(m[0], 10) : 0;
+}
+var LIFE_TYPES_EXTRACTED = ["term life", "whole life", "investment-linked"];
+function buildProspectCnaInput(profile, extractedPolicies) {
+  const mc = profile.manual_coverage ?? {};
+  let lifeCover = mc.life ?? 0;
+  let ciCover = mc.ci ?? 0;
+  let hasMedical = (mc.medical ?? 0) > 0;
+  for (const p of extractedPolicies ?? []) {
+    const type = (p.policy_type ?? "").toLowerCase();
+    const sum = parseAmount(p.sum_assured);
+    if (LIFE_TYPES_EXTRACTED.some((t) => type.includes(t)))
+      lifeCover += sum;
+    if (type.includes("critical illness"))
+      ciCover += sum;
+    if (type.includes("medical"))
+      hasMedical = true;
+  }
+  return {
+    annual_income: incomeBandMidpoint(profile.monthly_income_band ?? "") * 12,
+    income_estimated: true,
+    liabilities_total: null,
+    liquid_assets: null,
+    life_cover: lifeCover,
+    ci_cover: ciCover,
+    has_medical: hasMedical,
+    dependents: parseDependents(profile.dependents)
+  };
+}
+var LIFE_POLICY_TYPES = ["life", "investment_linked"];
+var PREMIUM_ANNUALIZE = {
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  single_premium: 0
+};
+var CASHFLOW_ANNUALIZE = {
+  weekly: 52,
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  one_off: 0
+};
+var CI_RIDER_CATEGORIES = ["critical_illness", "cancer"];
+function isCoverageCounted(p) {
+  return p.status == null || p.status === "in_force" || p.status === "paid_up";
+}
+function buildCoverageDetail(policies, liabilities, excludeGroup) {
+  const pool = policies.filter(
+    (p) => isCoverageCounted(p) && (!excludeGroup || p.is_group_employer !== true)
+  );
+  let deathCover = 0, deathHasGroup = false;
+  let disabilityRiderCover = 0, disabilityHasGroup = false;
+  let ciCover = 0, ciHasGroup = false;
+  let hasMedical = false, medicalHasGroup = false, medicalAnnualLimit = 0;
+  let paCover = 0, paHasGroup = false;
+  const mrtaLiabilityIds = /* @__PURE__ */ new Set();
+  for (const p of pool) {
+    const isGroup = p.is_group_employer === true;
+    const baseSum = p.sum_assured ?? 0;
+    if (LIFE_POLICY_TYPES.includes(p.policy_type)) {
+      deathCover += baseSum;
+      if (baseSum > 0 && isGroup)
+        deathHasGroup = true;
+    }
+    if (p.policy_type === "critical_illness") {
+      ciCover += baseSum;
+      if (baseSum > 0 && isGroup)
+        ciHasGroup = true;
+    }
+    if (p.policy_type === "medical") {
+      hasMedical = true;
+      if (isGroup)
+        medicalHasGroup = true;
+    }
+    if (p.covers_liability_id)
+      mrtaLiabilityIds.add(p.covers_liability_id);
+    for (const r of p.policy_riders ?? []) {
+      const riderSum = r.sum_assured ?? 0;
+      if (r.category === "life") {
+        deathCover += riderSum;
+        if (riderSum > 0 && isGroup)
+          deathHasGroup = true;
+      } else if (r.category === "disability") {
+        disabilityRiderCover += riderSum;
+        if (riderSum > 0 && isGroup)
+          disabilityHasGroup = true;
+      } else if (CI_RIDER_CATEGORIES.includes(r.category)) {
+        ciCover += riderSum;
+        if (riderSum > 0 && isGroup)
+          ciHasGroup = true;
+      } else if (r.category === "medical") {
+        hasMedical = true;
+        if (isGroup)
+          medicalHasGroup = true;
+        const limit = r.annual_limit ?? 0;
+        if (limit > medicalAnnualLimit)
+          medicalAnnualLimit = limit;
+      } else if (r.category === "accident") {
+        paCover += riderSum;
+        if (riderSum > 0 && isGroup)
+          paHasGroup = true;
+      }
+    }
+  }
+  const liabilitiesCoveredByPolicy = [...mrtaLiabilityIds].reduce((sum, id) => {
+    const l = liabilities.find((x) => x.id === id);
+    return sum + (l?.outstanding_balance ?? 0);
+  }, 0);
+  return {
+    death_cover: deathCover,
+    death_has_group: deathHasGroup,
+    tpd_cover: deathCover + disabilityRiderCover,
+    tpd_has_group: deathHasGroup || disabilityHasGroup,
+    // The schema has no distinct TPD item — every base life/ILP plan's own
+    // sum assured is assumed to already include TPD (决策 1).
+    tpd_assumed_from_life: true,
+    ci_cover: ciCover,
+    ci_has_group: ciHasGroup,
+    // No policy_riders category distinguishes early/advance-stage CI payouts
+    // today — decision 1's ci_early_cover stays 0 with an explanatory note
+    // (computeCna adds it) until that data exists.
+    ci_early_cover: 0,
+    ci_early_has_group: false,
+    has_medical: hasMedical,
+    medical_annual_limit: medicalAnnualLimit,
+    medical_has_group: medicalHasGroup,
+    pa_cover: paCover,
+    pa_has_group: paHasGroup,
+    liabilities_covered_by_policy: liabilitiesCoveredByPolicy
+  };
+}
+function annualizeInflows(inflows) {
+  return inflows.reduce(
+    (sum, e) => sum + e.amount * (CASHFLOW_ANNUALIZE[e.frequency] ?? 12),
+    0
+  );
+}
+function annualPremiumTotal(policies) {
+  return policies.reduce(
+    (sum, p) => sum + (p.premium ?? 0) * (PREMIUM_ANNUALIZE[p.premium_frequency ?? "annual"] ?? 1),
+    0
+  );
+}
+function buildCfpCnaInput(f, overrides = {}) {
+  const coverage = buildCoverageDetail(f.policies, f.liabilities, false);
+  const coverageExcludingGroup = buildCoverageDetail(f.policies, f.liabilities, true);
+  return {
+    // The baseline's figure wins: it was annualised from the months the advisor
+    // chose, so the income replacement and CI needs below rest on the same
+    // basis as every other figure in the report. Falling back to the row-by-row
+    // sum keeps the prospect path (no baseline, income as a band) working.
+    annual_income: overrides.annual_income ?? annualizeInflows(f.inflows),
+    liabilities_total: f.liabilities.reduce(
+      (s, l) => s + (l.outstanding_balance ?? 0),
+      0
+    ),
+    liquid_assets: overrides.liquid_assets ?? f.assets.filter((a) => isLiquid(a.asset_type)).reduce((s, a) => s + (a.current_value ?? 0), 0),
+    life_cover: coverage.death_cover,
+    ci_cover: coverage.ci_cover,
+    has_medical: coverage.has_medical,
+    dependents: f.client.number_of_dependants ?? 0,
+    ...overrides.education_need != null ? { education_need_override: overrides.education_need } : {},
+    coverage,
+    coverage_excluding_group: coverageExcludingGroup
+  };
+}
+
 // supabase/functions/_shared/finance/allocation.ts
 var ALLOCATION_BUCKETS = ["equity", "bond", "cash", "alternatives"];
 var MODEL_PORTFOLIOS = {
@@ -1735,7 +2123,7 @@ function riskBandFromSuitability(band) {
   }
 }
 var REBALANCE_THRESHOLD_PP = 5;
-var round = (n) => Math.round(n);
+var round3 = (n) => Math.round(n);
 function allocationOf(assets, holdings = [], cash = 0) {
   const sumBucket = (bucket) => (assets ?? []).filter((a) => allocationBucketOf(a.asset_type) === bucket).reduce((s, a) => s + (a.current_value ?? 0), 0);
   const equity = sumBucket("equity") + (holdings ?? []).reduce((s, h) => s + (h.market_value ?? 0), 0);
@@ -1747,7 +2135,7 @@ function currentAllocationRows(amounts) {
   const investable_total = ALLOCATION_BUCKETS.reduce((s, k) => s + amounts[k], 0);
   const rows = ALLOCATION_BUCKETS.map((bucket) => ({
     bucket,
-    amount: round(amounts[bucket]),
+    amount: round3(amounts[bucket]),
     pct: investable_total > 0 ? Number((amounts[bucket] / investable_total * 100).toFixed(1)) : null
   }));
   return { investable_total, rows };
@@ -1756,7 +2144,7 @@ function driftAgainst(model, allocation) {
   const investable_total = allocation.reduce((s, r) => s + r.amount, 0);
   const target_allocation = ALLOCATION_BUCKETS.map((bucket) => ({
     bucket,
-    amount: round(model[bucket] / 100 * investable_total),
+    amount: round3(model[bucket] / 100 * investable_total),
     pct: model[bucket]
   }));
   const drift = ALLOCATION_BUCKETS.map((bucket) => {
@@ -1772,7 +2160,7 @@ function driftAgainst(model, allocation) {
   const rebalancing_actions = drift.filter((d) => d.drift_pp != null && Math.abs(d.drift_pp) > REBALANCE_THRESHOLD_PP).map((d) => ({
     bucket: d.bucket,
     action: d.drift_pp > 0 ? "reduce" : "increase",
-    amount: round(Math.abs(d.drift_pp) / 100 * investable_total)
+    amount: round3(Math.abs(d.drift_pp) / 100 * investable_total)
   }));
   return { target_allocation, drift, rebalancing_actions };
 }
@@ -1788,6 +2176,7 @@ export {
   CASHFLOW_CATEGORIES,
   CASHFLOW_GROUPS,
   CATEGORY_BY_CODE,
+  CNA_DEFAULTS,
   EIS_EMPLOYEE_RATE,
   EPF_ASSET_TYPES,
   EPF_EMPLOYEE_RATE,
@@ -1810,6 +2199,8 @@ export {
   activeItems,
   allocationBucketOf,
   allocationOf,
+  annualPremiumTotal,
+  annualizeInflows,
   annualizeItems,
   annualizeItemsByCategory,
   assessAsset,
@@ -1817,10 +2208,13 @@ export {
   assetClassOf,
   assetTypeLabel,
   assetTypeMeta,
+  buildCfpCnaInput,
+  buildProspectCnaInput,
   categoriesOf,
   categoryLabel,
   classifyAsset,
   classifyCashflowRow,
+  computeCna,
   currentAllocationRows,
   deriveLoanItems,
   derivePremiumItems,
@@ -1829,6 +2223,7 @@ export {
   endItem,
   estimateLoan,
   groupOf,
+  incomeBandMidpoint,
   isActiveAt,
   isLiquid,
   isRetirementCapital,
@@ -1842,6 +2237,8 @@ export {
   liabilityTypeMeta,
   liquidityLevel,
   monthStart,
+  parseAmount,
+  parseDependents,
   planCashflow,
   premiumCategoryOf,
   resolveCategory,

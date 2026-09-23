@@ -1,7 +1,7 @@
 // Maps raw inputs (funnel form text / n8n extraction strings / DB rows) into
 // the deterministic CnaInput. No LLM, no network.
 
-import { type CnaInput, incomeBandMidpoint } from "./cna.ts";
+import { type CnaCoverageDetail, type CnaInput, incomeBandMidpoint } from "./cna.ts";
 import { isLiquid } from "../taxonomy/balance.ts";
 
 /** "RM500,000" / "500000.50" / "unknown" → number (0 when unparseable). */
@@ -104,6 +104,10 @@ export interface CfpFinancials {
   };
   inflows: Array<{ amount: number; frequency: string; category: string }>;
   liabilities: Array<{
+    // P5 决策 1: matches a policy's `covers_liability_id` so an in-force
+    // MRTA/MLTA policy's linked mortgage balance can be netted out of the
+    // death/TPD need. Optional — absent on any caller that predates this.
+    id?: string | null;
     liability_type: string;
     name: string;
     outstanding_balance: number;
@@ -123,6 +127,14 @@ export interface CfpFinancials {
     cash_value?: number | null;
     start_date?: string | null;
     end_date?: string | null;
+    // P5 决策 2 (migration 20260926000001_insurance_policy_status.sql):
+    // lifecycle + group/MRTA linkage. All optional/nullable so every caller
+    // that doesn't select these columns yet keeps compiling and behaves
+    // exactly as before (treated as in_force, non-group, no MRTA link).
+    status?: string | null;
+    is_group_employer?: boolean | null;
+    covers_liability_id?: string | null;
+    nomination_type?: string | null;
     // Per-policy riders — each carries its own coverage category + amount.
     // Non-identifying fields only (no rider/product names) so they can safely
     // feed the LLM prompt.
@@ -136,9 +148,113 @@ export interface CfpFinancials {
   }>;
 }
 
+type CfpPolicy = CfpFinancials["policies"][number];
+type CfpLiability = CfpFinancials["liabilities"][number];
+
 // Rider categories that count toward each protection type (mirrors the advisor
 // portal's InsuranceGapPanel so the report matches what the advisor sees).
 const CI_RIDER_CATEGORIES = ["critical_illness", "cancer"];
+
+/** P5 决策 1: only in_force (or unset — every pre-P5 row) and paid_up
+ * policies count toward cover; paid_up carries no premium (handled in
+ * derived.ts) but its sum assured is still real cover. lapsed/surrendered/
+ * matured policies count toward nothing. */
+function isCoverageCounted(p: { status?: string | null }): boolean {
+  return p.status == null || p.status === "in_force" || p.status === "paid_up";
+}
+
+/**
+ * Aggregates one coverage detail set (decision 1's death/TPD/CI/medical/PA +
+ * MRTA offset) from live policy rows. Called twice by buildCfpCnaInput — once
+ * over every counted policy, once with `is_group_employer` policies excluded
+ * — so `coverage` and `coverage_excluding_group` are built the exact same way
+ * and can never silently drift apart.
+ */
+function buildCoverageDetail(
+  policies: CfpPolicy[],
+  liabilities: CfpLiability[],
+  excludeGroup: boolean,
+): CnaCoverageDetail {
+  const pool = policies.filter((p) =>
+    isCoverageCounted(p) && (!excludeGroup || p.is_group_employer !== true)
+  );
+
+  let deathCover = 0, deathHasGroup = false;
+  let disabilityRiderCover = 0, disabilityHasGroup = false;
+  let ciCover = 0, ciHasGroup = false;
+  let hasMedical = false, medicalHasGroup = false, medicalAnnualLimit = 0;
+  let paCover = 0, paHasGroup = false;
+  const mrtaLiabilityIds = new Set<string>();
+
+  for (const p of pool) {
+    const isGroup = p.is_group_employer === true;
+    const baseSum = p.sum_assured ?? 0;
+
+    if (LIFE_POLICY_TYPES.includes(p.policy_type)) {
+      deathCover += baseSum;
+      if (baseSum > 0 && isGroup) deathHasGroup = true;
+    }
+    if (p.policy_type === "critical_illness") {
+      ciCover += baseSum;
+      if (baseSum > 0 && isGroup) ciHasGroup = true;
+    }
+    if (p.policy_type === "medical") {
+      hasMedical = true;
+      if (isGroup) medicalHasGroup = true;
+    }
+    if (p.covers_liability_id) mrtaLiabilityIds.add(p.covers_liability_id);
+
+    for (const r of p.policy_riders ?? []) {
+      const riderSum = r.sum_assured ?? 0;
+      if (r.category === "life") {
+        deathCover += riderSum;
+        if (riderSum > 0 && isGroup) deathHasGroup = true;
+      } else if (r.category === "disability") {
+        disabilityRiderCover += riderSum;
+        if (riderSum > 0 && isGroup) disabilityHasGroup = true;
+      } else if (CI_RIDER_CATEGORIES.includes(r.category)) {
+        ciCover += riderSum;
+        if (riderSum > 0 && isGroup) ciHasGroup = true;
+      } else if (r.category === "medical") {
+        hasMedical = true;
+        if (isGroup) medicalHasGroup = true;
+        const limit = r.annual_limit ?? 0;
+        if (limit > medicalAnnualLimit) medicalAnnualLimit = limit;
+      } else if (r.category === "accident") {
+        paCover += riderSum;
+        if (riderSum > 0 && isGroup) paHasGroup = true;
+      }
+    }
+  }
+
+  const liabilitiesCoveredByPolicy = [...mrtaLiabilityIds].reduce((sum, id) => {
+    const l = liabilities.find((x) => x.id === id);
+    return sum + (l?.outstanding_balance ?? 0);
+  }, 0);
+
+  return {
+    death_cover: deathCover,
+    death_has_group: deathHasGroup,
+    tpd_cover: deathCover + disabilityRiderCover,
+    tpd_has_group: deathHasGroup || disabilityHasGroup,
+    // The schema has no distinct TPD item — every base life/ILP plan's own
+    // sum assured is assumed to already include TPD (决策 1).
+    tpd_assumed_from_life: true,
+    ci_cover: ciCover,
+    ci_has_group: ciHasGroup,
+    // No policy_riders category distinguishes early/advance-stage CI payouts
+    // today — decision 1's ci_early_cover stays 0 with an explanatory note
+    // (computeCna adds it) until that data exists.
+    ci_early_cover: 0,
+    ci_early_has_group: false,
+    has_medical: hasMedical,
+    medical_annual_limit: medicalAnnualLimit,
+    medical_has_group: medicalHasGroup,
+    pa_cover: paCover,
+    pa_has_group: paHasGroup,
+    liabilities_covered_by_policy: liabilitiesCoveredByPolicy,
+  };
+}
 
 /**
  * Annualise inflows row by row.
@@ -192,32 +308,19 @@ export interface CnaBaselineOverrides {
 /** Build CnaInput from live DB financials.
  * Coverage now comes from the base plan (death/TPD) PLUS its riders — a plan is
  * a base benefit with categorised riders (medical, CI, cancer, accident, …), so
- * CI/medical live on riders, not the flat policy_type. */
+ * CI/medical live on riders, not the flat policy_type.
+ *
+ * P5 决策 1: `life_cover`/`ci_cover`/`has_medical` below and the richer
+ * `coverage`/`coverage_excluding_group` detail are built from the SAME
+ * buildCoverageDetail() aggregation (status-filtered — lapsed/surrendered/
+ * matured policies no longer count), so the legacy `gaps` output and the new
+ * `death`/`tpd`/`ci`/`medical`/`pa` breakdown can never silently disagree. */
 export function buildCfpCnaInput(
   f: CfpFinancials,
   overrides: CnaBaselineOverrides = {},
 ): CnaInput {
-  const allRiders = f.policies.flatMap((p) => p.policy_riders ?? []);
-  const riderSumByCategories = (cats: string[]) =>
-    allRiders
-      .filter((r) => cats.includes(r.category))
-      .reduce((s, r) => s + (r.sum_assured ?? 0), 0);
-
-  // Life = base death/TPD sum (life/ILP plans) + any additional 'life' riders.
-  const lifeCover = f.policies
-    .filter((p) => LIFE_POLICY_TYPES.includes(p.policy_type))
-    .reduce((s, p) => s + (p.sum_assured ?? 0), 0) +
-    riderSumByCategories(["life"]);
-
-  // Critical illness = CI/cancer riders, plus any legacy row still tagged with
-  // the flat policy_type='critical_illness'.
-  const ciCover = riderSumByCategories(CI_RIDER_CATEGORIES) +
-    f.policies
-      .filter((p) => p.policy_type === "critical_illness")
-      .reduce((s, p) => s + (p.sum_assured ?? 0), 0);
-
-  const hasMedical = f.policies.some((p) => p.policy_type === "medical") ||
-    allRiders.some((r) => r.category === "medical");
+  const coverage = buildCoverageDetail(f.policies, f.liabilities, false);
+  const coverageExcludingGroup = buildCoverageDetail(f.policies, f.liabilities, true);
 
   return {
     // The baseline's figure wins: it was annualised from the months the advisor
@@ -232,12 +335,14 @@ export function buildCfpCnaInput(
     liquid_assets: overrides.liquid_assets ?? f.assets
       .filter((a) => isLiquid(a.asset_type))
       .reduce((s, a) => s + (a.current_value ?? 0), 0),
-    life_cover: lifeCover,
-    ci_cover: ciCover,
-    has_medical: hasMedical,
+    life_cover: coverage.death_cover,
+    ci_cover: coverage.ci_cover,
+    has_medical: coverage.has_medical,
     dependents: f.client.number_of_dependants ?? 0,
     ...(overrides.education_need != null
       ? { education_need_override: overrides.education_need }
       : {}),
+    coverage,
+    coverage_excluding_group: coverageExcludingGroup,
   };
 }

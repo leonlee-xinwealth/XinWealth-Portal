@@ -1,7 +1,7 @@
 import {
   assertEquals,
 } from "https://deno.land/std@0.168.0/testing/asserts.ts";
-import { fetchCfpData } from "./db.ts";
+import { fetchAssetValuationsGraceful, fetchCfpData } from "./db.ts";
 
 /**
  * A minimal stand-in for the PostgREST builder: every method returns the chain,
@@ -204,6 +204,65 @@ Deno.test("clients.has_epf reaches CfpClient.has_epf verbatim (true/false/null)"
 
   const unset = await fetchCfpData(db({ clients: [{ ...CLIENT, has_epf: null }] }), "c-1");
   assertEquals(unset!.client.has_epf, null);
+});
+
+// ---------------------------------------------------------------------------
+// P3 — asset_id/id/linked_asset_id/account_id columns feed legacyHoldings and
+// assessAssets; asset_valuations degrades gracefully when the table errors
+// or is missing (it may not exist yet in every environment).
+// ---------------------------------------------------------------------------
+
+Deno.test("P3: assets/liabilities/investment_accounts/portfolio_holdings select the new columns", async () => {
+  const d = db();
+  await fetchCfpData(d, "c-1");
+  assertEquals(d.selects.assets.includes("id"), true);
+  assertEquals(d.selects.liabilities.includes("linked_asset_id"), true);
+  assertEquals(d.selects.investment_accounts.includes("id"), true);
+  assertEquals(d.selects.investment_accounts.includes("asset_id"), true);
+  assertEquals(d.selects.portfolio_holdings.includes("account_id"), true);
+});
+
+Deno.test("P3: asset_valuations rows reach CfpData.asset_valuations", async () => {
+  const rows = [
+    { asset_id: "a-1", valuation_date: "2026-07-01", value: 25000, net_contribution: 0 },
+  ];
+  const f = await fetchCfpData(db({ asset_valuations: rows }), "c-1");
+  assertEquals(f!.asset_valuations, rows);
+});
+
+Deno.test("P3: a client with no asset_valuations rows yet gets an empty list, not a throw", async () => {
+  const f = await fetchCfpData(db(), "c-1");
+  assertEquals(f!.asset_valuations, []);
+});
+
+Deno.test("P3: fetchAssetValuationsGraceful degrades to [] when the table errors (not yet migrated in this env)", async () => {
+  const erroringDb = {
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        then(res: (v: unknown) => unknown) {
+          return Promise.resolve({ data: null, error: { message: 'relation "asset_valuations" does not exist' } }).then(res);
+        },
+      };
+    },
+  };
+  const rows = await fetchAssetValuationsGraceful(erroringDb, "c-1");
+  assertEquals(rows, []);
+});
+
+Deno.test("P3: fetchAssetValuationsGraceful degrades to [] when the query throws outright", async () => {
+  const throwingDb = {
+    from() {
+      throw new Error("network error");
+    },
+  };
+  const rows = await fetchAssetValuationsGraceful(throwingDb, "c-1");
+  assertEquals(rows, []);
 });
 
 Deno.test("cashflow_items select includes every column planCashflow/statutory need", async () => {

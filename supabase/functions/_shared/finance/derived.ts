@@ -29,6 +29,11 @@ export interface PolicyRow {
   premium?: number | null;
   premium_frequency?: string | null;
   end_date?: string | null;
+  /** P5 决策 3 (migration 20260926000001_insurance_policy_status.sql):
+   *  in_force/lapsed/paid_up/surrendered/matured, default in_force. Optional/
+   *  nullable so callers that don't select the column keep working exactly
+   *  as before (treated as in_force). */
+  status?: string | null;
 }
 
 export interface DerivedItem {
@@ -88,6 +93,15 @@ function isExpired(endDate: string | null | undefined, today: Date): boolean {
   return end.getTime() < cutoff.getTime();
 }
 
+/** P5 决策 3: only an in_force (or unset — every pre-P5 row) policy still owes
+ * a premium. lapsed/surrendered/matured plainly don't; paid_up is fully paid
+ * up — its cover still counts (see _shared/insurance/mapping.ts) but it
+ * generates no further premium outflow even if a stale `premium` value is
+ * still stored on the row. */
+function isPremiumActive(status: string | null | undefined): boolean {
+  return status == null || status === "in_force";
+}
+
 /** 决策 3: one derived item per liability that carries a monthly payment.
  * Liabilities whose type has no `installment_category` (policy_loan, or an
  * unrecognised type) produce nothing — there is no category to file them
@@ -125,14 +139,16 @@ export function deriveLoanItems(liabilities: LiabilityRow[], today: Date = new D
   return items;
 }
 
-/** 决策 3: one derived item per non-expired policy with a non-zero premium.
- * Uses only the policy's own `premium` (never rider premiums — same basis as
- * the tax/insurance modules). single_premium policies annualise to 0 and are
- * skipped, same as an expired policy. */
+/** 决策 3: one derived item per non-expired, premium-active policy with a
+ * non-zero premium. Uses only the policy's own `premium` (never rider
+ * premiums — same basis as the tax/insurance modules). single_premium
+ * policies annualise to 0 and are skipped, same as an expired or non-active
+ * (lapsed/paid_up/surrendered/matured — P5 决策 3) policy. */
 export function derivePremiumItems(policies: PolicyRow[], today: Date = new Date()): DerivedItem[] {
   const items: DerivedItem[] = [];
   for (const p of policies ?? []) {
     if (isExpired(p.end_date, today)) continue;
+    if (!isPremiumActive(p.status)) continue;
 
     const occurrences = PREMIUM_OCCURRENCES[p.premium_frequency ?? "annual"] ?? 12;
     const monthly = round2(((p.premium ?? 0) * occurrences) / 12);
@@ -190,9 +206,14 @@ export function isSuperseded(
   }
 
   if (cat.group === "O3") {
-    const policyCategories = new Set((policies ?? []).map((p) => premiumCategoryOf(p.policy_type)));
+    // P5 决策 3: a lapsed/paid_up/surrendered/matured policy derives no
+    // premium item (derivePremiumItems, above), so it must not supersede a
+    // manual row either — otherwise the manual premium and the (now absent)
+    // derived one would BOTH vanish from the totals.
+    const activePolicies = (policies ?? []).filter((p) => isPremiumActive(p.status));
+    const policyCategories = new Set(activePolicies.map((p) => premiumCategoryOf(p.policy_type)));
     if (policyCategories.has(code)) return true;
-    if (code === "protection_other" && (policies?.length ?? 0) > 0) return true;
+    if (code === "protection_other" && activePolicies.length > 0) return true;
     return false;
   }
 

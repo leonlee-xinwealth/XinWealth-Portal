@@ -5,6 +5,7 @@
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
 import { fvMonthly } from "../goals/calc.ts";
+import { legacyHoldings } from "../../baseline.ts";
 import {
   allocationOf,
   currentAllocationRows,
@@ -47,6 +48,14 @@ export interface InvestmentDet {
   monthly_surplus: number;
   no_investable: boolean;
   wealth_projection: WealthProjectionRow[];
+  /** P3 决策 4: the same target_allocation/drift/rebalancing_actions above,
+   *  grouped under one key for the advisor Portfolio view — additive, the
+   *  flat fields stay for existing callers. */
+  portfolio_drift: {
+    target_allocation: AllocationRow[];
+    drift: DriftRow[];
+    rebalancing_actions: RebalancingAction[];
+  };
 }
 
 const round = (n: number) => Math.round(n);
@@ -59,7 +68,13 @@ export function computeInvestment(
   const riskBandDefaulted = !riskProfile || !MODEL_PORTFOLIOS[riskProfile];
   const band = !riskBandDefaulted ? riskProfile! : "balanced";
 
-  const amounts = allocationOf(f.assets, f.holdings, b.liquid_assets_after_emergency);
+  // P3 决策 1: a holding already folded into an asset (its account has an
+  // asset_id) must not also be summed here — see legacyHoldings (baseline.ts).
+  const amounts = allocationOf(
+    f.assets,
+    legacyHoldings(f.holdings, f.investment_accounts),
+    b.liquid_assets_after_emergency,
+  );
   const { investable_total: investableTotal, rows: currentAllocation } = currentAllocationRows(amounts);
   const noInvestable = investableTotal <= 0;
 
@@ -91,5 +106,6 @@ export function computeInvestment(
     monthly_surplus: round(b.annual_surplus / 12),
     no_investable: noInvestable,
     wealth_projection: wealthProjection,
+    portfolio_drift: { target_allocation: targetAllocation, drift, rebalancing_actions: rebalancingActions },
   };
 }

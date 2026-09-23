@@ -1,8 +1,22 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { fetchRawHealthData, calculateAnalytics } from '../services/apiService';
-import { FinancialAnalytics } from '../types';
+import { fetchRawHealthData, calculateAnalytics, pickAssetQuality, pickPortfolioAllocation } from '../services/apiService';
+import { FinancialAnalytics, AssetQualitySummary, AssetQualityQuadrant, PortfolioAllocationSummary } from '../types';
 import { Loader2, AlertCircle } from 'lucide-react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
+
+// P3 (spec docs/superpowers/specs/2026-09-26-cfp-p3-assets-portfolio-design.md
+// 决策 3/4): quadrant + allocation-bucket display copy. Hardcoded here rather
+// than imported from the taxonomy bundle — that bundle is for api/*.js and
+// cfp-brain only; the Vite client bundle keeps its own display strings (same
+// pattern api/_lib/portalLabels.js follows for the server side).
+const QUADRANT_META: Record<AssetQualityQuadrant, { label: string; color: string; bg: string }> = {
+  productive: { label: 'Productive', color: 'text-emerald-700', bg: 'bg-emerald-50 border-emerald-200' },
+  yielding_depreciating: { label: 'Yielding but depreciating', color: 'text-amber-700', bg: 'bg-amber-50 border-amber-200' },
+  appreciating_cash_consuming: { label: 'Appreciating, cash-consuming', color: 'text-sky-700', bg: 'bg-sky-50 border-sky-200' },
+  consuming: { label: 'Consuming', color: 'text-red-700', bg: 'bg-red-50 border-red-200' },
+};
+const QUADRANT_ORDER: AssetQualityQuadrant[] = ['productive', 'yielding_depreciating', 'appreciating_cash_consuming', 'consuming'];
+const ALLOCATION_BUCKET_LABEL: Record<string, string> = { equity: 'Equity', bond: 'Bonds', cash: 'Cash', alternatives: 'Alternatives' };
 
 type TabType = 'assets' | 'liabilities' | 'networth';
 
@@ -208,6 +222,10 @@ const NetWorth: React.FC = () => {
   const [assets, setAssets] = useState<RecordItem[]>([]);
   const [liabilities, setLiabilities] = useState<RecordItem[]>([]);
   const [analytics, setAnalytics] = useState<FinancialAnalytics | null>(null);
+  // P3: per-asset 2×2 quality + portfolio allocation vs target, additive
+  // fields on the same /api/health response fetched below.
+  const [assetQuality, setAssetQuality] = useState<AssetQualitySummary | null>(null);
+  const [portfolioAllocation, setPortfolioAllocation] = useState<PortfolioAllocationSummary | null>(null);
 
   const [selectedYear, setSelectedYear] = useState<string>(new Date().getFullYear().toString());
   const [selectedQuarter, setSelectedQuarter] = useState<string>('Q1');
@@ -235,6 +253,8 @@ const NetWorth: React.FC = () => {
         setAssets(combinedAssets || []);
         setLiabilities(parsedLiabilities || []);
         setAnalytics(calculateAnalytics(data));
+        setAssetQuality(pickAssetQuality(data));
+        setPortfolioAllocation(pickPortfolioAllocation(data));
         
         // Find latest date for default selection
         let latestYear = '';
@@ -327,6 +347,16 @@ const NetWorth: React.FC = () => {
       }
   }, [selectedQuarter, selectedYear, availableYears]);
 
+
+  // P3: asset id -> quadrant, for the per-item badge in the Details list
+  // below (class A/B assets have quadrant: null and get no badge).
+  const assetQuadrantById = useMemo(() => {
+    const map = new Map<string, AssetQualityQuadrant>();
+    (assetQuality?.assets || []).forEach((a) => {
+      if (a.quadrant) map.set(a.asset_id, a.quadrant);
+    });
+    return map;
+  }, [assetQuality]);
 
   // Pre-calculate data for Tabs 1 & 2 (Assets/Liabilities)
   const dataValues = useMemo(() => {
@@ -510,6 +540,11 @@ const NetWorth: React.FC = () => {
                                                                     {Math.round(ai.progress)}% Cleared
                                                                 </span>
                                                             )}
+                                                            {activeTab === 'assets' && assetQuadrantById.has(item.id) && (
+                                                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold border ${QUADRANT_META[assetQuadrantById.get(item.id)!].bg} ${QUADRANT_META[assetQuadrantById.get(item.id)!].color}`}>
+                                                                    {QUADRANT_META[assetQuadrantById.get(item.id)!].label}
+                                                                </span>
+                                                            )}
                                                         </div>
                                                     </div>
                                                     <div className="flex flex-col items-end">
@@ -684,6 +719,67 @@ const NetWorth: React.FC = () => {
           <p className="text-2xl font-extrabold">{formatCurrency(assets.reduce((sum, item) => sum + item.value, 0) - liabilities.reduce((sum, item) => sum + item.value, 0))}</p>
         </div>
       </div>
+
+      {/* P3 决策 3: Asset Quality 2×2 — count/value/net cash flow per quadrant */}
+      {assetQuality && assetQuality.assets.some((a) => a.quadrant) && (
+        <div className="mb-8">
+          <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-4">Asset Quality</h4>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {QUADRANT_ORDER.map((q) => {
+              const totals = assetQuality.by_quadrant?.[q];
+              const meta = QUADRANT_META[q];
+              return (
+                <div key={q} className={`rounded-2xl p-4 border ${meta.bg}`}>
+                  <p className={`text-xs font-bold ${meta.color}`}>{meta.label}</p>
+                  <p className="text-lg font-extrabold text-slate-800 mt-1">{formatCurrency(totals?.value || 0)}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">{totals?.count || 0} asset{(totals?.count || 0) === 1 ? '' : 's'}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* P3 决策 4: allocation vs the model portfolio for the client's risk band */}
+      {portfolioAllocation && portfolioAllocation.current_allocation.length > 0 && (
+        <div className="mb-8 bg-white rounded-3xl p-6 border border-slate-100 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Allocation vs Target</h4>
+            {portfolioAllocation.risk_band && (
+              <span className="text-[10px] font-bold text-xin-blue bg-xin-blue/10 px-2 py-1 rounded-full uppercase tracking-wide">
+                {portfolioAllocation.risk_band}
+                {portfolioAllocation.risk_band_source === 'suitability' ? ' · from suitability' : portfolioAllocation.risk_band_source === 'profile' ? ' · from profile' : ''}
+              </span>
+            )}
+          </div>
+          <div className="space-y-3">
+            {portfolioAllocation.current_allocation.map((row) => {
+              const driftRow = portfolioAllocation.drift.find((d) => d.bucket === row.bucket);
+              const currentPct = row.pct ?? 0;
+              const targetPct = driftRow?.target_pct ?? 0;
+              return (
+                <div key={row.bucket}>
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="font-bold text-slate-600">{ALLOCATION_BUCKET_LABEL[row.bucket] || row.bucket}</span>
+                    <span className="text-slate-400">
+                      {currentPct.toFixed(1)}% <span className="text-slate-300">/ target {targetPct.toFixed(1)}%</span>
+                      {driftRow?.drift_pp != null && Math.abs(driftRow.drift_pp) > 5 && (
+                        <span className={`ml-2 font-bold ${driftRow.drift_pp > 0 ? 'text-orange-500' : 'text-sky-500'}`}>
+                          {driftRow.drift_pp > 0 ? '+' : ''}{driftRow.drift_pp.toFixed(1)}pp
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                  <div className="relative h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="absolute inset-y-0 left-0 bg-xin-blue rounded-full" style={{ width: `${Math.min(100, currentPct)}%` }} />
+                    <div className="absolute inset-y-0 w-0.5 bg-xin-gold" style={{ left: `${Math.min(100, targetPct)}%` }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Repayment Achievement Progress Circles */}
       {activeTab === 'liabilities' && analytics && analytics.items.some(i => i.type === 'Liability' && i.progress > 0) && (
