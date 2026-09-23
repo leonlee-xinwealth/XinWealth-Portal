@@ -43,6 +43,39 @@ export interface CashflowDet {
   /** P2b 决策 4: one_off items near "now" — surfaced verbatim from the
    *  baseline (empty on the actuals path). */
   one_off_items: StandingItem[];
+  // ------------------------------------------------------------------
+  // Plan facts copied verbatim from the baseline (additive, no
+  // recomputation here) — the advisor renderer
+  // (components/advisor/cfp/renderers/CashflowRenderer.tsx) only ever sees
+  // this section's `content`, never `financial_reports.baseline` itself, so
+  // anything it needs to print (the same facts the PDF's
+  // pdf/cfpReport/select/cashflow.ts reads straight off the baseline) has to
+  // ride along here too.
+  // ------------------------------------------------------------------
+  /** P2b 决策 1: which of cashflow_items / cashflow_entries this plan was
+   *  built from. */
+  cashflow_source: FinancialBaseline["cashflow_source"];
+  /** P2b: the 'YYYY-MM-01' month items were evaluated "as of" when
+   *  cashflow_source is 'items' (null on the actuals path). */
+  items_as_of: string | null;
+  /** P2b 决策 6: employee EPF — a transfer (O1), already excluded from
+   *  monthly_expenses; 0 when has_epf isn't true. */
+  monthly_employee_epf: number;
+  /** P2b 决策 6: employer EPF — never in the client's own cash flow at all,
+   *  surfaced only for net-worth reconciliation. */
+  monthly_employer_epf: number;
+  /** P2b 决策 6: SOCSO + EIS — a real expense (O9), already folded into
+   *  monthly_expenses like any other derived item. */
+  monthly_socso_eis: number;
+  /** P2b 决策 6: annual_surplus minus the employee EPF that's forced savings
+   *  and can't be redirected. */
+  annual_disposable_surplus: number;
+  /** P2a: the principal portion of monthly_debt_service (wealth-building
+   *  view, kept separate from the cash view every ratio above uses). */
+  monthly_principal: number;
+  /** P2a/P2b: installments, premiums and statutory deductions the plan
+   *  folded in automatically — empty when the client has none. */
+  derived_items: DerivedItem[];
 }
 
 const round = (n: number) => Math.round(n);
@@ -205,5 +238,13 @@ export function computeCashflow(
     },
     insufficient_data: b.annual_income <= 0,
     one_off_items: b.one_off_items,
+    cashflow_source: b.cashflow_source,
+    items_as_of: b.items_as_of,
+    monthly_employee_epf: b.monthly_employee_epf,
+    monthly_employer_epf: b.monthly_employer_epf,
+    monthly_socso_eis: b.monthly_socso_eis,
+    annual_disposable_surplus: b.annual_disposable_surplus,
+    monthly_principal: b.monthly_principal,
+    derived_items: b.derived_items,
   };
 }

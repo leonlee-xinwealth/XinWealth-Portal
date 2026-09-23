@@ -162,3 +162,65 @@ Deno.test("P2b: computeCashflow surfaces one_off_items verbatim from the baselin
   const actuals = det();
   assertEquals(actuals.one_off_items, []);
 });
+
+// ---------------------------------------------------------------------------
+// Follow-up fix — the advisor renderer (CashflowRenderer.tsx) only ever sees
+// this section's `content`, never `financial_reports.baseline` itself. These
+// plan facts must therefore ride along on the section content, copied
+// verbatim from the baseline (no recomputation), exactly like the PDF's
+// pdf/cfpReport/select/cashflow.ts reads them straight off the baseline.
+// ---------------------------------------------------------------------------
+
+Deno.test("plan facts (cashflow_source, statutory EPF/SOCSO, disposable surplus, derived_items) are copied verbatim from the baseline — actuals path", () => {
+  const f = makeCfpData();
+  const b = computeBaseline(f, {}, NOW);
+  const d = computeCashflow(f, b);
+
+  assertEquals(d.cashflow_source, b.cashflow_source);
+  assertEquals(d.cashflow_source, "actuals");
+  assertEquals(d.items_as_of, b.items_as_of);
+  assertEquals(d.items_as_of, null);
+  assertEquals(d.monthly_employee_epf, b.monthly_employee_epf);
+  assertEquals(d.monthly_employer_epf, b.monthly_employer_epf);
+  assertEquals(d.monthly_socso_eis, b.monthly_socso_eis);
+  assertEquals(d.annual_disposable_surplus, b.annual_disposable_surplus);
+  assertEquals(d.monthly_principal, b.monthly_principal);
+  assertEquals(d.derived_items, b.derived_items);
+  // On the actuals path there's no statutory EPF, so disposable surplus
+  // equals the plain annual surplus.
+  assertEquals(d.annual_disposable_surplus, d.annual_surplus);
+});
+
+Deno.test("plan facts are copied verbatim from the baseline — items path with statutory EPF/SOCSO", () => {
+  const f = makeCfpData({
+    client: { ...makeCfpData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+      { direction: "outflow", category: "groceries", amount: 1000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  const b = computeBaseline(f, {}, NOW);
+  const d = computeCashflow(f, b);
+
+  assertEquals(d.cashflow_source, "items");
+  assertEquals(d.items_as_of, b.items_as_of);
+  assert(d.items_as_of !== null);
+  // 8,000 wage: employee EPF 880/mo (11%), employer EPF ~910/mo (per the
+  // statutory table), SOCSO/EIS 42/mo — same figures baseline.test.ts pins.
+  assertEquals(d.monthly_employee_epf, 880);
+  assertEquals(d.monthly_employee_epf, b.monthly_employee_epf);
+  assertEquals(d.monthly_employer_epf, b.monthly_employer_epf);
+  assert(d.monthly_employer_epf > 0);
+  assertEquals(d.monthly_socso_eis, 42);
+  assertEquals(d.monthly_socso_eis, b.monthly_socso_eis);
+  // Disposable surplus = annual surplus minus the forced-savings employee EPF.
+  assertEquals(d.annual_disposable_surplus, b.annual_disposable_surplus);
+  assertEquals(d.annual_disposable_surplus, d.annual_surplus - 12 * d.monthly_employee_epf);
+  assertEquals(d.monthly_principal, b.monthly_principal);
+  assertEquals(d.derived_items, b.derived_items);
+  assert(d.derived_items.some((it) => it.category === "epf_employee"));
+  assert(d.derived_items.some((it) => it.category === "socso_eis"));
+});
