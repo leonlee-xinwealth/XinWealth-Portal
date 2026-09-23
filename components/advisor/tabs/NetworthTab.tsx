@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Plus, X, Pencil } from 'lucide-react';
@@ -7,7 +7,9 @@ import {
   liabilityTypeLabel, liquidityLevel,
 } from '../../../supabase/functions/_shared/taxonomy/balance';
 import { estimateLoan } from '../../../supabase/functions/_shared/finance/loans';
-import { isActiveAt, itemMonthlyAmount, type StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
+import { type StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
+import { assessAssets, type AssetAssessment, type Quadrant } from '../../../supabase/functions/_shared/finance/assetQuality';
+import { QUADRANT_GRID, QUADRANT_STYLES, quadrantExplanation, quadrantLabel } from '../assets/quadrant';
 import { AlertTriangle } from 'lucide-react';
 
 // Exported so pdf/cfpReport/labels/__tests__/enums.test.ts can assert the
@@ -39,6 +41,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   const [assets, setAssets] = useState<any[]>([]);
   const [liabilities, setLiabilities] = useState<any[]>([]);
   const [items, setItems] = useState<StandingItem[]>([]);
+  const [valuations, setValuations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'asset'|'liability'|null>(null);
   const [aForm, setAForm] = useState({ asset_type:'', name:'', institution:'', current_value:'', cost_value:'', ownership_type:'sole', purpose:'', ownership_pct:'100' });
@@ -56,31 +59,32 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
       supabase.from('liabilities').select('*').eq('client_id', clientId).order('liability_type'),
       supabase.from('cashflow_items').select('*').eq('client_id', clientId),
     ]);
-    setAssets(a || []); setLiabilities(l || []); setItems((it || []) as StandingItem[]); setLoading(false);
+    setAssets(a || []); setLiabilities(l || []); setItems((it || []) as StandingItem[]);
+    // asset_valuations may not exist yet in every environment (P3 migration) —
+    // degrade to "no history" rather than failing the whole tab.
+    try {
+      const { data: v, error } = await supabase.from('asset_valuations').select('*').eq('client_id', clientId);
+      if (error) throw error;
+      setValuations(v || []);
+    } catch {
+      setValuations([]);
+    }
+    setLoading(false);
   }
   useEffect(() => { load(); }, [clientId]);
 
-  // Spec 2026-09-25-cfp-p2b decision 7: an asset's row surfaces the net monthly
-  // cashflow its links imply — standing items pointed at it (rent, dividends,
-  // its own upkeep) minus the estimated installment of any liability financing
-  // it (the loan payment isn't "spending against the asset" in isolation, but
-  // netting it here is what tells an advisor at a glance whether this asset is
-  // cash-flow positive). Returns null (hidden) when nothing links to it.
-  function linkedCashflowForAsset(assetId: string): number | null {
-    const now = new Date();
-    const linkedItems = items.filter(i => i.linked_asset_id === assetId && isActiveAt(i, now));
-    const linkedLiabilities = liabilities.filter(l => l.linked_asset_id === assetId);
-    if (linkedItems.length === 0 && linkedLiabilities.length === 0) return null;
-    let net = 0;
-    for (const it of linkedItems) {
-      const monthly = itemMonthlyAmount(it);
-      net += it.direction === 'inflow' ? monthly : -monthly;
-    }
-    for (const l of linkedLiabilities) {
-      net -= estimateLoan(l as any).monthly_payment;
-    }
-    return net;
-  }
+  // P3 asset quality 2×2 (D6) — spec 2026-09-26-cfp-p3-assets-portfolio-design.md
+  // 决策 3. Supersedes the old ad-hoc "linked cashflow" chip: assessAssets already
+  // computes the same net monthly cashflow (standing items − liability
+  // installments) plus the annualised value change and quadrant in one pass.
+  const assessment = useMemo(
+    () => assessAssets(assets, { items, liabilities, valuations }, new Date()),
+    [assets, liabilities, items, valuations],
+  );
+  const assessmentById = useMemo(
+    () => new Map(assessment.assets.map(a => [a.asset_id, a] as const)),
+    [assessment],
+  );
 
   async function addAsset() {
     if (!aForm.name || !aForm.current_value) return;
@@ -157,15 +161,19 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
           </div>
         ))}
       </div>
+
+      <AssetQualityPanel assessment={assessment} assets={assets} t={t} lang={lang} />
+
       <div className="grid grid-cols-2 gap-4">
         <NwTable title={t('Assets','资产')} color="text-emerald-600" addLabel={t('Add Asset','添加资产')} onAdd={() => setModal('asset')}>
           {assets.map(a => {
             if (editing?.table==='assets' && editing.id===a.id) {
               return <AssetEditRow key={a.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} />;
             }
-            // Net monthly cashflow linked to this asset (spec 2026-09-25-cfp-p2b
-            // decision 7) — hidden entirely when nothing links to the asset.
-            const linked = linkedCashflowForAsset(a.id);
+            // P3 asset quality (spec 2026-09-26-cfp-p3-assets-portfolio-design.md
+            // 决策 3) — quadrant badge, net monthly cashflow and annualised value
+            // change, replacing the old ad-hoc "linked cashflow" chip.
+            const row = assessmentById.get(a.id);
             return (
               <Item
                 key={a.id}
@@ -176,14 +184,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
                 color="text-emerald-600"
                 onEdit={() => startEditAsset(a)}
                 onDel={() => del('assets',a.id)}
-                extra={linked != null ? (
-                  <div className="mt-0.5 text-[11px] text-slate-400">
-                    {t('Linked cashflow','关联现金流')}{' '}
-                    <span className={`font-semibold ${linked >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {linked >= 0 ? '+' : '−'}RM {fmt(Math.abs(linked))}{t('/mo','/月')}
-                    </span>
-                  </div>
-                ) : null}
+                extra={<AssetQualityExtra row={row} t={t} lang={lang} />}
               />
             );
           })}
@@ -290,6 +291,109 @@ const Item = ({ title, sub, value, color, onEdit, onDel, flag, extra }: any) => 
     </div>
   </div>
 );
+
+// P3 决策 3 — per-row quadrant badge + net monthly cashflow + annualised value
+// change. The badge only appears for class C/D assets (assessAsset leaves
+// `quadrant` null for A/B — spec: they aren't labeled). The cashflow line only
+// appears when something is actually linked (a standing item or a financing
+// liability), same "hidden when nothing to show" rule the old chip used. The
+// value-change line appears whenever the asset is labeled (so a C/D row is
+// always explained, "missing history" included) or whenever there is real
+// measured history, even on an unlabeled A/B asset.
+const AssetQualityExtra = ({ row, t, lang }: { row: AssetAssessment | undefined; t: (en: string, zh: string) => string; lang: 'zh' | 'en' }) => {
+  if (!row) return null;
+  const hasCashflow = row.linked_items.length > 0 || row.linked_liabilities.length > 0;
+  const showValueChange = row.quadrant != null || row.value_change_source === 'history';
+  if (row.quadrant == null && !hasCashflow && !showValueChange) return null;
+  return (
+    <div className="mt-1 flex flex-col gap-0.5">
+      {row.quadrant != null && (
+        <span className={`inline-flex items-center gap-1 w-fit text-[10px] font-semibold px-1.5 py-0.5 rounded ${QUADRANT_STYLES[row.quadrant].bg} ${QUADRANT_STYLES[row.quadrant].text}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${QUADRANT_STYLES[row.quadrant].dot}`} />
+          {quadrantLabel(row.quadrant, lang)}
+        </span>
+      )}
+      {hasCashflow && (
+        <div className="text-[11px] text-slate-400">
+          {t('Net monthly cashflow','月净现金流')}{' '}
+          <span className={`font-semibold ${row.net_cash_flow_monthly >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+            {row.net_cash_flow_monthly >= 0 ? '+' : '−'}RM {fmt(Math.abs(row.net_cash_flow_monthly))}{t('/mo','/月')}
+          </span>
+        </div>
+      )}
+      {showValueChange && (
+        <div className="text-[11px] text-slate-400">
+          {t('Annual value change','年价值变动')}{' '}
+          {row.value_change_annual == null ? (
+            <span className="text-slate-400">{t('Missing valuation history','缺少估值历史')}</span>
+          ) : (
+            <>
+              <span className={`font-semibold ${row.value_change_annual >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                {row.value_change_annual >= 0 ? '+' : '−'}RM {fmt(Math.abs(row.value_change_annual))}
+              </span>
+              {row.value_change_source === 'default_depreciation' && (
+                <span className="ml-1 text-[10px] font-semibold px-1 py-0.5 rounded bg-slate-100 text-slate-500">{t('Estimated','估算')}</span>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// P3 决策 3 — 「资产质量」2×2 panel: rows = net monthly cashflow (≥0 top,
+// <0 bottom), columns = value change (≥0 left, <0 right), each cell listing
+// the class C/D assets that landed there plus the quadrant's totals.
+const AssetQualityPanel = ({ assessment, assets, t, lang }: {
+  assessment: ReturnType<typeof assessAssets>; assets: any[]; t: (en: string, zh: string) => string; lang: 'zh' | 'en';
+}) => {
+  const hasLabeled = assessment.assets.some(a => a.quadrant != null);
+  if (!hasLabeled) return null;
+  const assetById = new Map(assets.map(a => [a.id, a]));
+  return (
+    <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-6">
+      <div className="text-sm font-semibold text-xin-blue mb-3">{t('Asset Quality','资产质量')}</div>
+      <div className="grid grid-cols-2 gap-3">
+        {QUADRANT_GRID.map((q: Quadrant) => {
+          const rows = assessment.assets.filter(a => a.quadrant === q);
+          const total = assessment.by_quadrant[q];
+          const style = QUADRANT_STYLES[q];
+          return (
+            <div key={q} className={`rounded-xl p-3 ${style.bg}`}>
+              <div className={`flex items-center justify-between mb-1`}>
+                <span className={`text-xs font-bold ${style.text}`}>{quadrantLabel(q, lang)}</span>
+                <span className={`text-xs font-bold ${style.text}`}>{total.count > 0 ? `RM ${fmt(total.value)}` : '—'}</span>
+              </div>
+              <div className="text-[11px] text-slate-500 mb-2">{quadrantExplanation(q, lang)}</div>
+              {rows.length === 0 ? (
+                <div className="text-[11px] text-slate-300">—</div>
+              ) : (
+                <div className="space-y-0.5">
+                  {rows.map(r => {
+                    const a = assetById.get(r.asset_id);
+                    if (!a) return null;
+                    return (
+                      <div key={r.asset_id} className="flex items-center justify-between text-[11px] text-slate-600">
+                        <span className="truncate">{a.name}</span>
+                        <span className="font-semibold shrink-0 ml-2">RM {fmt(a.current_value)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {total.count > 0 && (
+                <div className={`mt-2 pt-2 border-t border-white/60 text-[11px] font-semibold ${style.text}`}>
+                  {t('Net monthly cashflow','月净现金流')}: {total.net_cash_flow_monthly >= 0 ? '+' : '−'}RM {fmt(Math.abs(total.net_cash_flow_monthly))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 const AssetEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang }: any) => {
   const set = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }));
   return (
