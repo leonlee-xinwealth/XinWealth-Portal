@@ -6,6 +6,7 @@
 
 import type { CfpData, FinancialBaseline } from "../../types.ts";
 import { pmtMonthly } from "../goals/calc.ts";
+import { legacyHoldings } from "../../baseline.ts";
 import { EPF_ASSET_TYPES, isRetirementCapital } from "../../../_shared/taxonomy/balance.ts";
 
 /** 11% employee + 12% employer statutory EPF contribution. */
@@ -167,8 +168,11 @@ export function computeRetirement(
       .filter((a) => EPF_ASSET_TYPES.includes(a.asset_type))
       .reduce((s, a) => s + (a.current_value ?? 0), 0),
   );
+  // P3 决策 1: an account that already has an asset is counted through that
+  // asset (below); only unmigrated accounts add their PRS sub-accounts or
+  // holdings on top, so nothing is counted twice.
   const prsBalance = round(
-    f.investment_accounts.reduce(
+    f.investment_accounts.filter((a) => a.asset_id == null).reduce(
       (s, a) => s + (a.prs_sub_account_a ?? 0) + (a.prs_sub_account_b ?? 0),
       0,
     ),
@@ -177,7 +181,7 @@ export function computeRetirement(
     f.assets
       .filter((a) => isRetirementCapital(a.asset_type) && !EPF_ASSET_TYPES.includes(a.asset_type))
       .reduce((s, a) => s + (a.current_value ?? 0), 0) +
-      f.holdings.reduce((s, h) => s + (h.market_value ?? 0), 0),
+      legacyHoldings(f.holdings, f.investment_accounts).reduce((s, h) => s + (h.market_value ?? 0), 0),
   );
 
   const retirementYears = Math.max(0, r.life_expectancy - b.retirement_age);
