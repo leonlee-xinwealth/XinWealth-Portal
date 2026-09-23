@@ -1509,11 +1509,280 @@ function planCashflowFromItems(input) {
   };
 }
 
+// supabase/functions/_shared/finance/valuation.ts
+var MS_PER_DAY = 24 * 60 * 60 * 1e3;
+var MIN_SPAN_DAYS = 60;
+var TARGET_SPAN_DAYS = 365;
+var VEHICLE_DEFAULT_DEPRECIATION_PCT = -0.1;
+var VEHICLE_ASSET_TYPE = "vehicle";
+function round25(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function round5(n) {
+  return Math.round((n + Number.EPSILON) * 1e5) / 1e5;
+}
+function toUtcMs(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr ?? "");
+  if (!m) {
+    const d = new Date(dateStr);
+    return d.getTime();
+  }
+  return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+function asOfMs(asOf) {
+  if (typeof asOf === "string")
+    return toUtcMs(asOf);
+  return Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate());
+}
+function sortedDated(valuations) {
+  return (valuations ?? []).filter((v) => !!v && !!v.valuation_date && Number.isFinite(v.value)).map((v) => ({ ...v, _ts: toUtcMs(v.valuation_date) })).sort((a, b) => a._ts - b._ts);
+}
+function valueChangeAnnual(valuations, asOf, opts) {
+  const currentValue = Number(opts.currentValue) || 0;
+  const none = () => {
+    if (opts.assetType === VEHICLE_ASSET_TYPE) {
+      return {
+        annual_change: round25(VEHICLE_DEFAULT_DEPRECIATION_PCT * currentValue),
+        source: "default_depreciation"
+      };
+    }
+    return { annual_change: null, source: "none" };
+  };
+  const asOfTs = asOfMs(asOf);
+  const list = sortedDated(valuations).filter((v) => v._ts <= asOfTs);
+  if (list.length === 0)
+    return none();
+  const latest = list[list.length - 1];
+  const earlierCandidates = list.filter((v) => v._ts < latest._ts);
+  if (earlierCandidates.length === 0)
+    return none();
+  const targetTs = latest._ts - TARGET_SPAN_DAYS * MS_PER_DAY;
+  let earlier = earlierCandidates[0];
+  let bestDiff = Math.abs(earlier._ts - targetTs);
+  for (const c of earlierCandidates.slice(1)) {
+    const diff = Math.abs(c._ts - targetTs);
+    if (diff < bestDiff || diff === bestDiff && c._ts > earlier._ts) {
+      earlier = c;
+      bestDiff = diff;
+    }
+  }
+  const days = Math.round((latest._ts - earlier._ts) / MS_PER_DAY);
+  if (days < MIN_SPAN_DAYS)
+    return none();
+  const contributions = list.filter((v) => v._ts > earlier._ts && v._ts <= latest._ts).reduce((s, v) => s + (Number(v.net_contribution) || 0), 0);
+  const rawChange = latest.value - earlier.value - contributions;
+  const annual_change = round25(rawChange * (TARGET_SPAN_DAYS / days));
+  return {
+    annual_change,
+    source: "history",
+    from_date: earlier.valuation_date,
+    to_date: latest.valuation_date,
+    days
+  };
+}
+function twr(valuations) {
+  const list = sortedDated(valuations);
+  if (list.length < 2)
+    return null;
+  let chain = 1;
+  let any = false;
+  for (let i = 1; i < list.length; i++) {
+    const prev = list[i - 1];
+    const cur = list[i];
+    if (prev.value === 0)
+      continue;
+    const c = Number(cur.net_contribution) || 0;
+    const r = (cur.value - c) / prev.value - 1;
+    chain *= 1 + r;
+    any = true;
+  }
+  if (!any)
+    return null;
+  const from = list[0].valuation_date;
+  const to = list[list.length - 1].valuation_date;
+  const totalDays = (list[list.length - 1]._ts - list[0]._ts) / MS_PER_DAY;
+  const twrValue = chain - 1;
+  const annualised = totalDays > 0 ? Math.pow(chain, TARGET_SPAN_DAYS / totalDays) - 1 : null;
+  return {
+    twr: round5(twrValue),
+    annualised: annualised != null ? round5(annualised) : null,
+    from,
+    to
+  };
+}
+
+// supabase/functions/_shared/finance/assetQuality.ts
+var QUADRANTS = [
+  { id: "productive", label_zh: "\u751F\u8D22\u8D44\u4EA7", label_en: "Productive" },
+  { id: "yielding_depreciating", label_zh: "\u6536\u76CA\u4F46\u8D2C\u503C", label_en: "Yielding but depreciating" },
+  { id: "appreciating_cash_consuming", label_zh: "\u589E\u503C\u4F46\u5403\u73B0\u91D1", label_en: "Appreciating but cash-consuming" },
+  { id: "consuming", label_zh: "\u6D88\u8017\u578B\u8D44\u4EA7", label_en: "Consuming" }
+];
+var NOTE_MISSING_VALUATION_HISTORY = "\u7F3A\u5C11\u4F30\u503C\u5386\u53F2";
+function round26(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function round4(n) {
+  return Math.round((n + Number.EPSILON) * 1e4) / 1e4;
+}
+function quadrantFor(netCashFlowMonthly, valueChangeEffective) {
+  const cashOk = netCashFlowMonthly >= 0;
+  const valueOk = valueChangeEffective >= 0;
+  if (cashOk && valueOk)
+    return "productive";
+  if (cashOk && !valueOk)
+    return "yielding_depreciating";
+  if (!cashOk && valueOk)
+    return "appreciating_cash_consuming";
+  return "consuming";
+}
+function assessAsset(asset, ctx, asOf) {
+  const asset_class = assetClassOf(asset.asset_type);
+  const currentValue = Number(asset.current_value) || 0;
+  const asOfDate = typeof asOf === "string" ? new Date(asOf) : asOf;
+  const linkedItems = activeItems(ctx.items ?? [], asOf).filter(
+    (it) => it.linked_asset_id != null && it.linked_asset_id === asset.id
+  );
+  let itemsMonthly = 0;
+  const linked_items = linkedItems.map((it) => {
+    const monthly = round26(itemMonthlyAmount(it));
+    itemsMonthly += it.direction === "inflow" ? monthly : -monthly;
+    return { id: it.id, category: it.category, direction: it.direction, monthly_amount: monthly };
+  });
+  const linkedLiabilities = (ctx.liabilities ?? []).filter(
+    (l) => l.linked_asset_id != null && l.linked_asset_id === asset.id
+  );
+  let liabilitiesMonthly = 0;
+  const linked_liabilities = linkedLiabilities.map((l) => {
+    const est = estimateLoan(l, asOfDate);
+    liabilitiesMonthly += est.monthly_payment;
+    return { id: l.id ?? null, liability_type: l.liability_type, monthly_payment: est.monthly_payment };
+  });
+  const net_cash_flow_monthly = round26(itemsMonthly - liabilitiesMonthly);
+  const ownValuations = (ctx.valuations ?? []).filter(
+    (v) => v.asset_id == null || v.asset_id === asset.id
+  );
+  const vc = valueChangeAnnual(ownValuations, asOf, { assetType: asset.asset_type, currentValue });
+  const notes = [];
+  let effectiveValueChange;
+  if (vc.annual_change == null) {
+    effectiveValueChange = 0;
+    if (vc.source === "none")
+      notes.push(NOTE_MISSING_VALUATION_HISTORY);
+  } else {
+    effectiveValueChange = vc.annual_change;
+  }
+  const labeled = asset_class === "C" || asset_class === "D";
+  const quadrant = labeled ? quadrantFor(net_cash_flow_monthly, effectiveValueChange) : null;
+  const total_return_annual = round26(net_cash_flow_monthly * 12 + effectiveValueChange);
+  const return_pct = currentValue > 0 ? round4(total_return_annual / currentValue) : null;
+  return {
+    asset_id: asset.id,
+    asset_class,
+    quadrant,
+    net_cash_flow_monthly,
+    linked_items,
+    linked_liabilities,
+    value_change_annual: vc.annual_change,
+    value_change_source: vc.source,
+    total_return_annual,
+    return_pct,
+    notes
+  };
+}
+function assessAssets(assets, ctx, asOf) {
+  const list = assets ?? [];
+  const results = list.map((a) => assessAsset(a, ctx, asOf));
+  const by_quadrant = {
+    productive: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+    yielding_depreciating: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+    appreciating_cash_consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+    consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 }
+  };
+  for (let i = 0; i < list.length; i++) {
+    const r = results[i];
+    if (r.quadrant == null)
+      continue;
+    const bucket = by_quadrant[r.quadrant];
+    bucket.count += 1;
+    bucket.value = round26(bucket.value + (Number(list[i].current_value) || 0));
+    bucket.net_cash_flow_monthly = round26(bucket.net_cash_flow_monthly + r.net_cash_flow_monthly);
+  }
+  return { assets: results, by_quadrant };
+}
+
+// supabase/functions/_shared/finance/allocation.ts
+var ALLOCATION_BUCKETS = ["equity", "bond", "cash", "alternatives"];
+var MODEL_PORTFOLIOS = {
+  conservative: { equity: 20, bond: 55, cash: 20, alternatives: 5 },
+  moderate: { equity: 35, bond: 45, cash: 15, alternatives: 5 },
+  balanced: { equity: 50, bond: 35, cash: 10, alternatives: 5 },
+  growth: { equity: 65, bond: 25, cash: 5, alternatives: 5 },
+  aggressive: { equity: 80, bond: 10, cash: 5, alternatives: 5 }
+};
+function riskBandFromSuitability(band) {
+  switch (band) {
+    case "STABLE":
+      return "conservative";
+    case "BALANCED":
+      return "balanced";
+    case "GROWTH":
+      return "growth";
+    case "AGGRESSIVE_GROWTH":
+      return "aggressive";
+    default:
+      return null;
+  }
+}
+var REBALANCE_THRESHOLD_PP = 5;
+var round = (n) => Math.round(n);
+function allocationOf(assets, holdings = [], cash = 0) {
+  const sumBucket = (bucket) => (assets ?? []).filter((a) => allocationBucketOf(a.asset_type) === bucket).reduce((s, a) => s + (a.current_value ?? 0), 0);
+  const equity = sumBucket("equity") + (holdings ?? []).reduce((s, h) => s + (h.market_value ?? 0), 0);
+  const bond = sumBucket("bond");
+  const alternatives = sumBucket("alternatives");
+  return { equity, bond, cash, alternatives };
+}
+function currentAllocationRows(amounts) {
+  const investable_total = ALLOCATION_BUCKETS.reduce((s, k) => s + amounts[k], 0);
+  const rows = ALLOCATION_BUCKETS.map((bucket) => ({
+    bucket,
+    amount: round(amounts[bucket]),
+    pct: investable_total > 0 ? Number((amounts[bucket] / investable_total * 100).toFixed(1)) : null
+  }));
+  return { investable_total, rows };
+}
+function driftAgainst(model, allocation) {
+  const investable_total = allocation.reduce((s, r) => s + r.amount, 0);
+  const target_allocation = ALLOCATION_BUCKETS.map((bucket) => ({
+    bucket,
+    amount: round(model[bucket] / 100 * investable_total),
+    pct: model[bucket]
+  }));
+  const drift = ALLOCATION_BUCKETS.map((bucket) => {
+    const currentPct = allocation.find((r) => r.bucket === bucket)?.pct ?? null;
+    const target = model[bucket];
+    return {
+      bucket,
+      current_pct: currentPct,
+      target_pct: target,
+      drift_pp: currentPct != null ? Number((currentPct - target).toFixed(1)) : null
+    };
+  });
+  const rebalancing_actions = drift.filter((d) => d.drift_pp != null && Math.abs(d.drift_pp) > REBALANCE_THRESHOLD_PP).map((d) => ({
+    bucket: d.bucket,
+    action: d.drift_pp > 0 ? "reduce" : "increase",
+    amount: round(Math.abs(d.drift_pp) / 100 * investable_total)
+  }));
+  return { target_allocation, drift, rebalancing_actions };
+}
+
 // supabase/functions/_shared/taxonomy/index.ts
 function isTransferCategory(code, direction = "outflow") {
   return wealthEffectOf(code, direction) === "transfer";
 }
 export {
+  ALLOCATION_BUCKETS,
   ASSET_CLASSES,
   ASSET_TYPES,
   CASHFLOW_CATEGORIES,
@@ -1531,6 +1800,8 @@ export {
   LIABILITY_TYPES,
   LIQUID_ASSET_TYPES,
   LOAN_DEFAULTS,
+  MODEL_PORTFOLIOS,
+  QUADRANTS,
   SOCSO_EIS_WAGE_CEILING,
   SOCSO_EMPLOYEE_RATE,
   STATUTORY_NOTE,
@@ -1538,8 +1809,11 @@ export {
   TRANSFER_CATEGORY_CODES,
   activeItems,
   allocationBucketOf,
+  allocationOf,
   annualizeItems,
   annualizeItemsByCategory,
+  assessAsset,
+  assessAssets,
   assetClassOf,
   assetTypeLabel,
   assetTypeMeta,
@@ -1547,9 +1821,11 @@ export {
   categoryLabel,
   classifyAsset,
   classifyCashflowRow,
+  currentAllocationRows,
   deriveLoanItems,
   derivePremiumItems,
   deriveStatutoryItems,
+  driftAgainst,
   endItem,
   estimateLoan,
   groupOf,
@@ -1570,5 +1846,8 @@ export {
   premiumCategoryOf,
   resolveCategory,
   reviseItem,
+  riskBandFromSuitability,
+  twr,
+  valueChangeAnnual,
   wealthEffectOf
 };
