@@ -787,6 +787,36 @@ function recordedYears(rows) {
   }
   return [...years].sort((a, b) => b - a);
 }
+function monthlyBreakdown(rows, year) {
+  const byMonth = /* @__PURE__ */ new Map();
+  for (const r of rows ?? []) {
+    if (yearOf(r.period_month) !== year)
+      continue;
+    const m = monthOf(r.period_month);
+    if (m == null)
+      continue;
+    if (isAssetTransfer(r))
+      continue;
+    const slot = byMonth.get(m) ?? { month: m, income: 0, expenses: 0, entries: 0 };
+    const amount = amountOf(r);
+    if (r.direction === "inflow")
+      slot.income += amount;
+    else
+      slot.expenses += amount;
+    slot.entries += 1;
+    byMonth.set(m, slot);
+  }
+  return [...byMonth.values()].sort((a, b) => a.month - b.month);
+}
+function defaultBasis(rows) {
+  const year = recordedYears(rows)[0];
+  if (year == null)
+    return null;
+  const months = monthlyBreakdown(rows, year).map((m) => m.month);
+  if (months.length === 0)
+    return null;
+  return { year, from_month: months[0], to_month: months[months.length - 1] };
+}
 function normalise(basis, fallbackYear) {
   if (!basis)
     return { year: fallbackYear, from_month: 1, to_month: 12 };
@@ -1717,6 +1747,442 @@ function assessAssets(assets, ctx, asOf) {
   return { assets: results, by_quadrant };
 }
 
+// supabase/functions/_shared/finance/snapshot.ts
+function round0(n) {
+  return Math.round(n);
+}
+function round42(n) {
+  return Number(n.toFixed(4));
+}
+function ownedValue(a) {
+  const value = Number(a.current_value) || 0;
+  const pct = a.ownership_pct == null ? 100 : Number(a.ownership_pct);
+  const pctSafe = Number.isFinite(pct) ? pct : 100;
+  return value * (pctSafe / 100);
+}
+function passiveIncomeMonthly(items, rows, basis, asOf) {
+  if (items.length > 0) {
+    let total = 0;
+    for (const it of activeItems(items, asOf)) {
+      if (it.direction !== "inflow")
+        continue;
+      if (groupOf(it.category)?.id !== "I2")
+        continue;
+      total += itemMonthlyAmount(it);
+    }
+    return total;
+  }
+  const passive = (rows ?? []).filter(
+    (r) => r.direction === "inflow" && groupOf(r.category ?? null)?.id === "I2"
+  );
+  return annualizeCashflow(passive, basis).monthly_income;
+}
+function computeSnapshot(input) {
+  const asOfDate = typeof input.asOf === "string" ? new Date(input.asOf) : input.asOf;
+  const asOfStr = typeof input.asOf === "string" ? input.asOf.slice(0, 10) : asOfDate.toISOString().slice(0, 10);
+  const assets = input.assets ?? [];
+  const liabilities = input.liabilities ?? [];
+  const policies = input.policies ?? [];
+  const items = input.items ?? [];
+  const rows = input.rows ?? [];
+  let totalAssets = 0;
+  let liquidTotal = 0;
+  let investTotal = 0;
+  let epfTotal = 0;
+  for (const a of assets) {
+    const v = ownedValue(a);
+    totalAssets += v;
+    if (isLiquid(a.asset_type))
+      liquidTotal += v;
+    if (assetClassOf(a.asset_type) === "C")
+      investTotal += v;
+    if (EPF_ASSET_TYPES.includes(a.asset_type))
+      epfTotal += v;
+  }
+  const totalLiabilities = liabilities.reduce((s, l) => s + (Number(l.outstanding_balance) || 0), 0);
+  const netWorth = totalAssets - totalLiabilities;
+  const basis = items.length > 0 ? null : defaultBasis(rows);
+  const plan = planCashflow({
+    rows,
+    liabilities,
+    policies,
+    basis,
+    today: asOfDate,
+    items,
+    client: input.client
+  });
+  const monthlyIncome = plan.totals.monthly_income;
+  const monthlyExpenses = plan.totals.monthly_expenses;
+  const monthlySurplus = monthlyIncome - monthlyExpenses;
+  const monthlyDebtService = plan.monthly_debt_service;
+  let mortgageMonthly = 0;
+  for (const l of liabilities) {
+    if (l.liability_type !== "mortgage")
+      continue;
+    const meta = liabilityTypeMeta(l.liability_type);
+    if (!meta || meta.installment_category == null)
+      continue;
+    mortgageMonthly += estimateLoan(l, asOfDate).monthly_payment;
+  }
+  const nonMortgageDebtService = monthlyDebtService - mortgageMonthly;
+  let activeLifeSumAssured = 0;
+  for (const p of policies) {
+    const active = !p.end_date || p.end_date >= asOfStr;
+    if (!active)
+      continue;
+    const kind = String(p.policy_type || "").toLowerCase();
+    if (kind !== "life" && kind !== "investment_linked")
+      continue;
+    activeLifeSumAssured += Number(p.sum_assured) || 0;
+  }
+  const annualIncome = monthlyIncome * 12;
+  const passiveMonthly = passiveIncomeMonthly(items, rows, basis, asOfDate);
+  const emergencyFundMonths = monthlyExpenses > 0 ? round42(liquidTotal / monthlyExpenses) : null;
+  const notes = [];
+  if (monthlyIncome <= 0)
+    notes.push("\u672A\u5F55\u5F97\u7ECF\u5E38\u6027\u6536\u5165\uFF0C\u6536\u5165\u76F8\u5173\u6BD4\u7387\u4E0D\u5177\u53C2\u8003\u610F\u4E49");
+  if (netWorth <= 0)
+    notes.push("\u51C0\u8D44\u4EA7\u4E3A\u96F6\u6216\u8D1F\u6570\uFF0C\u4EE5\u51C0\u8D44\u4EA7\u4E3A\u5206\u6BCD\u7684\u6BD4\u7387\u8BB0\u4E3A null");
+  return {
+    net_worth: round0(netWorth),
+    total_assets: round0(totalAssets),
+    total_liabilities: round0(totalLiabilities),
+    basic_liquidity_ratio: emergencyFundMonths,
+    liquid_asset_to_net_worth: netWorth > 0 ? round42(liquidTotal / netWorth) : null,
+    solvency_ratio: totalAssets > 0 ? round42(netWorth / totalAssets) : null,
+    debt_service_ratio: monthlyIncome > 0 ? round42(monthlyDebtService / monthlyIncome) : null,
+    non_mortgage_dsr: monthlyIncome > 0 ? round42(nonMortgageDebtService / monthlyIncome) : null,
+    savings_ratio: monthlyIncome > 0 ? round42(monthlySurplus / monthlyIncome) : null,
+    life_insurance_coverage: annualIncome > 0 ? round42(activeLifeSumAssured / annualIncome) : null,
+    invest_assets_to_net_worth: netWorth > 0 ? round42(investTotal / netWorth) : null,
+    passive_income_coverage: monthlyExpenses > 0 ? round42(passiveMonthly / monthlyExpenses) : null,
+    raw_metrics: {
+      liquid_assets_total: round0(liquidTotal),
+      invest_assets_total: round0(investTotal),
+      epf_assets_total: round0(epfTotal),
+      monthly_debt_service: round0(monthlyDebtService),
+      monthly_mortgage_service: round0(mortgageMonthly),
+      monthly_non_mortgage_service: round0(nonMortgageDebtService),
+      monthly_employee_epf: round0(plan.monthly_employee_epf),
+      monthly_socso_eis: round0(plan.monthly_socso_eis),
+      active_life_sum_assured: round0(activeLifeSumAssured),
+      passive_income_monthly: round0(passiveMonthly),
+      annual_income: round0(annualIncome),
+      plan_source: plan.source,
+      cashflow_basis: basis,
+      as_of: asOfStr,
+      notes
+    },
+    emergency_fund_months: emergencyFundMonths,
+    monthly_income: round0(monthlyIncome),
+    monthly_expenses: round0(monthlyExpenses),
+    monthly_surplus: round0(monthlySurplus),
+    monthly_principal: round0(plan.monthly_principal),
+    monthly_employer_epf: round0(plan.monthly_employer_epf)
+  };
+}
+
+// supabase/functions/_shared/finance/reconcile.ts
+function round27(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function toUtcMs2(d) {
+  if (typeof d === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+    if (m)
+      return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return new Date(d).getTime();
+  }
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+function valueAt(valuations, asOfMs2) {
+  const usable = (valuations ?? []).filter((v) => v && v.valuation_date && Number.isFinite(v.value)).map((v) => ({ ...v, _ts: toUtcMs2(v.valuation_date) })).filter((v) => v._ts <= asOfMs2).sort((a, b) => a._ts - b._ts);
+  if (usable.length === 0)
+    return null;
+  return usable[usable.length - 1].value;
+}
+function linkedContributionMonthly(items, assetId, asOf, isTransfer) {
+  let total = 0;
+  for (const it of activeItems(items, asOf)) {
+    if (it.linked_asset_id !== assetId)
+      continue;
+    if (!isTransfer(it.category))
+      continue;
+    total += Math.abs(itemMonthlyAmount(it));
+  }
+  return total;
+}
+var TRANSFER_CATEGORIES = /* @__PURE__ */ new Set([
+  "asnb_contribution",
+  "asset_purchase",
+  "asset_sale",
+  "borrowing_family",
+  "business_capital",
+  "credit_card_payment",
+  "crypto_purchase",
+  "epf_employee",
+  "epf_voluntary",
+  "epf_withdrawal",
+  "fd_placement",
+  "gold_purchase",
+  "investment_contribution",
+  "investment_other",
+  "lend_out",
+  "loan_drawdown",
+  "prs_contribution",
+  "savings_withdrawal",
+  "sspn",
+  "stock_etf_purchase",
+  "tabung_haji",
+  "to_savings",
+  "unit_trust_contribution"
+]);
+var isTransferCategory = (code) => code != null && TRANSFER_CATEGORIES.has(code);
+var NOTE_UNLINKED_TRANSFERS = "\u672A\u5173\u8054\u7684\u5B9A\u671F\u6295\u5165\u4F1A\u8BA9\u5BF9\u8D26\u5931\u771F";
+function reconcile(input) {
+  const { prev, curr, months, plan, assets, valuationsByAsset, items = [] } = input;
+  const deltaNetWorth = round27(curr.net_worth - prev.net_worth);
+  const savings = round27(months * plan.monthly_surplus);
+  const principal = round27(months * plan.monthly_principal);
+  const employerEpf = round27(months * plan.monthly_employer_epf);
+  const employeeEpf = plan.monthly_employee_epf ?? 0;
+  const prevMs = toUtcMs2(prev.asOf);
+  const currMs = toUtcMs2(curr.asOf);
+  const notes = [];
+  const market_by_asset = [];
+  const epfAssets = assets.filter((a) => EPF_ASSET_TYPES.includes(a.asset_type));
+  const otherAssets = assets.filter(
+    (a) => !isLiquid(a.asset_type) && !EPF_ASSET_TYPES.includes(a.asset_type)
+  );
+  if (epfAssets.length > 0) {
+    let rawChange = 0;
+    let anyHistory = false;
+    for (const a of epfAssets) {
+      const before = valueAt(valuationsByAsset[a.id], prevMs);
+      const after = valueAt(valuationsByAsset[a.id], currMs);
+      if (before != null && after != null) {
+        rawChange += after - before;
+        anyHistory = true;
+      }
+    }
+    const contribution = round27(months * (employeeEpf + plan.monthly_employer_epf));
+    if (!anyHistory) {
+      notes.push(`EPF \u8D26\u6237\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55\uFF0C\u5E02\u573A\u53D8\u52A8\u8BB0\u4E3A 0\uFF08\u5408\u8BA1 ${epfAssets.length} \u4E2A\u8D26\u6237\uFF09`);
+      market_by_asset.push({
+        asset_id: "epf_combined",
+        asset_type: "epf",
+        value_change: 0,
+        contribution_adjustment: contribution,
+        market_change: round27(0 - contribution),
+        source: "none",
+        note: "\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55"
+      });
+    } else {
+      const marketChange = round27(rawChange - contribution);
+      market_by_asset.push({
+        asset_id: "epf_combined",
+        asset_type: "epf",
+        value_change: round27(rawChange),
+        contribution_adjustment: contribution,
+        market_change: marketChange,
+        source: "epf_combined"
+      });
+    }
+  }
+  for (const a of otherAssets) {
+    const before = valueAt(valuationsByAsset[a.id], prevMs);
+    const after = valueAt(valuationsByAsset[a.id], currMs);
+    const contribution = round27(months * linkedContributionMonthly(items, a.id, curr.asOf, isTransferCategory));
+    if (before == null || after == null) {
+      notes.push(`\u8D44\u4EA7\u300C${a.id}\u300D\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55\uFF0C\u5E02\u573A\u53D8\u52A8\u8BB0\u4E3A 0`);
+      market_by_asset.push({
+        asset_id: a.id,
+        asset_type: a.asset_type,
+        value_change: 0,
+        contribution_adjustment: contribution,
+        market_change: round27(0 - contribution),
+        source: "none",
+        note: "\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55"
+      });
+      continue;
+    }
+    const valueChange = round27(after - before);
+    market_by_asset.push({
+      asset_id: a.id,
+      asset_type: a.asset_type,
+      value_change: valueChange,
+      contribution_adjustment: contribution,
+      market_change: round27(valueChange - contribution),
+      source: "history"
+    });
+  }
+  const hasUnlinkedTransfer = activeItems(items, curr.asOf).some(
+    (it) => isTransferCategory(it.category) && it.linked_asset_id == null
+  );
+  if (hasUnlinkedTransfer)
+    notes.push(NOTE_UNLINKED_TRANSFERS);
+  const marketChangeTotal = round27(market_by_asset.reduce((s, m) => s + m.market_change, 0));
+  const explainedTotal = round27(savings + principal + employerEpf + marketChangeTotal);
+  const unexplainedGap = round27(deltaNetWorth - explainedTotal);
+  return {
+    delta_net_worth: deltaNetWorth,
+    explained: {
+      savings,
+      principal,
+      employer_epf: employerEpf,
+      market_change: marketChangeTotal
+    },
+    market_by_asset,
+    unexplained_gap: unexplainedGap,
+    notes
+  };
+}
+
+// supabase/functions/_shared/finance/alerts.ts
+var MS_PER_DAY2 = 24 * 60 * 60 * 1e3;
+var EMERGENCY_FUND_MONTHS_MIN = 3;
+var UNEXPLAINED_GAP_FLOOR = 5e3;
+var UNEXPLAINED_GAP_PCT_OF_NW = 0.05;
+var DSR_RISE_THRESHOLD = 0.05;
+var DSR_HIGH_THRESHOLD = 0.6;
+var QUARTERLY_DUE_DAYS = 92;
+var QUARTERLY_OVERDUE_DAYS = 120;
+var ANNUAL_DUE_DAYS = 365;
+var SEVERITY_RANK = { high: 0, medium: 1, low: 2 };
+function toUtcMs3(d) {
+  if (typeof d === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d);
+    if (m)
+      return Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return new Date(d).getTime();
+  }
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+function daysBetween(from, to) {
+  return Math.floor((toUtcMs3(to) - toUtcMs3(from)) / MS_PER_DAY2);
+}
+function sortedByDate(snapshots) {
+  return [...snapshots].sort(
+    (a, b) => a.snapshot_date < b.snapshot_date ? -1 : a.snapshot_date > b.snapshot_date ? 1 : 0
+  );
+}
+function lastApproved(reviews, kind) {
+  const approved = reviews.filter((r) => r.kind === kind && r.status === "approved");
+  if (approved.length === 0)
+    return null;
+  return approved.reduce((latest, r) => r.period_end > latest.period_end ? r : latest);
+}
+function computeAlerts(input) {
+  const { client_id, latestSnapshot, reviews, asOf } = input;
+  const liabilities = input.liabilities ?? [];
+  const alerts = [];
+  const push = (code, severity, message_zh, message_en) => alerts.push({ code, severity, message_zh, message_en, client_id });
+  const gap = latestSnapshot.unexplained_gap;
+  const netWorth = latestSnapshot.net_worth ?? 0;
+  if (gap != null) {
+    const threshold = Math.max(UNEXPLAINED_GAP_FLOOR, UNEXPLAINED_GAP_PCT_OF_NW * Math.abs(netWorth));
+    if (Math.abs(gap) > threshold) {
+      push(
+        "unexplained_gap",
+        "medium",
+        `\u51C0\u8D44\u4EA7\u6709 RM ${Math.abs(gap).toLocaleString("en-MY", { maximumFractionDigits: 0 })} \u672A\u80FD\u89E3\u91CA\uFF0C\u8BF7\u68C0\u67E5\u672C\u671F\u8D44\u4EA7/\u8D1F\u503A\u8BB0\u5F55`,
+        `RM ${Math.abs(gap).toLocaleString("en-MY", { maximumFractionDigits: 0 })} of net worth change is unexplained \u2014 review this period's asset/liability entries`
+      );
+    }
+  }
+  const months = latestSnapshot.basic_liquidity_ratio;
+  if (months != null && months < EMERGENCY_FUND_MONTHS_MIN) {
+    push(
+      "emergency_fund_low",
+      "high",
+      `\u7D27\u6025\u9884\u5907\u91D1\u4EC5 ${months.toFixed(1)} \u4E2A\u6708\uFF0C\u4F4E\u4E8E 3 \u4E2A\u6708\u7684\u6700\u4F4E\u6807\u51C6`,
+      `Emergency fund covers only ${months.toFixed(1)} months, below the 3-month minimum`
+    );
+  }
+  const history = sortedByDate(input.snapshots);
+  const prevSnapshot = history.length > 0 ? history[history.length - 1] : null;
+  const currDsr = latestSnapshot.debt_service_ratio;
+  const prevDsr = prevSnapshot?.debt_service_ratio;
+  if (currDsr != null && prevDsr != null) {
+    const risePp = Math.round((currDsr - prevDsr) * 1e4) / 1e4;
+    if (risePp >= DSR_RISE_THRESHOLD) {
+      push(
+        "dsr_rising",
+        "medium",
+        `\u8D1F\u503A\u507F\u8FD8\u6BD4\u7387\u8F83\u4E0A\u6B21\u5FEB\u7167\u4E0A\u5347 ${(risePp * 100).toFixed(1)} \u4E2A\u767E\u5206\u70B9`,
+        `Debt service ratio rose ${(risePp * 100).toFixed(1)} percentage points since the last snapshot`
+      );
+    }
+  }
+  if (currDsr != null && currDsr > DSR_HIGH_THRESHOLD) {
+    push(
+      "dsr_high",
+      "high",
+      `\u8D1F\u503A\u507F\u8FD8\u6BD4\u7387\u8FBE ${(currDsr * 100).toFixed(1)}%\uFF0C\u8D85\u8FC7 60%`,
+      `Debt service ratio is ${(currDsr * 100).toFixed(1)}%, above 60%`
+    );
+  }
+  const lastQuarterly = lastApproved(reviews, "quarterly");
+  if (lastQuarterly) {
+    const since = daysBetween(lastQuarterly.approved_at ?? lastQuarterly.period_end, asOf);
+    if (since > QUARTERLY_OVERDUE_DAYS) {
+      push(
+        "quarterly_review_overdue",
+        "high",
+        `\u5B63\u5EA6\u590D\u68C0\u5DF2\u903E\u671F ${since} \u5929\uFF08\u4E0A\u6B21\u6279\u51C6\uFF1A${lastQuarterly.period_end}\uFF09`,
+        `Quarterly review is ${since} days overdue (last approved: ${lastQuarterly.period_end})`
+      );
+    } else if (since > QUARTERLY_DUE_DAYS) {
+      push(
+        "quarterly_review_due",
+        "medium",
+        `\u5B63\u5EA6\u590D\u68C0\u5DF2\u5230\u671F ${since} \u5929\uFF08\u4E0A\u6B21\u6279\u51C6\uFF1A${lastQuarterly.period_end}\uFF09`,
+        `Quarterly review is due, ${since} days since last approved (${lastQuarterly.period_end})`
+      );
+    }
+  }
+  const lastAnnual = lastApproved(reviews, "annual");
+  if (lastAnnual) {
+    const since = daysBetween(lastAnnual.approved_at ?? lastAnnual.period_end, asOf);
+    if (since > ANNUAL_DUE_DAYS) {
+      push(
+        "annual_review_due",
+        "medium",
+        `\u5E74\u5EA6\u5168\u9762\u590D\u68C0\u5DF2\u5230\u671F ${since} \u5929\uFF08\u4E0A\u6B21\u6279\u51C6\uFF1A${lastAnnual.period_end}\uFF09`,
+        `Annual full review is due, ${since} days since last approved (${lastAnnual.period_end})`
+      );
+    }
+  }
+  if (liabilities.length > 0) {
+    const asOfDate = typeof asOf === "string" ? new Date(asOf) : asOf;
+    const estimatedNames = [];
+    liabilities.forEach((l, i) => {
+      const est = input.loanEstimates?.[i] ?? estimateLoan(l, asOfDate);
+      if (est.estimated.includes("interest_rate"))
+        estimatedNames.push(l.name ?? l.liability_type);
+    });
+    if (estimatedNames.length > 0) {
+      push(
+        "estimated_rate",
+        "low",
+        `${estimatedNames.length} \u9879\u8D1F\u503A\u7684\u5229\u7387\u4E3A\u4F30\u7B97\u503C\uFF08${estimatedNames.join("\u3001")}\uFF09\uFF0C\u590D\u68C0\u65F6\u8BF7\u66F4\u65B0\u5229\u7387`,
+        `${estimatedNames.length} liabilit${estimatedNames.length === 1 ? "y has" : "ies have"} an estimated interest rate (${estimatedNames.join(", ")}) \u2014 update it at the next review`
+      );
+    }
+  }
+  for (const r of reviews) {
+    if (r.status !== "submitted")
+      continue;
+    push(
+      "review_pending",
+      "low",
+      `\u6709\u4E00\u4EFD${r.kind === "quarterly" ? "\u5B63\u5EA6" : "\u5E74\u5EA6"}\u590D\u68C0\uFF08\u622A\u81F3 ${r.period_end}\uFF09\u5F85\u5BA1\u6838`,
+      `A ${r.kind} review (period ending ${r.period_end}) is awaiting approval`
+    );
+  }
+  return alerts.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]);
+}
+
 // supabase/functions/_shared/insurance/cna.ts
 var CNA_DEFAULTS = {
   income_replacement_years: 10,
@@ -2184,7 +2650,7 @@ function driftAgainst(model, allocation) {
 }
 
 // supabase/functions/_shared/taxonomy/index.ts
-function isTransferCategory(code, direction = "outflow") {
+function isTransferCategory2(code, direction = "outflow") {
   return wealthEffectOf(code, direction) === "transfer";
 }
 export {
@@ -2232,7 +2698,9 @@ export {
   categoryLabel,
   classifyAsset,
   classifyCashflowRow,
+  computeAlerts,
   computeCna,
+  computeSnapshot,
   currentAllocationRows,
   deriveLoanItems,
   derivePremiumItems,
@@ -2246,7 +2714,7 @@ export {
   isLiquid,
   isRetirementCapital,
   isSuperseded,
-  isTransferCategory,
+  isTransferCategory2 as isTransferCategory,
   itemMonthlyAmount,
   itemsFromMonthRows,
   levelUpAsset,
@@ -2259,6 +2727,7 @@ export {
   parseDependents,
   planCashflow,
   premiumCategoryOf,
+  reconcile,
   resolveCategory,
   reviseItem,
   riskBandFromSuitability,

@@ -11,6 +11,12 @@ export * from "../cashflow/items.ts";
 export * from "../finance/statutory.ts";
 export * from "../finance/valuation.ts";
 export * from "../finance/assetQuality.ts";
+export { computeSnapshot } from "../finance/snapshot.ts";
+export type { SnapshotInput, SnapshotResult, SnapshotAsset, SnapshotPolicy } from "../finance/snapshot.ts";
+export { reconcile } from "../finance/reconcile.ts";
+export type { ReconcileInput, ReconcileResult, ReconcilePlan, ReconcileAsset, SnapshotRef, AssetMarketChange, MarketChangeSource } from "../finance/reconcile.ts";
+export { computeAlerts } from "../finance/alerts.ts";
+export type { Alert, AlertSeverity, AlertSnapshot, AlertReview, AlertLiability, ComputeAlertsInput } from "../finance/alerts.ts";
 // P5 决策 1: the one canonical insurance CNA formula — api/health.js and the
 // client portal read this (via api/_lib/taxonomy.mjs) instead of computing
 // their own gap math. No name collisions with anything else re-exported here
