@@ -4,9 +4,12 @@ import { useLanguage } from '../../../context/LanguageContext';
 import { RefreshCw } from 'lucide-react';
 import { firstDayOfCurrentMonth, fmtMultiplier, fmtPercent, fmtRM, safeNumber, yyyyMmDd } from '../utils/finance';
 import {
-  annualizeCashflow, defaultBasis, type PeriodRow,
+  defaultBasis, type PeriodRow,
 } from '../../../supabase/functions/_shared/cashflow/periods';
 import { isLiquid } from '../../../supabase/functions/_shared/taxonomy/balance';
+import {
+  planCashflow, type LiabilityRow, type PolicyRow,
+} from '../../../supabase/functions/_shared/finance/derived';
 
 type Tone = 'good' | 'warn' | 'bad' | 'na';
 
@@ -47,9 +50,9 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
       const today = new Date().toISOString().split('T')[0];
       const [{ data: assets, error: aErr }, { data: liabilities, error: lErr }, { data: cashflow, error: cErr }, { data: policies, error: pErr }] = await Promise.all([
         supabase.from('assets').select('current_value, asset_type').eq('client_id', clientId),
-        supabase.from('liabilities').select('outstanding_balance, monthly_payment').eq('client_id', clientId),
+        supabase.from('liabilities').select('id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, remaining_months, rate_type, original_principal, end_date').eq('client_id', clientId),
         supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category').eq('client_id', clientId),
-        supabase.from('insurance_policies').select('sum_assured, policy_type, end_date').eq('client_id', clientId),
+        supabase.from('insurance_policies').select('id, policy_type, plan_name, provider, premium, premium_frequency, sum_assured, end_date').eq('client_id', clientId),
       ]);
 
       const combinedError = aErr || lErr || cErr || pErr;
@@ -58,17 +61,20 @@ export default function HealthScoreCard({ clientId }: { clientId: string }) {
       // A row records ONE MONTH'S actual figure, so the run-rate these ratios
       // need comes from averaging the recorded months — not from converting
       // every row to a monthly rate and summing them, which treats June's and
-      // July's positions as two concurrent commitments. Same function the CFP
-      // report uses (_shared/cashflow/periods.ts); no basis is chosen on this
-      // widget, so it takes every month the client has on record.
+      // July's positions as two concurrent commitments. planCashflow wraps that
+      // same averaging (_shared/cashflow/periods.ts) and ALSO folds in the
+      // installments/premiums a liability or policy implies — those never
+      // live in cashflow_entries (spec 2026-09-24-cfp-p2a decision 1), so the
+      // old plain monthly_payment sum silently undercounted debt service.
       const rows = (cashflow || []) as PeriodRow[];
-      const totals = annualizeCashflow(rows, defaultBasis(rows));
-      const monthlyIncome = totals.monthly_income;
-      const monthlyExpenses = totals.monthly_expenses;
+      const liabilityRows = (liabilities || []) as LiabilityRow[];
+      const policyRows = (policies || []) as PolicyRow[];
+      const plan = planCashflow({ rows, liabilities: liabilityRows, policies: policyRows, basis: defaultBasis(rows) });
+      const monthlyIncome = plan.totals.monthly_income;
+      const monthlyExpenses = plan.totals.monthly_expenses;
       const monthlySurplus = monthlyIncome - monthlyExpenses;
 
-      const totalMonthlyLoanRepayment = (liabilities || [])
-        .reduce((s: number, l: any) => s + safeNumber(l.monthly_payment), 0);
+      const totalMonthlyLoanRepayment = plan.monthly_debt_service;
 
       const liquidAssets = (assets || [])
         .filter((a: any) => isLiquid(a.asset_type))

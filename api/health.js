@@ -1,11 +1,9 @@
 import { applyCors, configError, getAuthUser, supabaseAdmin } from './_lib/supabase.js';
 import { assetCategory, cashflowLabel } from './_lib/portalLabels.js';
 import { categoryLabel, isTransferCategory } from './_lib/taxonomy.mjs';
-
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December'
-];
+import {
+  MONTH_NAMES, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear,
+} from './_lib/portalDerived.js';
 
 const monthName = (dateStr) => {
   const d = new Date(dateStr);
@@ -131,8 +129,11 @@ export default async function handler(req, res) {
     });
 
   const expenseRecords = (cashflows || [])
-    // saving and investing is not spending
+    // saving and investing is not spending; a row now covered by a liability's
+    // or policy's own derived installment/premium is dropped here too (决策 4)
+    // so it isn't double-counted against the derived record appended below.
     .filter((c) => c.direction === 'outflow' && !isTransferCategory(c.category, 'outflow'))
+    .filter((c) => !isSupersededOutflow(c, liabilities || [], insurances || []))
     .map((c) => {
       const date = c.period_month || c.created_at;
       const type = cashflowLabel('outflow', c.category);
@@ -146,6 +147,19 @@ export default async function handler(req, res) {
         'Date': toMs(date)
       });
     });
+
+  // Installments (from liabilities) and premiums (from active policies) never
+  // live in cashflow_entries (spec decision 1) — computed here at read time
+  // and filed under the same Year/Month the client portal already treats as
+  // "latest" (services/apiService.ts getLatestRecords), so they're picked up
+  // alongside the manual rows for that period instead of being invisible.
+  const { month: latestMonth, year: latestYear } = latestMonthYear(expenseRecords);
+  const derivedExpenseRecords = buildDerivedExpenseRecords({
+    liabilities: liabilities || [],
+    policies: insurances || [],
+    month: latestMonth,
+    year: latestYear,
+  }).map((r) => record(r.id, r.fields));
 
   const holdingsByMonth = new Map();
   for (const h of holdings || []) {
@@ -214,7 +228,7 @@ export default async function handler(req, res) {
     assets: assetRecords,
     liabilities: liabilityRecords,
     incomes: incomeRecords,
-    expenses: expenseRecords,
+    expenses: [...expenseRecords, ...derivedExpenseRecords],
     investments: [...investmentRecords, ...investmentAssetRecords],
     insurances: insuranceRecords,
     snapshots: snapshotRecords
