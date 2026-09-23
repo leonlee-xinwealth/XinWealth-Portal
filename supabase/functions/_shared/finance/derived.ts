@@ -412,6 +412,19 @@ function planCashflowFromItems(input: PlanCashflowInput): PlanCashflowResult {
 
   const itemTotals = annualizeItems(kept, today);
 
+  // one_off_items must be scanned from EVERY non-superseded item, not just
+  // the ones active "at today" (`kept`, above). isActiveAt requires
+  // effective_from ≤ month(today) ≤ effective_to, and a one_off item's
+  // effective_to === effective_from (a single month) — so a one_off item
+  // scheduled outside that exact month (e.g. 5 months in the future, or 3
+  // months in the past) is never "active at today" and `activeItems` drops
+  // it before annualizeItems ever sees it, even though it plainly belongs in
+  // annualizeItems' own ±11/+12-month surfacing window. Recurring totals
+  // above correctly stay based on `kept` (active items only); only the
+  // one_off listing needs the broader, non-superseded set.
+  const nonSupersededAll = items.filter((it) => !isSuperseded(it, liabilities, policies));
+  const one_off_items = annualizeItems(nonSupersededAll, today).one_off_items;
+
   const loanItems = deriveLoanItems(liabilities, today);
   const premiumItems = derivePremiumItems(policies, today);
   const statutory = deriveStatutoryForHousehold(items, client, clients, today);
@@ -426,7 +439,7 @@ function planCashflowFromItems(input: PlanCashflowInput): PlanCashflowResult {
   const monthly_expenses = round2(itemTotals.monthly_expenses + derivedMonthlyExpense);
   const annual_expenses = round2(itemTotals.annual_expenses + derivedMonthlyExpense * 12);
 
-  const { one_off_items, ...itemTotalsRest } = itemTotals;
+  const { one_off_items: _itemTotalsOneOff, ...itemTotalsRest } = itemTotals;
   const totals: CashflowTotals = {
     ...itemTotalsRest,
     monthly_expenses,

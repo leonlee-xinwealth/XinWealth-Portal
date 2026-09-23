@@ -112,3 +112,53 @@ Deno.test("P2a: expense breakdown includes derived installments/premium; shares 
   const shares = d.expense_breakdown.reduce((s, e) => s + (e.share ?? 0), 0);
   assert(shares <= 1.0001, `shares add to ${shares}`);
 });
+
+// ---------------------------------------------------------------------------
+// P2b 决策 1/6 — on the items path, the breakdown reads active,
+// non-superseded standing items (+ derived, incl. statutory) instead of
+// cashflow_entries actuals. epf_employee (a transfer) never reaches the
+// expense breakdown but does count in asset_transfers_monthly; socso_eis (a
+// real O9 expense) reaches the expense breakdown.
+// ---------------------------------------------------------------------------
+
+Deno.test("P2b: items-path breakdown comes from standing items + statutory; epf_employee excluded from expenses, socso_eis included", () => {
+  const d = det({
+    client: { ...makeCfpData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+      { direction: "outflow", category: "groceries", amount: 1000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+
+  assertEquals(d.income_breakdown.find((c) => c.category === "salary_basic")?.monthly_amount, 8000);
+  assertEquals(d.expense_breakdown.find((c) => c.category === "groceries")?.monthly_amount, 1000);
+  // SOCSO/EIS (42/mo on an uncapped 8,000 wage) is a real expense.
+  assertEquals(d.expense_breakdown.find((c) => c.category === "socso_eis")?.monthly_amount, 42);
+  // epf_employee (880/mo) is a transfer — never in the expense breakdown,
+  // but it does count toward asset_transfers_monthly.
+  assertEquals(d.expense_breakdown.find((c) => c.category === "epf_employee"), undefined);
+  assertEquals(d.asset_transfers_monthly, 880);
+
+  const shares2 = d.expense_breakdown.reduce((s, e) => s + (e.share ?? 0), 0);
+  assert(shares2 <= 1.0001, `shares add to ${shares2}`);
+});
+
+Deno.test("P2b: computeCashflow surfaces one_off_items verbatim from the baseline", () => {
+  const withOneOff = det({
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+      { direction: "outflow", category: "travel", amount: 5000, frequency: "one_off", effective_from: "2026-06-01", effective_to: "2026-06-01" },
+    ],
+  });
+  assertEquals(withOneOff.one_off_items.length, 1);
+  assertEquals(withOneOff.one_off_items[0].category, "travel");
+
+  const actuals = det();
+  assertEquals(actuals.one_off_items, []);
+});

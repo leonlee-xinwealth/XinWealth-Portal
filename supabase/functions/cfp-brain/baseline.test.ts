@@ -286,3 +286,66 @@ Deno.test("P2a: 乙's derived installments/premium turn a reported near-breakeve
     b.baseline_notes.join(" | "),
   );
 });
+
+// ---------------------------------------------------------------------------
+// P2b — standing items (决策 1) and statutory EPF/SOCSO/EIS (决策 6). NOW =
+// 2026-07-16, so items are evaluated "as of" 2026-07.
+// ---------------------------------------------------------------------------
+
+Deno.test("P2b: a standing salary item switches cashflow_source to 'items' and derives statutory deductions", () => {
+  const f = makeCfpData({
+    client: { ...makeCfpData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  const b = computeBaseline(f, {}, NOW);
+
+  assertEquals(b.cashflow_source, "items");
+  assertEquals(b.items_as_of, "2026-07-01");
+  assertEquals(b.annual_income, 96000);
+
+  // wage 8,000: employee 11% = 880 (transfer, never in expenses), employer
+  // 12% (>5,000 threshold) = 960, SOCSO/EIS 0.7% of the 6,000-capped wage = 42.
+  assertEquals(b.monthly_employee_epf, 880);
+  assertEquals(b.monthly_employer_epf, 960);
+  assertAlmostEquals(b.monthly_socso_eis, 42, 0.01);
+  assertAlmostEquals(b.annual_expenses, 42 * 12, 0.01);
+
+  // annual_disposable_surplus = annual_surplus − 12 × employee EPF.
+  assertEquals(b.annual_disposable_surplus, b.annual_surplus - 880 * 12);
+
+  assert(b.baseline_notes.some((n) => n.includes("常设项目") && n.includes("2026-07")), b.baseline_notes.join(" | "));
+  assert(b.baseline_notes.some((n) => n.includes("按法定比例估算")), b.baseline_notes.join(" | "));
+  assertEquals(b.one_off_items, []);
+});
+
+Deno.test("P2b: no items stays on the actuals path — cashflow_source, statutory fields and disposable surplus are all unaffected", () => {
+  const b = computeBaseline(makeCfpData(), {}, NOW);
+  assertEquals(b.cashflow_source, "actuals");
+  assertEquals(b.items_as_of, null);
+  assertEquals(b.monthly_employee_epf, 0);
+  assertEquals(b.monthly_employer_epf, 0);
+  assertEquals(b.monthly_socso_eis, 0);
+  assertEquals(b.annual_disposable_surplus, b.annual_surplus);
+  assertEquals(b.one_off_items, []);
+});
+
+Deno.test("P2b: has_epf true but no active salary items derives no statutory deductions", () => {
+  const f = makeCfpData({
+    client: { ...makeCfpData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "outflow", category: "groceries", amount: 500, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  const b = computeBaseline(f, {}, NOW);
+  assertEquals(b.monthly_employee_epf, 0);
+  assertEquals(b.monthly_employer_epf, 0);
+  assertEquals(b.monthly_socso_eis, 0);
+});

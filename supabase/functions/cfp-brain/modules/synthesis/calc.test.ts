@@ -83,6 +83,37 @@ Deno.test("budget waterfall allocates by fixed priority and truncates when over 
   assertEquals(w2.allocated_annual, 0);
 });
 
+// ---------------------------------------------------------------------------
+// P2b 决策 6 — forced EPF savings can't be reallocated by the waterfall, so
+// it must run off annual_disposable_surplus, not the raw annual_surplus.
+// ---------------------------------------------------------------------------
+
+Deno.test("P2b: budget waterfall surplus uses annual_disposable_surplus, not annual_surplus, when there's a statutory EPF figure", () => {
+  const f = makeCfpData({
+    client: { ...makeCfpData().client, has_epf: true },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  const b = computeBaseline(f, {}, NOW);
+  assert(b.annual_disposable_surplus < b.annual_surplus, "employee EPF must reduce the disposable surplus");
+
+  const det = computeSynthesis(f, b, makePrior());
+  assertEquals(det.budget.annual_surplus, Math.max(0, b.annual_disposable_surplus));
+  assert(det.budget.annual_surplus < b.annual_surplus);
+});
+
+Deno.test("P2b: no statutory EPF (actuals path) leaves the waterfall surplus exactly as before", () => {
+  const f = makeCfpData();
+  const b = computeBaseline(f, {}, NOW);
+  assertEquals(b.annual_disposable_surplus, b.annual_surplus);
+  const det = computeSynthesis(f, b, makePrior());
+  assertEquals(det.budget.annual_surplus, Math.max(0, b.annual_surplus));
+});
+
 Deno.test("health score renormalises weights when components are missing", () => {
   const f = makeCfpData();
   const b = computeBaseline(f, {}, NOW);

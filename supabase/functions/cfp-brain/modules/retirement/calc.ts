@@ -231,7 +231,15 @@ export function computeRetirement(
     retirementYears,
   );
 
-  const annualEpfContribution = f.client.employment_status === "employed"
+  // P2b 决策 6: when standing items produced a real statutory EPF figure, use
+  // it directly (12 × employee + employer) instead of the 23% rule-of-thumb —
+  // it already reflects the client's actual wage base, age band and the
+  // ≤/>5,000 employer-rate threshold. Falls back to the old estimate when
+  // there is no statutory item (actuals path, or has_epf isn't true).
+  const statutoryMonthlyEpf = (b.monthly_employee_epf ?? 0) + (b.monthly_employer_epf ?? 0);
+  const annualEpfContribution = statutoryMonthlyEpf > 0
+    ? 12 * statutoryMonthlyEpf
+    : f.client.employment_status === "employed"
     ? EPF_CONTRIBUTION_RATE * b.annual_income
     : 0;
 

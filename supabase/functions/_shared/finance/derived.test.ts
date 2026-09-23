@@ -344,6 +344,29 @@ Deno.test("planCashflow `clients`: absent falls back to the single-client `clien
   assertEquals(result.monthly_employer_epf, 960);
 });
 
+Deno.test("planCashflow (items path): a one_off item outside the active-at-today window still surfaces, as long as it's within annualizeItems' ±11/+12-month window", () => {
+  // TODAY = 2026-06-01. A one_off item 3 months ago (2026-03) and one 5
+  // months ahead (2026-11) are both well inside annualizeItems' ±11/+12
+  // surfacing window, but NEITHER is "active at today" (isActiveAt requires
+  // effective_from ≤ month(today) ≤ effective_to, and a one_off's
+  // effective_to === effective_from). Filtering by activeItems() before
+  // scanning for one_off items (the bug this pins) would silently drop both.
+  const items: StandingItem[] = [
+    { direction: "outflow", category: "car_repair", amount: 2000, frequency: "one_off", effective_from: "2026-03-01", effective_to: "2026-03-01" },
+    { direction: "outflow", category: "travel", amount: 3000, frequency: "one_off", effective_from: "2026-11-01", effective_to: "2026-11-01" },
+  ];
+  const result = planCashflow({ rows: [], liabilities: [], policies: [], basis: null, items, today: TODAY });
+
+  assertEquals(result.one_off_items.length, 2);
+  assertEquals(
+    result.one_off_items.map((i) => i.effective_from).sort(),
+    ["2026-03-01", "2026-11-01"],
+  );
+  // Neither one_off item is recurring, so totals stay untouched.
+  assertEquals(result.totals.monthly_expenses, 0);
+  assertEquals(result.totals.annual_expenses, 0);
+});
+
 Deno.test("planCashflow (items path): one_off items are surfaced; the actuals path always returns an empty list", () => {
   const items: StandingItem[] = [
     { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },

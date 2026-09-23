@@ -1458,6 +1458,8 @@ function planCashflowFromItems(input) {
       kept.push(it);
   }
   const itemTotals = annualizeItems(kept, today);
+  const nonSupersededAll = items.filter((it) => !isSuperseded(it, liabilities, policies));
+  const one_off_items = annualizeItems(nonSupersededAll, today).one_off_items;
   const loanItems = deriveLoanItems(liabilities, today);
   const premiumItems = derivePremiumItems(policies, today);
   const statutory = deriveStatutoryForHousehold(items, client, clients, today);
@@ -1470,7 +1472,7 @@ function planCashflowFromItems(input) {
   }
   const monthly_expenses = round24(itemTotals.monthly_expenses + derivedMonthlyExpense);
   const annual_expenses = round24(itemTotals.annual_expenses + derivedMonthlyExpense * 12);
-  const { one_off_items, ...itemTotalsRest } = itemTotals;
+  const { one_off_items: _itemTotalsOneOff, ...itemTotalsRest } = itemTotals;
   const totals = {
     ...itemTotalsRest,
     monthly_expenses,

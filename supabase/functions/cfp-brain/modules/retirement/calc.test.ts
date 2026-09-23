@@ -50,6 +50,32 @@ Deno.test("EPF contribution is zero when the client is not employed", () => {
   assertEquals(d.epf_projected, Math.round(100000 * epfGrowth));
 });
 
+// ---------------------------------------------------------------------------
+// P2b 决策 6 — a real statutory EPF figure (from standing salary items) wins
+// over the 23%-of-income rule of thumb.
+// ---------------------------------------------------------------------------
+
+Deno.test("annual_epf_contribution uses 12 × (employee + employer) when standing items produced a statutory figure", () => {
+  const d = det({
+    client: { ...makeCfpData().client, has_epf: true },
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  // wage 8,000: employee 11% = 880, employer 12% (>5,000 threshold) = 960.
+  assertEquals(d.annual_epf_contribution, 12 * (880 + 960));
+});
+
+Deno.test("annual_epf_contribution falls back to the 23% rule when the items path has no statutory figure", () => {
+  const d = det({
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  }); // has_epf defaults to false — no statutory items are derived
+  // Falls back to 23% of the items-path annual_income (8,000 × 12).
+  assertEquals(d.annual_epf_contribution, Math.round(0.23 * (8000 * 12)));
+});
+
 Deno.test("missing date of birth: insufficient_data with all projections zeroed", () => {
   const d = det({ client: { ...makeCfpData().client, date_of_birth: null } });
   assert(d.insufficient_data);
