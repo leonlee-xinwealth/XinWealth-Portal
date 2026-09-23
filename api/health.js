@@ -230,6 +230,17 @@ export default async function handler(req, res) {
     });
   });
 
+  // Current ratios/position read from the plan (决策 1: cashflow_items when
+  // the client has any, otherwise the averaged actuals) — the month-by-month
+  // history above (incomes/expenses) intentionally stays on cashflow_entries.
+  const current = buildCurrentPlan({
+    rows: cashflows || [],
+    liabilities: liabilities || [],
+    policies: insurances || [],
+    items: items || [],
+    client: { has_epf: clientRow.has_epf, date_of_birth: clientRow.date_of_birth },
+  });
+
   return res.status(200).json({
     assets: assetRecords,
     liabilities: liabilityRecords,
@@ -237,6 +248,7 @@ export default async function handler(req, res) {
     expenses: [...expenseRecords, ...derivedExpenseRecords],
     investments: [...investmentRecords, ...investmentAssetRecords],
     insurances: insuranceRecords,
-    snapshots: snapshotRecords
+    snapshots: snapshotRecords,
+    current
   });
 }
