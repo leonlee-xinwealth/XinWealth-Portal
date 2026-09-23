@@ -174,7 +174,7 @@ export function ExecSummary({ data }: CfpPageProps) {
       {/* headline figure band — the template's gold bar */}
       <View style={{ backgroundColor: T.gold, paddingVertical: 9, paddingHorizontal: SPACE.lg }}>
         <Text style={{ fontFamily: FONT.serif, fontWeight: WEIGHT.bold, fontSize: TYPE.h2 + 1, color: T.blue, lineHeight: LEADING.tight }}>
-          年度可支配盈余 {money(data.baseline?.annual_surplus ?? null)} · 已规划 {planned} / {rows.length} 个板块
+          年度可支配盈余 {money(data.baseline?.annual_disposable_surplus ?? data.baseline?.annual_surplus ?? null)} · 已规划 {planned} / {rows.length} 个板块
         </Text>
       </View>
 
