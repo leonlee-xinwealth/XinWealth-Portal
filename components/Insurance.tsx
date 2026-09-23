@@ -1,11 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { fetchFinancialHealth } from '../services/apiService';
-import { Loader2, Shield, AlertTriangle } from 'lucide-react';
-import { FinancialHealthData } from '../types';
+import { Loader2, Shield, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { CnaLineItem, CnaMedicalItem, CnaProtectionSet, CnaResult, FinancialHealthData } from '../types';
+import { useLanguage } from '../context/LanguageContext';
 
 type TabType = 'overview' | 'policies';
+type CategoryKey = keyof CnaProtectionSet;
 
-// Helpers
+// P5 (2026-09-26-cfp-p5-insurance-design.md 决策 1/4): this page no longer
+// owns any gap formula (it used to hard-code 10x/3x/5x-income multiples and a
+// flat RM1,000,000 medical target that never matched the advisor panel or the
+// CFP report). It renders `insurance_gap` — the SAME computeCna() output the
+// advisor's InsuranceGapPanel.tsx and both PDF exporters render — verbatim.
+
+const CATEGORY_ROWS: Array<{ key: CategoryKey; en: string; zh: string; needBased: boolean }> = [
+  { key: 'death', en: 'Death', zh: '身故', needBased: true },
+  { key: 'tpd', en: 'TPD', zh: '全残（TPD）', needBased: true },
+  { key: 'ci', en: 'Critical Illness', zh: '重大疾病', needBased: true },
+  { key: 'ci_early_cover', en: 'Early-stage CI (cover only)', zh: '早期重疾（只显示保障）', needBased: false },
+  { key: 'medical', en: 'Medical', zh: '医药', needBased: false },
+  { key: 'pa', en: 'Personal Accident (cover only)', zh: '意外（只显示保障）', needBased: false },
+];
+
+const STATUS_LABELS: Record<string, [string, string]> = {
+  in_force: ['In Force', '有效'],
+  lapsed: ['Lapsed', '已失效'],
+  paid_up: ['Paid-up', '已缴清'],
+  surrendered: ['Surrendered', '已退保'],
+  matured: ['Matured', '已满期'],
+};
+const STATUS_COLORS: Record<string, string> = {
+  in_force: 'bg-emerald-50 text-emerald-700',
+  lapsed: 'bg-red-50 text-red-600',
+  paid_up: 'bg-blue-50 text-blue-700',
+  surrendered: 'bg-slate-100 text-slate-500',
+  matured: 'bg-slate-100 text-slate-500',
+};
+
+// Helpers for reading the { id, fields: {...} } shape api/health.js returns.
 const extractValue = (item: any, fields: string[]): number => {
   if (!item || !item.fields) return 0;
   for (const field of fields) {
@@ -43,66 +75,34 @@ const extractString = (item: any, fields: string[], defaultValue: string = 'Unkn
   return defaultValue;
 };
 
+const extractBool = (item: any, field: string): boolean => !!item?.fields?.[field];
+
 const formatRM = (value: number) => {
   return new Intl.NumberFormat('en-MY', {
     style: 'currency',
     currency: 'MYR',
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(value || 0);
 };
 
-// 颜色阈值（Overview 横幅 + 拨盘共用）
-const getCoverageColor = (pct: number): string => {
-  if (pct >= 100) return '#10b981';
-  if (pct >= 50) return '#f59e0b';
-  return '#ef4444';
-};
-
-// 整体保障评分（充足类别数 / 总类别数 * 100）
-const getBannerScore = (reqs: Array<{ current: number; required: number }>) => {
-  const total = reqs.length;
-  const sufficient = reqs.filter(r => r.required > 0 && r.current >= r.required).length;
-  const atRisk = reqs.filter(r => {
-    const pct = r.required > 0 ? r.current / r.required : 0;
-    return pct >= 0.5 && pct < 1;
-  }).length;
-  const critical = reqs.filter(r => {
-    const pct = r.required > 0 ? r.current / r.required : 0;
-    return pct < 0.5;
-  }).length;
-  const scorePct = total > 0 ? Math.round((sufficient / total) * 100) : 0;
-  const label = scorePct >= 80 ? 'Protected' : scorePct >= 50 ? 'Partial' : 'At Risk';
-  const color = getCoverageColor(scorePct);
-  return { scorePct, label, color, sufficient, atRisk, critical };
-};
-
-// 拨盘每格配置
-const getDialConfig = (req: { current: number; required: number }) => {
-  const pct = req.required > 0 ? Math.min(100, (req.current / req.required) * 100) : 0;
-  const color = getCoverageColor(pct);
-  const shortfall = req.required - req.current;
-  return { pct: Math.round(pct), color, shortfall };
-};
-
-const COVERAGE_TAGS = [
-  { key: 'dd',  label: 'Death & Disability', bg: '#eff6ff', color: '#1d4ed8', fields: ['Death', 'death', 'TPD', 'tpd'] },
-  { key: 'med', label: 'Medical',             bg: '#f0fdf4', color: '#166534', fields: ['Medical Annual limit', 'medical annual limit'] },
-  { key: 'ci',  label: 'Critical Illness',   bg: '#fdf4ff', color: '#7e22ce', fields: ['Advance Critical Illness', 'advance critical illness', 'Early Critical Illness', 'early critical illness'] },
-  { key: 'acc', label: 'Accident',            bg: '#fff7ed', color: '#c2410c', fields: ['Personal Accident', 'personal accident'] },
-] as const;
-
-const getPolicyCoverageTags = (record: any) => {
-  return COVERAGE_TAGS.filter(tag =>
-    tag.fields.some((field: string) => extractValue(record, [field]) > 0)
-  );
+const toneClasses: Record<string, string> = {
+  good: 'text-emerald-600 bg-emerald-50',
+  warn: 'text-amber-600 bg-amber-50',
+  bad: 'text-red-500 bg-red-50',
+  na: 'text-slate-400 bg-slate-50',
 };
 
 const Insurance: React.FC = () => {
+  const { language } = useLanguage();
+  const isZh = language === 'zh';
+  const t = (en: string, zh: string) => (isZh ? zh : en);
+
   const [data, setData] = useState<FinancialHealthData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [excludeGroup, setExcludeGroup] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -124,7 +124,7 @@ const Insurance: React.FC = () => {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center space-y-4 animate-fade-in">
         <Loader2 className="w-10 h-10 text-xin-blue animate-spin" />
-        <p className="text-xin-blue text-sm font-medium tracking-widest uppercase">Calculating Coverage...</p>
+        <p className="text-xin-blue text-sm font-medium tracking-widest uppercase">{t('Loading Coverage...', '正在加载保障信息...')}</p>
       </div>
     );
   }
@@ -135,7 +135,7 @@ const Insurance: React.FC = () => {
         <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6">
           <AlertTriangle className="text-red-500 w-10 h-10" />
         </div>
-        <h3 className="text-2xl font-bold text-slate-800 mb-2">Failed to load data</h3>
+        <h3 className="text-2xl font-bold text-slate-800 mb-2">{t('Failed to load data', '加载失败')}</h3>
         <p className="text-slate-500 max-w-md">{error}</p>
       </div>
     );
@@ -144,30 +144,41 @@ const Insurance: React.FC = () => {
   if (!data) return null;
 
   const annualIncome = data.raw.annualIncome || 0;
-  const insuranceRecords = data.raw.insurance || [];
+  const insuranceRecords: any[] = data.raw.insurance || [];
+  const gapResult: CnaResult | null = data.insuranceGap;
+  const activeSet: CnaProtectionSet | null = gapResult ? (excludeGroup ? gapResult.excluding_group : gapResult) : null;
 
-  // Calculate total coverage for a specific column field across all insurance records
-  const getCoverage = (fieldNames: string[]) => {
-    return insuranceRecords.reduce((sum: number, record: any) => {
-      return sum + extractValue(record, fieldNames);
-    }, 0);
-  };
+  // Protection score — same "how many need-based categories are fully
+  // covered" idea the old banner used, now driven off the shared gap output
+  // instead of a page-local requirements list.
+  const needBasedRows = CATEGORY_ROWS.filter((r) => r.needBased);
+  const sufficientCount = activeSet
+    ? needBasedRows.filter((r) => {
+        const item = activeSet[r.key] as CnaLineItem;
+        return item.gap != null && item.gap <= 0;
+      }).length
+    : 0;
+  const scorePct = needBasedRows.length > 0 ? Math.round((sufficientCount / needBasedRows.length) * 100) : 0;
+  const scoreLabel = gapResult?.insufficient
+    ? t('Add income', '待补充收入')
+    : scorePct >= 80 ? t('Protected', '保障充足') : scorePct >= 50 ? t('Partial', '部分保障') : t('At Risk', '保障不足');
+  const scoreColor = scorePct >= 80 ? '#10b981' : scorePct >= 50 ? '#f59e0b' : '#ef4444';
+  const RING_R = 30;
+  const RING_CIRC = 2 * Math.PI * RING_R;
+  const ringDash = (scorePct / 100) * RING_CIRC;
 
-  // Extract policy URL
-  const getPolicyUrl = (item: any): string | null => {
-    // PDF download is disabled for this milestone.
-    // It will be re-enabled in the advisor portal phase with Supabase Storage.
-    return null;
-  };
-
-  // Parse policies for the table
+  // Parse policies for the list — Sum Assured/Premium stay for backward
+  // compatibility; Status/Is Group Employer/Cash Value are P5's additions.
   const policies = insuranceRecords.map((record, idx) => ({
     id: record.id || record.record_id || `policy-${idx}`,
     insurer: extractString(record, ['Insurer', 'insurer', 'Company', 'company']),
     planName: extractString(record, ['Plan Name', 'plan name', 'Plan', 'plan', 'Policy Name', 'policy name']),
     policyNumber: extractString(record, ['Policy Number', 'policy number', 'Policy No', 'policy no']),
     premium: extractValue(record, ['Premium', 'premium']),
-    policyUrl: getPolicyUrl(record),
+    sumAssured: extractValue(record, ['Sum Assured', 'sum assured']),
+    status: extractString(record, ['Status'], 'in_force'),
+    isGroupEmployer: extractBool(record, 'Is Group Employer'),
+    cashValue: record.fields?.['Cash Value'] ?? null,
     rawRecord: record,
   })).filter(p => p.planName !== 'Unknown' || p.policyNumber !== 'Unknown');
 
@@ -186,56 +197,70 @@ const Insurance: React.FC = () => {
     return Array.from(map.entries()).map(([insurer, val]) => ({ insurer, ...val }));
   })();
 
-  // Requirements Map
-  const requirements = [
-    {
-      id: 'accident',
-      title: 'Accident',
-      description: 'Standard: 10x Annual Income',
-      current: getCoverage(['Personal Accident', 'personal accident']),
-      required: annualIncome * 10,
-    },
-    {
-      id: 'basicMedical',
-      title: 'Basic Medical',
-      description: 'Standard: At least RM 1,000,000',
-      current: getCoverage(['Medical Annual limit', 'medical annual limit']),
-      required: 1000000,
-    },
-    {
-      id: 'criticalIllnessAdvance',
-      title: 'Critical Illness (Advance)',
-      description: 'Standard: 3x Annual Income',
-      current: getCoverage(['Advance Critical Illness', 'advance critical illness']),
-      required: annualIncome * 3,
-    },
-    {
-      id: 'disability',
-      title: 'Disability',
-      description: 'Standard: 10x Annual Income',
-      current: getCoverage(['TPD', 'tpd']),
-      required: annualIncome * 10,
-    },
-    {
-      id: 'earlyCriticalIllness',
-      title: 'Early Critical Illness',
-      description: 'Standard: 50% of Critical Illness (Advance)',
-      current: getCoverage(['Early Critical Illness', 'early critical illness']),
-      required: annualIncome * 3 * 0.5,
-    },
-    {
-      id: 'familyProtection',
-      title: 'Family Protection',
-      description: 'Standard: 10x Annual Income',
-      current: getCoverage(['Death', 'death']),
-      required: annualIncome * 10,
-    }
-  ];
+  const renderGapRow = (row: typeof CATEGORY_ROWS[number]) => {
+    if (!activeSet) return null;
+    const item = activeSet[row.key];
+    const isInsufficient = row.needBased && gapResult?.insufficient;
+    const need = item.need;
+    const gap = item.gap;
+    const tone: 'good' | 'warn' | 'bad' | 'na' = (() => {
+      if (row.key === 'medical') {
+        const m = item as CnaMedicalItem;
+        if (!m.has_cover) return 'bad';
+        if (m.low_limit) return 'warn';
+        if (m.limit_unknown) return 'warn';
+        return 'good';
+      }
+      if (!row.needBased || isInsufficient || need == null) return 'na';
+      return (gap ?? 0) > 0 ? 'bad' : 'good';
+    })();
+    const ToneIcon = tone === 'good' ? CheckCircle2 : tone === 'bad' ? XCircle : null;
 
-  const bannerData = getBannerScore(requirements);
-  const RING_R = 30;
-  const RING_CIRC = 2 * Math.PI * RING_R;
-  const ringDash = (bannerData.scorePct / 100) * RING_CIRC;
+    return (
+      <div key={row.key} className="px-5 py-4 border-t border-slate-50 first:border-t-0">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            {ToneIcon ? <ToneIcon size={16} className={tone === 'good' ? 'text-emerald-500' : 'text-red-500'} /> : <span className="w-4" />}
+            <span className="font-bold text-xin-blue">{t(row.en, row.zh)}</span>
+          </div>
+          <div className={`text-xs font-bold px-2 py-1 rounded-full ${toneClasses[tone]}`}>
+            {row.key === 'medical'
+              ? (item as CnaMedicalItem).has_cover
+                ? `${t('Has cover', '已投保')}${(item as CnaMedicalItem).annual_limit > 0 ? ` · RM ${formatRM((item as CnaMedicalItem).annual_limit)}/${t('yr', '年')}` : ''}${(item as CnaMedicalItem).low_limit ? ` · ${t('Low limit', '限额偏低')}` : ''}${(item as CnaMedicalItem).limit_unknown ? ` · ${t('Limit unrecorded', '未记录')}` : ''}`
+                : t('No cover', '未投保')
+              : (!row.needBased || isInsufficient || need == null)
+                ? `RM ${formatRM(item.cover)} ${t('cover', '保障')}`
+                : `${t('Gap', '缺口')} RM ${formatRM(gap ?? 0)}`}
+          </div>
+        </div>
+        <div className="mt-2 grid grid-cols-3 gap-3 text-xs">
+          <div>
+            <p className="text-slate-400 uppercase tracking-wider font-semibold mb-0.5">{t('Need', '需求')}</p>
+            <p className="font-bold text-slate-700">{row.needBased && !isInsufficient && need != null ? `RM ${formatRM(need)}` : '—'}</p>
+          </div>
+          <div>
+            <p className="text-slate-400 uppercase tracking-wider font-semibold mb-0.5">{t('Cover', '现有保障')}</p>
+            <p className="font-bold text-slate-700">
+              {row.key === 'medical' ? ((item as CnaMedicalItem).has_cover ? `RM ${formatRM((item as CnaMedicalItem).annual_limit)}` : t('None', '无')) : `RM ${formatRM(item.cover)}`}
+            </p>
+          </div>
+          <div>
+            <p className="text-slate-400 uppercase tracking-wider font-semibold mb-0.5">{t('Gap', '缺口')}</p>
+            <p className={`font-bold ${(gap ?? 0) > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+              {row.needBased && !isInsufficient && gap != null ? `RM ${formatRM(gap)}` : '—'}
+            </p>
+          </div>
+        </div>
+        {item.notes.length > 0 && (
+          <div className="mt-2 space-y-0.5">
+            {item.notes.map((n, i) => (
+              <p key={i} className="text-[11px] text-slate-400">{n}</p>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-8 animate-fade-in-up pb-20">
@@ -243,14 +268,14 @@ const Insurance: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold text-xin-blue tracking-tight font-serif flex items-center gap-3">
             <Shield className="text-xin-gold w-8 h-8" />
-            Insurance Protection
+            {t('Insurance Protection', '保险保障')}
           </h1>
           <p className="text-slate-500 mt-2 text-sm max-w-2xl">
-            Overview of your risk tolerance and required coverage vs current coverage.
+            {t('Coverage need vs what you actually hold, from the same calculation your advisor sees.', '保障需求与实际持有保障的对比，与顾问端使用同一套计算。')}
           </p>
         </div>
         <div className="bg-white px-6 py-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-end">
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Annual Income</p>
+          <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">{t('Annual Income', '年收入')}</p>
           <p className="text-2xl font-bold text-xin-blue">{formatRM(annualIncome)}</p>
         </div>
       </div>
@@ -266,7 +291,7 @@ const Insurance: React.FC = () => {
                 : 'text-slate-500 hover:text-xin-blue hover:bg-white/50 scale-95'
             }`}
           >
-            Overview
+            {t('Overview', '总览')}
           </button>
           <button
             onClick={() => setActiveTab('policies')}
@@ -276,7 +301,7 @@ const Insurance: React.FC = () => {
                 : 'text-slate-500 hover:text-xin-blue hover:bg-white/50 scale-95'
             }`}
           >
-            Policies
+            {t('Policies', '保单')}
           </button>
         </div>
       </div>
@@ -294,126 +319,59 @@ const Insurance: React.FC = () => {
                 <circle
                   cx="36" cy="36" r={RING_R}
                   fill="none"
-                  stroke={bannerData.color}
+                  stroke={scoreColor}
                   strokeWidth="7"
                   strokeLinecap="round"
                   strokeDasharray={`${ringDash} ${RING_CIRC - ringDash}`}
                   transform="rotate(-90 36 36)"
                 />
                 <text x="36" y="41" textAnchor="middle" fill="white" fontSize="14" fontWeight="800">
-                  {bannerData.scorePct}%
+                  {scorePct}%
                 </text>
               </svg>
             </div>
             <div className="flex-1">
-              <p className="text-xs font-bold uppercase tracking-widest text-white/60 mb-1">Protection Score</p>
-              <p className="text-2xl font-extrabold text-white mb-2">{bannerData.label}</p>
-              <div className="flex gap-1.5">
-                {requirements.map(req => {
-                  const pct = req.required > 0 ? req.current / req.required : 1;
-                  const dotColor = pct >= 1 ? '#10b981' : pct >= 0.5 ? '#f59e0b' : '#ef4444';
-                  return (
-                    <div
-                      key={req.id}
-                      className="w-2 h-2 rounded-full"
-                      style={{ background: dotColor }}
-                      title={req.title}
-                    />
-                  );
-                })}
-              </div>
+              <p className="text-xs font-bold uppercase tracking-widest text-white/60 mb-1">{t('Protection Score', '保障评分')}</p>
+              <p className="text-2xl font-extrabold text-white mb-2">{scoreLabel}</p>
+              <label className="flex items-center gap-1.5 text-xs text-white/70 select-none cursor-pointer">
+                <input type="checkbox" checked={excludeGroup} onChange={(e) => setExcludeGroup(e.target.checked)} className="rounded border-white/40" />
+                {t('Exclude group cover', '不含团保')}
+              </label>
             </div>
           </div>
-          {/* Status Badges */}
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: 'Protected', count: bannerData.sufficient, color: '#10b981', border: '#10b981' },
-              { label: 'At Risk',   count: bannerData.atRisk,    color: '#f59e0b', border: '#f59e0b' },
-              { label: 'Critical',  count: bannerData.critical,  color: '#ef4444', border: '#ef4444' },
-            ].map(({ label, count, color, border }) => (
-              <div
-                key={label}
-                className="rounded-2xl p-3 text-center bg-white shadow-sm border border-slate-100"
-                style={{ borderTop: `3px solid ${border}` }}
-              >
-                <p className="text-2xl font-extrabold" style={{ color }}>{count}</p>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mt-1">{label}</p>
-              </div>
-            ))}
-          </div>
-          {/* Dial Grid */}
-          <div className="grid grid-cols-3 gap-3">
-            {requirements.map(req => {
-              const DIAL_R = 22;
-              const DIAL_CIRC = 2 * Math.PI * DIAL_R;
-              const { pct, color, shortfall } = getDialConfig(req);
-              const dash = (pct / 100) * DIAL_CIRC;
-              const isSufficient = req.required > 0 && req.current >= req.required;
 
-              return (
-                <div
-                  key={req.id}
-                  className="bg-white rounded-2xl p-3 text-center shadow-sm border border-slate-100 flex flex-col items-center"
-                >
-                  <svg width="56" height="56" viewBox="0 0 56 56">
-                    <circle
-                      cx="28" cy="28" r={DIAL_R}
-                      fill="none"
-                      stroke={`${color}22`}
-                      strokeWidth="5"
-                    />
-                    <circle
-                      cx="28" cy="28" r={DIAL_R}
-                      fill="none"
-                      stroke={color}
-                      strokeWidth="5"
-                      strokeLinecap="round"
-                      strokeDasharray={`${dash} ${DIAL_CIRC - dash}`}
-                      transform="rotate(-90 28 28)"
-                    />
-                    {isSufficient ? (
-                      <text x="28" y="33" textAnchor="middle" fill={color} fontSize="14" fontWeight="800">✓</text>
-                    ) : (
-                      <text x="28" y="33" textAnchor="middle" fill={color} fontSize="10" fontWeight="800">{pct}%</text>
-                    )}
-                  </svg>
-                  <p className="text-xs font-bold text-slate-600 mt-2 leading-tight">{req.title}</p>
-                  {isSufficient ? (
-                    <p className="text-xs font-semibold mt-1" style={{ color: '#10b981' }}>Sufficient</p>
-                  ) : (
-                    <p className="text-xs font-semibold mt-1" style={{ color: '#ef4444' }}>-{formatRM(shortfall)}</p>
-                  )}
-                </div>
-              );
-            })}
+          {gapResult?.assumptions?.length ? (
+            <div className="bg-white rounded-2xl border border-slate-100 px-4 py-3 shadow-sm">
+              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">{t('Assumptions', '计算假设')}</p>
+              <ul className="space-y-0.5">
+                {gapResult.assumptions.map((a, i) => (
+                  <li key={i} className="text-[11px] text-slate-400">{a}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* Category rows */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+            {CATEGORY_ROWS.map(renderGapRow)}
           </div>
         </div>
       ) : (
         <div className="space-y-6 animate-fade-in">
           {/* Header */}
           <div className="flex items-center justify-between">
-            <h3 className="text-xl font-bold text-xin-blue">Your Policies</h3>
+            <h3 className="text-xl font-bold text-xin-blue">{t('Your Policies', '我的保单')}</h3>
             <span className="bg-xin-blue/10 text-xin-blue px-3 py-1 rounded-full text-xs font-bold">
-              {policies.length} Active
+              {policies.length} {t('Policies', '份保单')}
             </span>
           </div>
 
           {policies.length === 0 ? (
             <div className="text-center py-12 bg-white rounded-3xl border border-slate-100">
-              <p className="text-slate-500 font-medium">No policies found</p>
+              <p className="text-slate-500 font-medium">{t('No policies found', '暂无保单记录')}</p>
             </div>
           ) : (
             <>
-              {/* Legend */}
-              <div className="bg-white rounded-2xl border border-slate-100 px-4 py-3 flex flex-wrap gap-x-5 gap-y-2 shadow-sm">
-                {COVERAGE_TAGS.map(tag => (
-                  <div key={tag.key} className="flex items-center gap-1.5">
-                    <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: tag.color }} />
-                    <span className="text-xs font-semibold text-slate-600">{tag.label}</span>
-                  </div>
-                ))}
-              </div>
-
               {/* Grouped by insurer */}
               {policyGroups.map(group => (
                 <div key={group.insurer}>
@@ -424,43 +382,54 @@ const Insurance: React.FC = () => {
                       {group.insurer}
                     </span>
                     <span className="text-xs text-slate-400">
-                      {group.policies.length} {group.policies.length === 1 ? 'policy' : 'policies'}
+                      {group.policies.length} {group.policies.length === 1 ? t('policy', '份') : t('policies', '份')}
                     </span>
                     <div className="flex-1 h-px bg-slate-100" />
                   </div>
 
                   {/* Policy cards grid */}
-                  <div className={`grid gap-3 ${group.policies.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                  <div className={`grid gap-3 ${group.policies.length === 1 ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
                     {group.policies.map(policy => {
-                      const tags = getPolicyCoverageTags(policy.rawRecord);
+                      const statusLabel = STATUS_LABELS[policy.status] || STATUS_LABELS.in_force;
+                      const statusColor = STATUS_COLORS[policy.status] || STATUS_COLORS.in_force;
                       return (
                         <div
                           key={policy.id}
                           className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm"
                           style={{ borderLeft: `3px solid ${group.color}` }}
                         >
-                          <p className="text-sm font-bold text-slate-800 mb-0.5 leading-tight">{policy.planName}</p>
+                          <div className="flex items-start justify-between gap-2 mb-0.5">
+                            <p className="text-sm font-bold text-slate-800 leading-tight">{policy.planName}</p>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${statusColor}`}>
+                              {isZh ? statusLabel[1] : statusLabel[0]}
+                            </span>
+                          </div>
                           <p className="font-mono text-xs text-slate-400 mb-3">{policy.policyNumber}</p>
 
-                          {tags.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mb-3">
-                              {tags.map(tag => (
-                                <span
-                                  key={tag.key}
-                                  className="text-xs font-bold px-1.5 py-0.5 rounded"
-                                  style={{ background: tag.bg, color: tag.color }}
-                                >
-                                  {tag.label}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-
-                          <div className="border-t border-slate-50 pt-3">
-                            <p className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-0.5">Premium</p>
-                            <p className="text-base font-extrabold" style={{ color: group.color }}>{formatRM(policy.premium)}</p>
-                            <p className="text-xs text-slate-400">per year</p>
+                          <div className="flex flex-wrap gap-1 mb-3">
+                            {policy.isGroupEmployer && (
+                              <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">
+                                {t('Group · lapses at exit', '团保 · 离职即失效')}
+                              </span>
+                            )}
                           </div>
+
+                          <div className="border-t border-slate-50 pt-3 flex items-end justify-between gap-3">
+                            <div>
+                              <p className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-0.5">{t('Sum Assured', '保额')}</p>
+                              <p className="text-sm font-bold text-slate-700">{formatRM(policy.sumAssured)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-slate-400 uppercase tracking-wider font-medium mb-0.5">{t('Premium', '保费')}</p>
+                              <p className="text-base font-extrabold" style={{ color: group.color }}>{formatRM(policy.premium)}</p>
+                              <p className="text-xs text-slate-400">{t('per year', '每年')}</p>
+                            </div>
+                          </div>
+                          {policy.cashValue != null && Number(policy.cashValue) > 0 && (
+                            <p className="text-[11px] text-slate-400 mt-2">
+                              {t('Cash value', '现金价值')}: {formatRM(Number(policy.cashValue))} · {t('reference only — not counted in net worth', '仅供参考 · 未计入净资产')}
+                            </p>
+                          )}
                         </div>
                       );
                     })}

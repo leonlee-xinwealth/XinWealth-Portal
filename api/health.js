@@ -1,13 +1,14 @@
 import { applyCors, configError, getAuthUser, supabaseAdmin } from './_lib/supabase.js';
 import { assetCategory, cashflowLabel } from './_lib/portalLabels.js';
 import {
-  MODEL_PORTFOLIOS, allocationOf, assessAssets, categoryLabel, currentAllocationRows, driftAgainst,
-  isLiquid, isTransferCategory, riskBandFromSuitability,
+  MODEL_PORTFOLIOS, allocationOf, assessAssets, buildCfpCnaInput, categoryLabel, computeCna, computeSnapshot,
+  currentAllocationRows, driftAgainst, isLiquid, isTransferCategory, riskBandFromSuitability,
 } from './_lib/taxonomy.mjs';
 import {
   MONTH_NAMES, buildCurrentPlan, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear,
   legacyHoldings,
 } from './_lib/portalDerived.js';
+import { computeReviewStatus } from './_lib/reviewDates.js';
 
 const monthName = (dateStr) => {
   const d = new Date(dateStr);
@@ -39,6 +40,25 @@ async function fetchAssetValuationsGraceful(clientId) {
     const { data, error } = await supabaseAdmin
       .from('asset_valuations')
       .select('asset_id, valuation_date, value, net_contribution')
+      .eq('client_id', clientId);
+    if (error || !data) return [];
+    return data;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * P4 决策 (reviews table may not exist yet in every environment): the
+ * client-home due/pending banner (决策 6) only needs kind/status/period_end/
+ * approved_at/submitted_at — degrades to [] on any error (missing table or
+ * otherwise) rather than failing the whole /api/health response.
+ */
+async function fetchReviewsGraceful(clientId) {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('reviews')
+      .select('kind, status, period_end, approved_at, submitted_at')
       .eq('client_id', clientId);
     if (error || !data) return [];
     return data;
@@ -85,7 +105,7 @@ export default async function handler(req, res) {
 
   const { data: clientRow, error: clientErr } = await supabaseAdmin
     .from('clients')
-    .select('id, has_epf, date_of_birth, risk_profile')
+    .select('id, has_epf, date_of_birth, risk_profile, number_of_dependants, onboarded_at, created_at')
     .ilike('email', email)
     .maybeSingle();
 
@@ -97,11 +117,15 @@ export default async function handler(req, res) {
       incomes: [],
       expenses: [],
       investments: [],
+      insurance: [],
       insurances: [],
       snapshots: [],
       current: null,
       asset_quality: { assets: [], by_quadrant: {} },
-      portfolio: null
+      portfolio: null,
+      snapshot: null,
+      insurance_gap: null,
+      review_status: { last_approved_at: null, pending: false, due: false }
     });
   }
 
@@ -117,12 +141,16 @@ export default async function handler(req, res) {
     { data: items, error: itemsErr },
     { data: investmentAccounts, error: investmentAccountsErr },
     assetValuations,
-    latestSuitability
+    latestSuitability,
+    reviews
   ] = await Promise.all([
     supabaseAdmin.from('assets').select('*').eq('client_id', clientId),
     supabaseAdmin.from('liabilities').select('*').eq('client_id', clientId),
     supabaseAdmin.from('cashflow_entries').select('*').eq('client_id', clientId),
-    supabaseAdmin.from('insurance_policies').select('*').eq('client_id', clientId),
+    // P5 决策 1/2: riders feed the CI/medical/PA aggregation and status/
+    // is_group_employer/covers_liability_id feed the in-force + MRTA/团保
+    // logic buildCfpCnaInput needs — same join InsuranceGapPanel.tsx uses.
+    supabaseAdmin.from('insurance_policies').select('*, policy_riders(category, sum_assured, room_board_daily, annual_limit, lifetime_limit)').eq('client_id', clientId),
     supabaseAdmin.from('health_snapshots').select('*').eq('client_id', clientId),
     supabaseAdmin.from('portfolio_holdings').select('*').eq('client_id', clientId),
     // Standing items (P2b 常设项目) — when present, they're what "current"
@@ -134,7 +162,8 @@ export default async function handler(req, res) {
     // P3 决策 2: asset_valuations may not exist yet in every environment —
     // degrade to [] instead of a 500 (never blocks the rest of the response).
     fetchAssetValuationsGraceful(clientId),
-    fetchLatestSuitabilityGraceful(clientId)
+    fetchLatestSuitabilityGraceful(clientId),
+    fetchReviewsGraceful(clientId)
   ]);
 
   if (assetsErr) return res.status(500).json({ error: 'Failed to fetch assets', details: assetsErr.message });
@@ -275,13 +304,21 @@ export default async function handler(req, res) {
       });
     });
 
+  // P5 决策 2/4: status/is_group_employer/nomination_type ride along so the
+  // client portal can render a status chip and a 「团保 · 离职即失效」 tag
+  // per policy (Insurance.tsx) — additive fields, the four original ones stay
+  // exactly as before for any existing reader.
   const insuranceRecords = (insurances || []).map((p) =>
     record(p.id, {
       'Insurer': p.provider || '',
       'Plan Name': p.policy_type || '',
       'Policy Number': p.policy_number || '',
       'Sum Assured': p.sum_assured != null ? Number(p.sum_assured) : 0,
-      'Premium': p.premium != null ? Number(p.premium) : 0
+      'Premium': p.premium != null ? Number(p.premium) : 0,
+      'Status': p.status || 'in_force',
+      'Is Group Employer': p.is_group_employer === true,
+      'Nomination Type': p.nomination_type || null,
+      'Cash Value': p.cash_value != null ? Number(p.cash_value) : null,
     })
   );
 
@@ -350,16 +387,105 @@ export default async function handler(req, res) {
     rebalancing_actions: rebalancingActions,
   };
 
+  // P4 决策 3: the ONE health-snapshot formula — HealthScoreCard.tsx,
+  // api/health.js and cfp-brain/baseline.ts all read computeSnapshot now,
+  // replacing the ad-hoc ratio math services/apiService.ts used to do itself.
+  // `raw_metrics` carries the same liquid/invest/EPF totals apiService.ts's
+  // `raw` object used to sum by hand.
+  const clientStatutoryInfo = { has_epf: clientRow.has_epf, date_of_birth: clientRow.date_of_birth };
+  const snapshot = computeSnapshot({
+    assets: assets || [],
+    liabilities: liabilities || [],
+    items: items || [],
+    rows: cashflows || [],
+    policies: insurances || [],
+    client: clientStatutoryInfo,
+    asOf: new Date(),
+  });
+
+  // P5 决策 1: the ONE coverage-gap formula — advisor panel, client portal and
+  // both PDF exporters all read buildCfpCnaInput/computeCna's output now.
+  // Shape mirrors components/advisor/components/InsuranceGapPanel.tsx's
+  // toCfpFinancials so the two surfaces read the live rows identically.
+  const cnaFinancials = {
+    client: {
+      id: clientId,
+      date_of_birth: clientRow.date_of_birth ?? null,
+      number_of_dependants: clientRow.number_of_dependants ?? 0,
+      occupation: null,
+      retirement_age: null,
+      marital_status: null,
+    },
+    inflows: (cashflows || [])
+      .filter((r) => r.direction === 'inflow')
+      .map((r) => ({ amount: Number(r.amount) || 0, frequency: r.frequency, category: r.category || '' })),
+    liabilities: (liabilities || []).map((l) => ({
+      id: l.id ?? null,
+      liability_type: l.liability_type,
+      name: l.name ?? '',
+      outstanding_balance: Number(l.outstanding_balance) || 0,
+      monthly_payment: l.monthly_payment != null ? Number(l.monthly_payment) : null,
+    })),
+    assets: (assets || []).map((a) => ({
+      asset_type: a.asset_type,
+      current_value: Number(a.current_value) || 0,
+    })),
+    policies: (insurances || []).map((p) => ({
+      policy_type: p.policy_type,
+      provider: p.provider ?? null,
+      sum_assured: p.sum_assured != null ? Number(p.sum_assured) : null,
+      premium: p.premium != null ? Number(p.premium) : null,
+      premium_frequency: p.premium_frequency ?? null,
+      policy_number: p.policy_number ?? null,
+      cash_value: p.cash_value != null ? Number(p.cash_value) : null,
+      start_date: p.start_date ?? null,
+      end_date: p.end_date ?? null,
+      status: p.status ?? null,
+      is_group_employer: p.is_group_employer ?? null,
+      covers_liability_id: p.covers_liability_id ?? null,
+      nomination_type: p.nomination_type ?? null,
+      policy_riders: (p.policy_riders || []).map((r) => ({
+        category: r.category,
+        sum_assured: r.sum_assured != null ? Number(r.sum_assured) : null,
+        room_board_daily: r.room_board_daily != null ? Number(r.room_board_daily) : null,
+        annual_limit: r.annual_limit != null ? Number(r.annual_limit) : null,
+        lifetime_limit: r.lifetime_limit != null ? Number(r.lifetime_limit) : null,
+      })),
+    })),
+  };
+  // The plan's income (决策 1 — items when present, else averaged actuals)
+  // wins over mapping.ts's own row-by-row annualizeInflows fallback, which is
+  // wrong for cashflow_entries actuals (see mapping.ts's annualizeInflows doc).
+  const cnaInput = buildCfpCnaInput(cnaFinancials, { annual_income: current.annual_income });
+  const insuranceGap = computeCna(cnaInput);
+
+  // P4 决策 6: client-home due/pending banner — degrades to "no reviews" when
+  // the `reviews` table isn't there yet (fetchReviewsGraceful → []), in which
+  // case `due` falls back to the client's onboarding date.
+  const reviewStatus = computeReviewStatus({
+    reviews: reviews || [],
+    onboardedAt: clientRow.onboarded_at || clientRow.created_at || null,
+    asOf: new Date(),
+  });
+
   return res.status(200).json({
     assets: assetRecords,
     liabilities: liabilityRecords,
     incomes: incomeRecords,
     expenses: [...expenseRecords, ...derivedExpenseRecords],
     investments: [...investmentRecords, ...investmentAssetRecords],
+    // P5 决策 4: `insurance` is the correct key (the client portal used to
+    // read `insurance` while this endpoint only ever sent `insurances`,
+    // which meant the page always saw an empty list) — `insurances` stays as
+    // an alias so no other reader breaks.
+    insurance: insuranceRecords,
     insurances: insuranceRecords,
     snapshots: snapshotRecords,
     current,
     asset_quality: assetQuality,
-    portfolio
+    portfolio,
+    snapshot,
+    insurance_gap: insuranceGap,
+    review_status: reviewStatus,
   });
 }
