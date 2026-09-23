@@ -116,6 +116,20 @@ const parseRate = (val) => {
   return Number.isFinite(n) ? n : null;
 };
 
+// Property/vehicle loans (AssetsStep.tsx) collect a loan END year/month, not a
+// remaining term directly — loanEndMonth is JS-style zero-indexed (0-11), the
+// same convention that step's own elapsed-months math already uses. Whole
+// months only; a non-future or incomplete end date yields null so the D1
+// estimator (_shared/finance/loans.ts) falls back to its own default.
+const remainingMonthsToLoanEnd = (loanEndYear, loanEndMonth, today = new Date()) => {
+  if (loanEndYear == null || loanEndYear === '' || loanEndMonth == null || loanEndMonth === '') return null;
+  const endYear = parseInt(loanEndYear, 10);
+  const endMonth = parseInt(loanEndMonth, 10);
+  if (!Number.isFinite(endYear) || !Number.isFinite(endMonth)) return null;
+  const months = (endYear - today.getFullYear()) * 12 + (endMonth - today.getMonth());
+  return months > 0 ? months : null;
+};
+
 const mapEnum = (value, map) => (value != null && map.hasOwnProperty(value)) ? map[value] : null;
 
 // First day of the reporting month (YYYY-MM-01) for cashflow_entries.period_month
@@ -365,7 +379,9 @@ export default async function handler(req, res) {
             originalLoanAmount: it.originalLoanAmount,
             monthlyInstallment: it.monthlyInstallment,
             interestRate:       it.interestRate,
-            displayName:        it.description
+            displayName:        it.description,
+            loanEndYear:        it.loanEndYear,
+            loanEndMonth:       it.loanEndMonth
           });
         }
       }
@@ -440,6 +456,10 @@ export default async function handler(req, res) {
         outstanding_balance: balance,
         interest_rate:       parseRate(meta.interestRate),
         monthly_payment:     parseAmount(meta.monthlyInstallment) || null,
+        // D1 estimator inputs (spec 2026-09-24-cfp-p2a decision 2/6): what the
+        // KYC form actually told us, nothing guessed here.
+        remaining_months:    remainingMonthsToLoanEnd(meta.loanEndYear, meta.loanEndMonth),
+        rate_type:           meta.liabilityType === 'car_loan' ? 'flat' : null,
         linked_asset_id:     insertedAssets[meta.rowIndex]?.id || null
       });
     }

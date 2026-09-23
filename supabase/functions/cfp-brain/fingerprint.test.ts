@@ -33,6 +33,11 @@ function baseline(over: Partial<FinancialBaseline> = {}): FinancialBaseline {
     net_worth: 231_500,
     total_liabilities: 771_500,
     monthly_debt_service: 4_200,
+    // P2a: FinancialBaseline gained these three fields; this fixture predates
+    // them and doesn't exercise them, so zero/empty keeps every assertion below unchanged.
+    monthly_principal: 1_800,
+    derived_items: [],
+    superseded_manual: 0,
     debt_service_ratio: 0.21,
     savings_ratio: 0.3,
     solvency_ratio: 0.23,

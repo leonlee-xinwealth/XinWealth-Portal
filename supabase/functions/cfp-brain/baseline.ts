@@ -7,13 +7,13 @@
 //      diverge on returns or inflation.
 
 import {
-  annualizeCashflow,
   ANNUAL_OCCURRENCES,
   defaultBasis,
   isAssetTransfer,
   type CashflowBasis,
 } from "../_shared/cashflow/periods.ts";
 import { LIQUID_ASSET_TYPES as TAXONOMY_LIQUID } from "../_shared/taxonomy/balance.ts";
+import { planCashflow } from "../_shared/finance/derived.ts";
 import type {
   BaselineAssumptions,
   CfpData,
@@ -51,6 +51,13 @@ export const CASHFLOW_ANNUALIZE = ANNUAL_OCCURRENCES;
 export const LIQUID_ASSET_TYPES: readonly string[] = TAXONOMY_LIQUID;
 
 const round = (n: number) => Math.round(n);
+
+/** Chinese label for a D1-estimated loan field, for baseline_notes. */
+const ESTIMATED_FIELD_LABEL_ZH: Record<string, string> = {
+  monthly_payment: "月供",
+  interest_rate: "利率",
+  remaining_months: "剩余期数",
+};
 
 export function ageFromDob(dob: string | null, now = new Date()): number | null {
   if (!dob) return null;
@@ -102,13 +109,28 @@ export function computeBaseline(
   // which is the rule that used to silently discard most of the data.
   const basis: CashflowBasis | null = inputs.cashflow_basis ??
     defaultBasis(f.cashflow);
-  const cf = annualizeCashflow(f.cashflow, basis);
+
+  // P2a (决策 1, 5): installments and premiums are derived from the liabilities
+  // and policies themselves — never re-keyed by hand — and folded into the
+  // same income/expense totals every ratio below is built on. This ONE call
+  // replaces the old annualizeCashflow(...) + liabilities.monthly_payment sum:
+  // manual rows that duplicate a derived item (决策 4) are dropped from the
+  // manual side so the total counts each obligation once.
+  const plan = planCashflow({
+    rows: f.cashflow,
+    liabilities: f.liabilities,
+    policies: f.policies,
+    basis,
+    today: now,
+  });
+  const cf = plan.totals;
   const annualIncome = cf.annual_income;
   const annualExpenses = cf.annual_expenses;
   const monthlyIncome = cf.monthly_income;
-  // Essential-expense proxy: all recurring outflows. Category strings are
-  // free-text, so a conservative "everything is essential" reading keeps the
-  // emergency fund honest rather than optimistic.
+  // Essential-expense proxy: all recurring outflows, including derived loan
+  // installments and policy premiums. Category strings are free-text, so a
+  // conservative "everything is essential" reading keeps the emergency fund
+  // honest rather than optimistic.
   const monthlyEssential = cf.monthly_expenses;
   notes.push("紧急预备金按全部经常性月支出为「必要支出」口径计算");
   if (basis) {
@@ -127,6 +149,27 @@ export function computeBaseline(
     notes.push("未录得任何月份的收支记录,收入与支出按零处理");
   }
   notes.push("储蓄/投资转入、资产变现与借入视为资产转移，不计入收入或支出；贷款月供仍计入支出");
+
+  // P2a: which installments/premiums were auto-included, which of their
+  // fields were estimated rather than given, every loan warning verbatim, and
+  // how many manually-keyed rows were superseded by them (决策 2-4).
+  const loanItems = plan.derived.filter((d) => d.source_type === "liability");
+  const premiumItems = plan.derived.filter((d) => d.source_type === "policy");
+  if (loanItems.length > 0 || premiumItems.length > 0) {
+    notes.push(
+      `现金流已自动计入 ${loanItems.length} 笔贷款月供、${premiumItems.length} 笔保单保费（来自负债/保单记录，非手工录入）`,
+    );
+  }
+  for (const item of loanItems) {
+    if (item.estimated.length > 0) {
+      const fields = item.estimated.map((k) => ESTIMATED_FIELD_LABEL_ZH[k] ?? k).join("、");
+      notes.push(`${item.source_name}：${fields}缺失，按 D1 规则估算`);
+    }
+    for (const w of item.warnings) notes.push(`${item.source_name}：${w}`);
+  }
+  if (plan.superseded.length > 0) {
+    notes.push(`${plan.superseded.length} 笔手工录入的现金流已由对应负债/保单自动计入取代，不再重复计算`);
+  }
 
   const emergencyNeedLow = monthlyEssential * assumptions.emergency_months_low;
   const emergencyNeedHigh = monthlyEssential * assumptions.emergency_months_high;
@@ -147,10 +190,12 @@ export function computeBaseline(
     (s, l) => s + (l.outstanding_balance ?? 0),
     0,
   );
-  const monthlyDebtService = f.liabilities.reduce(
-    (s, l) => s + (l.monthly_payment ?? 0),
-    0,
-  );
+  // P2a (决策 5): each liability's FULL estimated payment (credit card = its
+  // minimum payment; policy_loan excluded) — replaces the old raw
+  // liabilities.monthly_payment sum, which was 0 for any liability that never
+  // had a payment typed in by hand.
+  const monthlyDebtService = plan.monthly_debt_service;
+  const monthlyPrincipal = plan.monthly_principal;
   const netWorth = totalAssets - totalLiabilities;
 
   const age = ageFromDob(f.client.date_of_birth, now);
@@ -205,6 +250,9 @@ export function computeBaseline(
     net_worth: round(netWorth),
     total_liabilities: round(totalLiabilities),
     monthly_debt_service: round(monthlyDebtService),
+    monthly_principal: round(monthlyPrincipal),
+    derived_items: plan.derived,
+    superseded_manual: plan.superseded.length,
     debt_service_ratio: monthlyIncome > 0
       ? Number((monthlyDebtService / monthlyIncome).toFixed(4))
       : null,

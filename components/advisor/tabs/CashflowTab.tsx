@@ -3,12 +3,16 @@ import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { Plus, X, Pencil, AlertTriangle } from 'lucide-react';
 import {
-  monthlyBreakdown, recordedYears, yearToDateTotals,
+  isTransferCode, monthlyBreakdown, recordedYears, yearToDateTotals,
   type PeriodRow,
 } from '../../../supabase/functions/_shared/cashflow/periods';
 import {
   CASHFLOW_CATEGORIES, CASHFLOW_GROUPS, categoryLabel, wealthEffectOf,
 } from '../../../supabase/functions/_shared/taxonomy/cashflow';
+import {
+  deriveLoanItems, derivePremiumItems, isSuperseded,
+  type DerivedItem, type LiabilityRow, type PolicyRow,
+} from '../../../supabase/functions/_shared/finance/derived';
 
 // A cashflow entry records ONE MONTH'S actual figure for one category, so this
 // screen is organised by month. The totals shown here are ACTUALS — what the
@@ -32,6 +36,10 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   const { language } = useLanguage();
   const t = (en: string, zh: string) => language === 'zh' ? zh : en;
   const [entries, setEntries] = useState<any[]>([]);
+  // Installments and premiums are computed from their source (Net worth /
+  // Insurance), never re-keyed here — spec 2026-09-24-cfp-p2a decision 1.
+  const [liabilities, setLiabilities] = useState<LiabilityRow[]>([]);
+  const [policies, setPolicies] = useState<PolicyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'inflow'|'outflow'|null>(null);
   const [form, setForm] = useState({
@@ -55,9 +63,17 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   const setEdit = (k: string, v: any) => setEditForm((p: any) => ({ ...p, [k]: v }));
 
   async function load() {
-    const { data: e } = await supabase.from('cashflow_entries').select('*')
-      .eq('client_id', clientId).order('direction').order('category');
-    setEntries(e || []); setLoading(false);
+    const [{ data: e }, { data: l }, { data: p }] = await Promise.all([
+      supabase.from('cashflow_entries').select('*')
+        .eq('client_id', clientId).order('direction').order('category'),
+      supabase.from('liabilities')
+        .select('id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, remaining_months, rate_type, original_principal, end_date')
+        .eq('client_id', clientId),
+      supabase.from('insurance_policies')
+        .select('id, policy_type, plan_name, provider, premium, premium_frequency, end_date')
+        .eq('client_id', clientId),
+    ]);
+    setEntries(e || []); setLiabilities((l || []) as LiabilityRow[]); setPolicies((p || []) as PolicyRow[]); setLoading(false);
   }
   useEffect(() => { load(); }, [clientId]);
 
@@ -120,11 +136,36 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
     load();
   }
 
+  // Installments (from liabilities) and premiums (from active policies),
+  // computed at read time — not a manual row, never stored. Spec decisions 1/3.
+  const derivedItems: DerivedItem[] = useMemo(
+    () => [...deriveLoanItems(liabilities), ...derivePremiumItems(policies)],
+    [liabilities, policies],
+  );
+  const derivedMonthlyExpense = useMemo(
+    () => derivedItems.filter(d => !isTransferCode(d.category)).reduce((s, d) => s + d.monthly_amount, 0),
+    [derivedItems],
+  );
+  // A manual row that duplicates a derived item (决策 4) — excluded from every
+  // total below, but still shown in the table with a "replaced" chip so an
+  // advisor opening an old client sees why the number moved.
+  const supersededIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of entries) {
+      if (e.direction === 'outflow' && isSuperseded(e, liabilities, policies)) ids.add(e.id);
+    }
+    return ids;
+  }, [entries, liabilities, policies]);
+  const totalledEntries = useMemo(
+    () => entries.filter(e => !supersededIds.has(e.id)),
+    [entries, supersededIds],
+  );
+
   const years = useMemo(() => {
-    const found = recordedYears(entries as PeriodRow[]);
+    const found = recordedYears(totalledEntries as PeriodRow[]);
     // Always offer the current year so a client with no history can be started.
     return found.includes(now.getFullYear()) ? found : [now.getFullYear(), ...found];
-  }, [entries]);
+  }, [totalledEntries]);
 
   // Keep the selected year on something that exists once the rows arrive.
   useEffect(() => {
@@ -132,12 +173,12 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   }, [years]);
 
   const breakdown = useMemo(
-    () => monthlyBreakdown(entries as PeriodRow[], year),
-    [entries, year],
+    () => monthlyBreakdown(totalledEntries as PeriodRow[], year),
+    [totalledEntries, year],
   );
   const ytd = useMemo(
-    () => yearToDateTotals(entries as PeriodRow[], year),
-    [entries, year],
+    () => yearToDateTotals(totalledEntries as PeriodRow[], year),
+    [totalledEntries, year],
   );
 
   const visible = entries.filter(e => {
@@ -150,12 +191,15 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   // Actuals for the selected range. A month view shows that month; the year
   // view shows the year's running total. Neither is an annualised run-rate —
   // that lives on the CFP tab, where the advisor picks which months to build on.
+  // Derived installments/premiums are today's obligations (计算, 不存储 — spec
+  // decision 1), so a month view counts them once and a year view counts them
+  // for every month that year already has data for (min 1).
   const totalIn = viewMonth === 'all'
     ? ytd.income
     : (breakdown.find(m => m.month === viewMonth)?.income ?? 0);
   const totalOut = viewMonth === 'all'
-    ? ytd.expenses
-    : (breakdown.find(m => m.month === viewMonth)?.expenses ?? 0);
+    ? ytd.expenses + derivedMonthlyExpense * Math.max(1, breakdown.length)
+    : (breakdown.find(m => m.month === viewMonth)?.expenses ?? 0) + derivedMonthlyExpense;
   const net = totalIn - totalOut;
 
   const monthName = (m: number) =>
@@ -279,7 +323,14 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
         <EntryTable title={t('Income','收入')} color="text-emerald-600" borderColor="border-emerald-200" entries={inflows} direction="inflow" catLabel={catLabel} monthName={monthName} showMonth={viewMonth === 'all'} onAdd={() => setModal('inflow')} onDelete={handleDelete} addLabel={t('Add Income','添加收入')}
           editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language} />
         <EntryTable title={t('Expenses','支出')} color="text-red-500" borderColor="border-red-200" entries={outflows} direction="outflow" catLabel={catLabel} monthName={monthName} showMonth={viewMonth === 'all'} onAdd={() => setModal('outflow')} onDelete={handleDelete} addLabel={t('Add Expense','添加支出')}
-          editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language} />
+          editingId={editingId} editForm={editForm} setEdit={setEdit} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit} t={t} language={language}
+          derivedItems={derivedItems} supersededIds={supersededIds} extraTotal={viewMonth === 'all' ? derivedMonthlyExpense * Math.max(1, breakdown.length) : derivedMonthlyExpense} />
+      </div>
+      <div className="text-[11px] text-slate-400 mt-2">
+        {t(
+          'Installments and premiums marked "Auto" are read from the Net worth and Insurance tabs, not entered here.',
+          '标记「自动」的月供和保费来自「净资产」和「保险」标签页，无需在此重复录入。',
+        )}
       </div>
       {modal && (
         <Modal title={modal==='inflow'?t('Add Income','添加收入'):t('Add Expense','添加支出')} onClose={() => setModal(null)}>
@@ -311,22 +362,27 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   );
 }
 
-function EntryTable({ title, color, borderColor, entries, direction, catLabel, monthName, showMonth, onAdd, onDelete, addLabel, editingId, editForm, setEdit, onEdit, onCancelEdit, onSaveEdit, savingEdit, t, language }: any) {
+function EntryTable({ title, color, borderColor, entries, direction, catLabel, monthName, showMonth, onAdd, onDelete, addLabel, editingId, editForm, setEdit, onEdit, onCancelEdit, onSaveEdit, savingEdit, t, language, derivedItems, supersededIds, extraTotal }: any) {
   // Each row already IS one month's figure, so the total is a plain sum. The
   // old `monthly(e)` converted every row to a monthly rate and summed those,
   // which is what made June's and July's figures look like one position.
   // Transfers move the client's own money between pockets (spec §1): shown,
   // but kept out of the income / spending total.
   const isTransfer = (e: any) => wealthEffectOf(e.category, e.direction) === 'transfer';
-  const total = entries.filter((e: any) => !isTransfer(e)).reduce((s: number, e: any) => s + Number(e.amount ?? 0), 0);
+  const isSupersededRow = (e: any) => !!supersededIds?.has(e.id);
+  // Superseded rows (决策 4) are shown with a chip but, like transfers, kept
+  // out of the total — the installment/premium they duplicate is now the
+  // derived row below.
+  const total = entries.filter((e: any) => !isTransfer(e) && !isSupersededRow(e)).reduce((s: number, e: any) => s + Number(e.amount ?? 0), 0) + Number(extraTotal ?? 0);
   const transferTotal = entries.filter(isTransfer).reduce((s: number, e: any) => s + Number(e.amount ?? 0), 0);
+  const hasDerived = (derivedItems?.length ?? 0) > 0;
   return (
     <div className={`bg-white rounded-2xl border ${borderColor} overflow-hidden shadow-sm`}>
       <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-50">
         <span className={`font-semibold text-sm ${color}`}>{title}</span>
         <button onClick={onAdd} className={`flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors ${color}`}><Plus size={12} />{addLabel}</button>
       </div>
-      {entries.length === 0 ? <div className="p-8 text-center text-slate-300 text-sm">—</div> : (
+      {entries.length === 0 && !hasDerived ? <div className="p-8 text-center text-slate-300 text-sm">—</div> : (
         <>
           {entries.map((e: any) => (
             editingId === e.id ? (
@@ -360,6 +416,7 @@ function EntryTable({ title, color, borderColor, entries, direction, catLabel, m
                   <div className="text-sm font-medium text-xin-blue flex items-center gap-1.5 flex-wrap">
                     {catLabel(e.category)}
                     {isTransfer(e) && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{t('Transfer','资产转移')}</span>}
+                    {isSupersededRow(e) && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{t('Replaced by liability/policy','已由负债/保单取代')}</span>}
                     {e.needs_review && <span title={e.review_reason || ''} className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">{t('Needs review','待分类')}</span>}
                   </div>
                   <div className="text-xs text-slate-400">
@@ -375,6 +432,34 @@ function EntryTable({ title, color, borderColor, entries, direction, catLabel, m
                 </div>
               </div>
             )
+          ))}
+          {(derivedItems ?? []).map((d: DerivedItem) => (
+            <div key={d.key} className="px-5 py-3 border-b border-slate-50 last:border-0 bg-slate-50/40">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-xin-blue flex items-center gap-1.5 flex-wrap">
+                    {catLabel(d.category)}
+                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{t('Auto','自动')}</span>
+                    {d.estimated.length > 0 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{t('Estimated','估算')}</span>}
+                  </div>
+                  <div className="text-xs text-slate-400 truncate">{d.source_name}</div>
+                  {d.source_type === 'liability' && (
+                    <div className="text-[11px] text-slate-400">
+                      {t(
+                        `Principal RM ${fmt(d.principal_monthly)} · Interest RM ${fmt(d.interest_monthly)}`,
+                        `本金 RM ${fmt(d.principal_monthly)} · 利息 RM ${fmt(d.interest_monthly)}`,
+                      )}
+                    </div>
+                  )}
+                </div>
+                <span className={`text-sm font-semibold shrink-0 ${color}`}>RM {fmt(d.monthly_amount)}</span>
+              </div>
+              {d.warnings.map((w: string, i: number) => (
+                <div key={i} className="text-[11px] text-amber-600 flex items-center gap-1 mt-1">
+                  <AlertTriangle size={11} className="shrink-0" />{w}
+                </div>
+              ))}
+            </div>
           ))}
           <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-t border-slate-100">
             <span className="text-xs font-semibold text-slate-500">{t('Total','合计')}</span>

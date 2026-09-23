@@ -30,8 +30,10 @@ Deno.test("insurance CNA consumes after-emergency liquid assets and real educati
   const insurance = det.insurance_planning as InsuranceDet;
 
   // Coupling #1: emergency fund reserved before the CNA deducts liquid assets.
-  // 50k liquid − 36k (6-month reserve) = 14k, not the raw 50k.
-  assertEquals(insurance.cna.resources.liquid_assets, 14000);
+  // P2a: essential spend is now 7,500/mo (household 6,000 + the fixture
+  // mortgage's derived 1,500/mo installment), so the 6-month reserve is
+  // 45,000, not 36,000: 50k liquid − 45k reserve = 5k, not the raw 50k.
+  assertEquals(insurance.cna.resources.liquid_assets, 5000);
 
   // Coupling #2: education need comes from the real goal's future cost
   // (100k × 1.04^10 ≈ 148,024 → rounded to nearest 1,000 by the CNA).

@@ -6,6 +6,8 @@ import {
   ASSET_CLASSES, ASSET_TYPES, LIABILITY_TYPES, assetTypeLabel, assetTypeMeta,
   liabilityTypeLabel, liquidityLevel,
 } from '../../../supabase/functions/_shared/taxonomy/balance';
+import { estimateLoan } from '../../../supabase/functions/_shared/finance/loans';
+import { AlertTriangle } from 'lucide-react';
 
 // Exported so pdf/cfpReport/labels/__tests__/enums.test.ts can assert the
 // report has a display label for every type this UI can create.
@@ -19,6 +21,16 @@ const PURPOSES: Array<[string, string, string]> = [
   ['investment', 'Investment', '投资'],
 ];
 
+// 计息方式 — empty lets the D1 estimator (_shared/finance/loans.ts) fall back
+// to the liability_type's default (spec 2026-09-24-cfp-p2a decision 2).
+const RATE_TYPES: Array<[string, string, string]> = [
+  ['', 'Default by type', '按类型默认'],
+  ['reducing', 'Reducing balance', '等额本息'],
+  ['flat', 'Flat rate', '平息'],
+  ['revolving', 'Revolving credit', '循环信用'],
+  ['interest_only', 'Interest only', '只付利息'],
+];
+
 export default function NetworthTab({ clientId }: { clientId: string }) {
   const { language } = useLanguage();
   const t = (en: string, zh: string) => language === 'zh' ? zh : en;
@@ -28,7 +40,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'asset'|'liability'|null>(null);
   const [aForm, setAForm] = useState({ asset_type:'', name:'', institution:'', current_value:'', cost_value:'', ownership_type:'sole', purpose:'', ownership_pct:'100' });
-  const [lForm, setLForm] = useState({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'' });
+  const [lForm, setLForm] = useState({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'' });
   const [saving, setSaving] = useState(false);
 
   const [editing, setEditing] = useState<{ table: 'assets'|'liabilities'; id: string } | null>(null);
@@ -62,8 +74,8 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   async function addLiability() {
     if (!lForm.name || !lForm.outstanding_balance) return;
     setSaving(true);
-    await supabase.from('liabilities').insert({ client_id: clientId, liability_type: lForm.liability_type||'other', name: lForm.name, lender: lForm.lender||null, outstanding_balance: parseFloat(lForm.outstanding_balance), monthly_payment: lForm.monthly_payment?parseFloat(lForm.monthly_payment):null, interest_rate: lForm.interest_rate?parseFloat(lForm.interest_rate):null, start_date: lForm.start_date||null, end_date: lForm.end_date||null });
-    setSaving(false); setModal(null); setLForm({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'' }); load();
+    await supabase.from('liabilities').insert({ client_id: clientId, liability_type: lForm.liability_type||'other', name: lForm.name, lender: lForm.lender||null, outstanding_balance: parseFloat(lForm.outstanding_balance), monthly_payment: lForm.monthly_payment?parseFloat(lForm.monthly_payment):null, interest_rate: lForm.interest_rate?parseFloat(lForm.interest_rate):null, start_date: lForm.start_date||null, end_date: lForm.end_date||null, remaining_months: lForm.remaining_months?parseInt(lForm.remaining_months,10):null, rate_type: lForm.rate_type||null });
+    setSaving(false); setModal(null); setLForm({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'' }); load();
   }
   async function del(table: string, id: string) {
     if (!confirm(t('Delete?','确定删除？'))) return;
@@ -76,7 +88,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   }
   function startEditLiability(l: any) {
     setEditing({ table: 'liabilities', id: l.id });
-    setEditForm({ liability_type: l.liability_type, name: l.name, lender: l.lender||'', outstanding_balance: String(l.outstanding_balance), monthly_payment: l.monthly_payment!=null?String(l.monthly_payment):'', interest_rate: l.interest_rate!=null?String(l.interest_rate):'', start_date: l.start_date||'', end_date: l.end_date||'' });
+    setEditForm({ liability_type: l.liability_type, name: l.name, lender: l.lender||'', outstanding_balance: String(l.outstanding_balance), monthly_payment: l.monthly_payment!=null?String(l.monthly_payment):'', interest_rate: l.interest_rate!=null?String(l.interest_rate):'', start_date: l.start_date||'', end_date: l.end_date||'', remaining_months: l.remaining_months!=null?String(l.remaining_months):'', rate_type: l.rate_type||'' });
   }
   function cancelEdit() {
     setEditing(null); setEditForm({});
@@ -96,7 +108,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
           ownership_pct: parseFloat(editForm.ownership_pct) || 100,
           needs_review: false, review_reason: null,
         }
-      : { liability_type: editForm.liability_type||'other', name: editForm.name, lender: editForm.lender||null, outstanding_balance: parseFloat(editForm.outstanding_balance), monthly_payment: editForm.monthly_payment?parseFloat(editForm.monthly_payment):null, interest_rate: editForm.interest_rate?parseFloat(editForm.interest_rate):null, start_date: editForm.start_date||null, end_date: editForm.end_date||null };
+      : { liability_type: editForm.liability_type||'other', name: editForm.name, lender: editForm.lender||null, outstanding_balance: parseFloat(editForm.outstanding_balance), monthly_payment: editForm.monthly_payment?parseFloat(editForm.monthly_payment):null, interest_rate: editForm.interest_rate?parseFloat(editForm.interest_rate):null, start_date: editForm.start_date||null, end_date: editForm.end_date||null, remaining_months: editForm.remaining_months?parseInt(editForm.remaining_months,10):null, rate_type: editForm.rate_type||null };
     await supabase.from(editing.table).update(payload).eq('id', editing.id);
     setSavingEdit(false); setEditing(null);
     setOk(true); setTimeout(() => setOk(false), 3000);
@@ -130,11 +142,40 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
           {assets.length > 0 && <Total label={t('Total','合计')} value={fmt(totalA)} color="text-emerald-600" />}
         </NwTable>
         <NwTable title={t('Liabilities','负债')} color="text-red-500" addLabel={t('Add Liability','添加负债')} onAdd={() => setModal('liability')}>
-          {liabilities.map(l => editing?.table==='liabilities' && editing.id===l.id ? (
-            <LiabilityEditRow key={l.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} />
-          ) : (
-            <Item key={l.id} title={l.name} sub={liabilityTypeLabel(l.liability_type, lang)+(l.lender?` · ${l.lender}`:'')+(l.monthly_payment?` · RM${fmt(l.monthly_payment)}/mo`:'')} value={fmt(l.outstanding_balance)} color="text-red-500" onEdit={() => startEditLiability(l)} onDel={() => del('liabilities',l.id)} />
-          ))}
+          {liabilities.map(l => {
+            if (editing?.table==='liabilities' && editing.id===l.id) {
+              return <LiabilityEditRow key={l.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} />;
+            }
+            // The estimated monthly payment (D1 estimator, spec 2026-09-24-cfp-p2a
+            // decision 2) is what actually drives the client's cash flow and DSR —
+            // shown here read-only so an advisor can sanity-check it against what
+            // the client reported without having to open the Cashflow tab.
+            const est = estimateLoan(l as any);
+            return (
+              <Item
+                key={l.id}
+                title={l.name}
+                sub={liabilityTypeLabel(l.liability_type, lang)+(l.lender?` · ${l.lender}`:'')}
+                value={fmt(l.outstanding_balance)}
+                color="text-red-500"
+                onEdit={() => startEditLiability(l)}
+                onDel={() => del('liabilities',l.id)}
+                extra={est.monthly_payment > 0 ? (
+                  <div className="mt-0.5">
+                    <span className="text-[11px] text-slate-400 flex items-center gap-1 flex-wrap">
+                      {t(`RM ${fmt(est.monthly_payment)}/mo`, `RM ${fmt(est.monthly_payment)}/月`)}
+                      {est.estimated.length > 0 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{t('Estimated','估算')}</span>}
+                    </span>
+                    {est.warnings.map((w, i) => (
+                      <div key={i} className="text-[11px] text-amber-600 flex items-center gap-1 mt-0.5">
+                        <AlertTriangle size={11} className="shrink-0" />{w}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              />
+            );
+          })}
           {liabilities.length > 0 && <Total label={t('Total','合计')} value={fmt(totalL)} color="text-red-500" />}
         </NwTable>
       </div>
@@ -161,6 +202,10 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
           <Fr label={t('Monthly Payment','每月还款')+' (RM)'}><Inp type="number" value={lForm.monthly_payment} onChange={v => setLForm(p => ({...p,monthly_payment:v}))} placeholder="0.00" /></Fr>
           <Fr label={t('Interest Rate','利率')+' (%)'}><Inp type="number" value={lForm.interest_rate} onChange={v => setLForm(p => ({...p,interest_rate:v}))} placeholder="4.5" /></Fr>
           <div className="grid grid-cols-2 gap-3">
+            <Fr label={t('Remaining term (months)','剩余期数（月）')}><Inp type="number" value={lForm.remaining_months} onChange={v => setLForm(p => ({...p,remaining_months:v}))} placeholder="e.g. 240" /></Fr>
+            <Fr label={t('Amortisation','计息方式')}><Sel value={lForm.rate_type} onChange={v => setLForm(p => ({...p,rate_type:v}))} opts={RATE_TYPES.map(([v, en, zh]) => [v, lang === 'zh' ? zh : en] as [string, string])} /></Fr>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
             <Fr label={t('Start Date','开始日期')}><Inp type="date" value={lForm.start_date} onChange={v => setLForm(p => ({...p,start_date:v}))} /></Fr>
             <Fr label={t('End Date','到期日期')}><Inp type="date" value={lForm.end_date} onChange={v => setLForm(p => ({...p,end_date:v}))} /></Fr>
           </div>
@@ -180,16 +225,17 @@ const NwTable = ({ title, color, addLabel, onAdd, children }: any) => (
     {React.Children.count(children) === 0 ? <div className="p-8 text-center text-slate-300 text-sm">—</div> : children}
   </div>
 );
-const Item = ({ title, sub, value, color, onEdit, onDel, flag }: any) => (
+const Item = ({ title, sub, value, color, onEdit, onDel, flag, extra }: any) => (
   <div className="flex items-center justify-between px-5 py-3 border-b border-slate-50 last:border-0">
-    <div>
+    <div className="min-w-0">
       <div className="text-sm font-medium text-xin-blue flex items-center gap-1.5">
         {title}
         {flag && <span title={flag} className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700">待确认</span>}
       </div>
       <div className="text-xs text-slate-400">{sub}</div>
+      {extra}
     </div>
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-3 shrink-0">
       <span className={`text-sm font-semibold ${color}`}>RM {value}</span>
       <button onClick={onEdit} className="text-slate-300 hover:text-xin-blue"><Pencil size={14} /></button>
       <button onClick={onDel} className="text-slate-300 hover:text-red-400"><X size={14} /></button>
@@ -225,6 +271,10 @@ const LiabilityEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang }: 
       <Fr label={`${t('Outstanding Balance','未偿还余额')} (RM) *`}><Inp type="number" value={form.outstanding_balance} onChange={v => set('outstanding_balance',v)} /></Fr>
       <Fr label={t('Monthly Payment','每月还款')+' (RM)'}><Inp type="number" value={form.monthly_payment} onChange={v => set('monthly_payment',v)} /></Fr>
       <Fr label={t('Interest Rate','利率')+' (%)'}><Inp type="number" value={form.interest_rate} onChange={v => set('interest_rate',v)} /></Fr>
+      <div className="grid grid-cols-2 gap-3">
+        <Fr label={t('Remaining term (months)','剩余期数（月）')}><Inp type="number" value={form.remaining_months} onChange={v => set('remaining_months',v)} placeholder="e.g. 240" /></Fr>
+        <Fr label={t('Amortisation','计息方式')}><Sel value={form.rate_type} onChange={v => set('rate_type',v)} opts={RATE_TYPES.map(([v, en, zh]) => [v, lang === 'zh' ? zh : en] as [string, string])} /></Fr>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <Fr label={t('Start Date','开始日期')}><Inp type="date" value={form.start_date} onChange={v => set('start_date',v)} /></Fr>
         <Fr label={t('End Date','到期日期')}><Inp type="date" value={form.end_date} onChange={v => set('end_date',v)} /></Fr>

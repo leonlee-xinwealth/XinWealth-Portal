@@ -563,6 +563,453 @@ function levelUpLiabilityType(label) {
   return LEVELUP_LIABILITY_LABELS[norm(label ?? "")] ?? "other";
 }
 
+// supabase/functions/_shared/finance/loans.ts
+var LOAN_DEFAULTS = {
+  mortgage: { rate_pct: 4.2, months: 300, rate_type: "reducing" },
+  car_loan: { rate_pct: 3, months: 60, rate_type: "flat" },
+  personal_loan: { rate_pct: 8, months: 60, rate_type: "reducing" },
+  study_loan: { rate_pct: 1, months: 120, rate_type: "reducing" },
+  renovation_loan: { rate_pct: 7, months: 60, rate_type: "reducing" },
+  business_loan: { rate_pct: 7, months: 60, rate_type: "reducing" },
+  asb_financing: { rate_pct: 4.5, months: 120, rate_type: "reducing" },
+  family_loan: { rate_pct: 0, months: 36, rate_type: "reducing" },
+  bnpl: { rate_pct: 0, months: 6, rate_type: "reducing" },
+  tax_payable: { rate_pct: 0, months: 12, rate_type: "reducing" },
+  other: { rate_pct: 6, months: 60, rate_type: "reducing" },
+  credit_card: { rate_pct: 18, months: null, rate_type: "revolving" },
+  overdraft: { rate_pct: 8, months: null, rate_type: "interest_only" },
+  share_margin: { rate_pct: 6, months: null, rate_type: "interest_only" },
+  policy_loan: null
+};
+var WARN_PAYMENT_BELOW_INTEREST = "\u6708\u4F9B\u4E0D\u8DB3\u4EE5\u652F\u4ED8\u5F53\u671F\u5229\u606F\uFF0C\u4F59\u989D\u6216\u5229\u7387\u53EF\u80FD\u6709\u8BEF";
+var WARN_PAYMENT_TERM_SHORTFALL = "\u6708\u4F9B \xD7 \u5269\u4F59\u671F\u6570\u5C0F\u4E8E\u4F59\u989D\uFF0C\u6570\u636E\u53EF\u80FD\u6709\u8BEF";
+function round2(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function monthsUntilEndDate(endDate, today) {
+  if (!endDate)
+    return null;
+  const end = new Date(endDate);
+  if (isNaN(end.getTime()))
+    return null;
+  const months = (end.getUTCFullYear() - today.getUTCFullYear()) * 12 + (end.getUTCMonth() - today.getUTCMonth()) - (end.getUTCDate() < today.getUTCDate() ? 1 : 0);
+  return months > 0 ? months : null;
+}
+function reducingPayment(balance, rMonthly, months) {
+  const n = Math.max(months, 1);
+  if (rMonthly <= 0)
+    return balance / n;
+  return balance * rMonthly / (1 - Math.pow(1 + rMonthly, -n));
+}
+function monthsFromRatePayment(balance, rMonthly, payment) {
+  if (rMonthly <= 0)
+    return payment > 0 ? balance / payment : null;
+  if (payment <= balance * rMonthly)
+    return null;
+  return -Math.log(1 - balance * rMonthly / payment) / Math.log(1 + rMonthly);
+}
+function solveRatePct(balance, payment, months) {
+  let lo = 0;
+  let hi = 60;
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    const implied = reducingPayment(balance, mid / 1200, months);
+    if (implied > payment)
+      hi = mid;
+    else
+      lo = mid;
+  }
+  return Math.round((lo + hi) / 2 * 1e4) / 1e4;
+}
+function estimateLoan(input, today = /* @__PURE__ */ new Date()) {
+  const balanceNum = Number(input.outstanding_balance);
+  const B = Number.isFinite(balanceNum) ? balanceNum : 0;
+  const rawDefaults = Object.prototype.hasOwnProperty.call(LOAN_DEFAULTS, input.liability_type) ? LOAN_DEFAULTS[input.liability_type] : LOAN_DEFAULTS.other;
+  const rateType = input.rate_type ?? rawDefaults?.rate_type ?? "reducing";
+  const zero = () => ({
+    monthly_payment: 0,
+    annual_rate_pct: 0,
+    remaining_months: 0,
+    rate_type: rateType,
+    interest_monthly: 0,
+    principal_monthly: 0,
+    estimated: [],
+    warnings: []
+  });
+  if (B <= 0 || rawDefaults === null)
+    return zero();
+  const hasRate = input.interest_rate != null;
+  const hasPayment = input.monthly_payment != null;
+  const hasMonths = input.remaining_months != null;
+  const warnings = [];
+  const resolveDefaultMonths = () => {
+    const fromEnd = monthsUntilEndDate(input.end_date, today);
+    return fromEnd != null ? fromEnd : rawDefaults.months;
+  };
+  let months;
+  let ratePct;
+  let payment;
+  let interestMonthly;
+  let principalMonthly;
+  if (rateType === "reducing") {
+    if (hasMonths) {
+      months = input.remaining_months;
+    } else if (hasRate && hasPayment) {
+      months = null;
+    } else {
+      months = resolveDefaultMonths();
+    }
+    ratePct = hasRate ? input.interest_rate : hasPayment && months != null ? solveRatePct(B, input.monthly_payment, months) : rawDefaults.rate_pct;
+    const rMonthly = ratePct / 1200;
+    if (months == null && hasRate && hasPayment) {
+      const derived = monthsFromRatePayment(B, rMonthly, input.monthly_payment);
+      months = derived != null ? Math.max(1, Math.round(derived)) : null;
+    }
+    payment = hasPayment ? input.monthly_payment : reducingPayment(B, rMonthly, months ?? rawDefaults.months ?? 1);
+    interestMonthly = B * rMonthly;
+    principalMonthly = Math.max(0, payment - interestMonthly);
+    if (payment <= interestMonthly)
+      warnings.push(WARN_PAYMENT_BELOW_INTEREST);
+    if (months != null && payment * months < B * 0.98)
+      warnings.push(WARN_PAYMENT_TERM_SHORTFALL);
+  } else if (rateType === "flat") {
+    months = hasMonths ? input.remaining_months : resolveDefaultMonths();
+    ratePct = hasRate ? input.interest_rate : rawDefaults.rate_pct;
+    const rMonthly = ratePct / 1200;
+    const base = input.original_principal ?? B;
+    interestMonthly = base * rMonthly;
+    const n = months ?? 1;
+    payment = hasPayment ? input.monthly_payment : B / Math.max(n, 1) + interestMonthly;
+    principalMonthly = Math.max(0, payment - interestMonthly);
+    if (months != null && payment * months < B * 0.98)
+      warnings.push(WARN_PAYMENT_TERM_SHORTFALL);
+  } else if (rateType === "revolving") {
+    months = hasMonths ? input.remaining_months : resolveDefaultMonths();
+    ratePct = hasRate ? input.interest_rate : rawDefaults.rate_pct;
+    const rMonthly = ratePct / 1200;
+    interestMonthly = B * rMonthly;
+    const minPayment = Math.min(B, Math.max(B * 0.05, 50));
+    payment = hasPayment ? input.monthly_payment : minPayment;
+    principalMonthly = Math.max(0, payment - interestMonthly);
+    if (months != null && payment * months < B * 0.98)
+      warnings.push(WARN_PAYMENT_TERM_SHORTFALL);
+  } else {
+    months = hasMonths ? input.remaining_months : resolveDefaultMonths();
+    ratePct = hasRate ? input.interest_rate : rawDefaults.rate_pct;
+    const rMonthly = ratePct / 1200;
+    interestMonthly = B * rMonthly;
+    payment = hasPayment ? input.monthly_payment : interestMonthly;
+    principalMonthly = Math.max(0, payment - interestMonthly);
+    if (months != null && payment * months < B * 0.98)
+      warnings.push(WARN_PAYMENT_TERM_SHORTFALL);
+  }
+  const estimated = [];
+  if (!hasPayment)
+    estimated.push("monthly_payment");
+  if (!hasRate)
+    estimated.push("interest_rate");
+  if (!hasMonths && months != null)
+    estimated.push("remaining_months");
+  return {
+    monthly_payment: round2(payment),
+    annual_rate_pct: ratePct,
+    remaining_months: months,
+    rate_type: rateType,
+    interest_monthly: round2(interestMonthly),
+    principal_monthly: round2(principalMonthly),
+    estimated,
+    warnings
+  };
+}
+
+// supabase/functions/_shared/cashflow/periods.ts
+var ANNUAL_OCCURRENCES = {
+  weekly: 52,
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  one_off: 0
+};
+var TRANSFER_CATEGORIES_INLINE = [
+  "asnb_contribution",
+  "asset_purchase",
+  "asset_sale",
+  "borrowing_family",
+  "business_capital",
+  "credit_card_payment",
+  "crypto_purchase",
+  "epf_employee",
+  "epf_voluntary",
+  "epf_withdrawal",
+  "fd_placement",
+  "gold_purchase",
+  "investment_contribution",
+  "investment_other",
+  "lend_out",
+  "loan_drawdown",
+  "prs_contribution",
+  "savings_withdrawal",
+  "sspn",
+  "stock_etf_purchase",
+  "tabung_haji",
+  "to_savings",
+  "unit_trust_contribution"
+];
+var TRANSFER_SET = new Set(TRANSFER_CATEGORIES_INLINE);
+function isAssetTransfer(r) {
+  return isTransferCode(r.category);
+}
+function isTransferCode(code) {
+  return code != null && TRANSFER_SET.has(code);
+}
+function yearOf(periodMonth) {
+  const y = Number(String(periodMonth ?? "").slice(0, 4));
+  return Number.isInteger(y) && y > 1900 && y < 3e3 ? y : null;
+}
+function monthOf(periodMonth) {
+  const m = Number(String(periodMonth ?? "").slice(5, 7));
+  return Number.isInteger(m) && m >= 1 && m <= 12 ? m : null;
+}
+function isMonthlyActual(r) {
+  return (r.frequency ?? "monthly") === "monthly";
+}
+function amountOf(r) {
+  const n = Number(r.amount);
+  return Number.isFinite(n) ? n : 0;
+}
+function normalise(basis, fallbackYear) {
+  if (!basis)
+    return { year: fallbackYear, from_month: 1, to_month: 12 };
+  const from = Math.min(12, Math.max(1, Math.round(basis.from_month)));
+  const to = Math.min(12, Math.max(1, Math.round(basis.to_month)));
+  return {
+    year: basis.year,
+    from_month: Math.min(from, to),
+    to_month: Math.max(from, to)
+  };
+}
+function annualizeCashflow(rows, basis) {
+  const b = normalise(basis, (/* @__PURE__ */ new Date()).getFullYear());
+  const basisMonths = b.to_month - b.from_month + 1;
+  let monthlyIncome = 0;
+  let monthlyExpenses = 0;
+  let annualItemsIncome = 0;
+  let annualItemsExpenses = 0;
+  const withData = /* @__PURE__ */ new Set();
+  for (const r of rows ?? []) {
+    if (isAssetTransfer(r))
+      continue;
+    if (yearOf(r.period_month) !== b.year)
+      continue;
+    const amount = amountOf(r);
+    const inflow = r.direction === "inflow";
+    if (isMonthlyActual(r)) {
+      const m = monthOf(r.period_month);
+      if (m == null || m < b.from_month || m > b.to_month)
+        continue;
+      withData.add(m);
+      if (inflow)
+        monthlyIncome += amount;
+      else
+        monthlyExpenses += amount;
+    } else {
+      const occurrences = ANNUAL_OCCURRENCES[r.frequency] ?? 12;
+      const annual = amount * occurrences;
+      if (inflow)
+        annualItemsIncome += annual;
+      else
+        annualItemsExpenses += annual;
+    }
+  }
+  const divisor = withData.size || 1;
+  const avgIncome = monthlyIncome / divisor;
+  const avgExpenses = monthlyExpenses / divisor;
+  const annualIncome = avgIncome * 12 + annualItemsIncome;
+  const annualExpenses = avgExpenses * 12 + annualItemsExpenses;
+  return {
+    annual_income: annualIncome,
+    annual_expenses: annualExpenses,
+    monthly_income: annualIncome / 12,
+    monthly_expenses: annualExpenses / 12,
+    basis_months: basisMonths,
+    months_with_data: [...withData].sort((a, b2) => a - b2),
+    annual_items_income: annualItemsIncome,
+    annual_items_expenses: annualItemsExpenses
+  };
+}
+
+// supabase/functions/_shared/finance/derived.ts
+function round22(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+var PREMIUM_OCCURRENCES = {
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  single_premium: 0
+};
+function premiumCategoryOf(policy_type) {
+  switch (policy_type) {
+    case "life":
+      return "life_takaful";
+    case "investment_linked":
+      return "savings_plan_premium";
+    case "medical":
+      return "medical_card";
+    case "critical_illness":
+      return "critical_illness";
+    case "accident":
+      return "personal_accident";
+    case "property":
+      return "home_insurance";
+    default:
+      return "protection_other";
+  }
+}
+function isExpired(endDate, today) {
+  if (!endDate)
+    return false;
+  const end = new Date(endDate);
+  if (isNaN(end.getTime()))
+    return false;
+  const cutoff = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  return end.getTime() < cutoff.getTime();
+}
+function deriveLoanItems(liabilities, today = /* @__PURE__ */ new Date()) {
+  const items = [];
+  for (const l of liabilities ?? []) {
+    const meta = liabilityTypeMeta(l.liability_type);
+    if (!meta || meta.installment_category == null)
+      continue;
+    const est = estimateLoan(l, today);
+    const isCreditCard = l.liability_type === "credit_card";
+    const category = isCreditCard ? "finance_charges" : meta.installment_category;
+    const interestOnlyAmount = isCreditCard || est.rate_type === "interest_only";
+    const amount = interestOnlyAmount ? est.interest_monthly : est.monthly_payment;
+    items.push({
+      key: `liability:${l.id ?? l.name ?? l.liability_type}`,
+      source_type: "liability",
+      source_id: l.id ?? null,
+      source_name: l.name ?? meta.label_zh,
+      category,
+      direction: "outflow",
+      monthly_amount: round22(amount),
+      interest_monthly: est.interest_monthly,
+      principal_monthly: est.principal_monthly,
+      estimated: est.estimated,
+      warnings: est.warnings
+    });
+  }
+  return items;
+}
+function derivePremiumItems(policies, today = /* @__PURE__ */ new Date()) {
+  const items = [];
+  for (const p of policies ?? []) {
+    if (isExpired(p.end_date, today))
+      continue;
+    const occurrences = PREMIUM_OCCURRENCES[p.premium_frequency ?? "annual"] ?? 12;
+    const monthly = round22((p.premium ?? 0) * occurrences / 12);
+    if (monthly === 0)
+      continue;
+    items.push({
+      key: `policy:${p.id ?? p.plan_name ?? p.policy_type}`,
+      source_type: "policy",
+      source_id: p.id ?? null,
+      source_name: p.plan_name ?? p.provider ?? p.policy_type,
+      category: premiumCategoryOf(p.policy_type),
+      direction: "outflow",
+      monthly_amount: monthly,
+      interest_monthly: 0,
+      principal_monthly: 0,
+      estimated: [],
+      warnings: []
+    });
+  }
+  return items;
+}
+function isSuperseded(row, liabilities, policies) {
+  const code = row.category;
+  if (!code)
+    return false;
+  const cat = CATEGORY_BY_CODE[code];
+  if (!cat)
+    return false;
+  if (cat.group === "O2" && cat.wealth_effect === "split") {
+    const liabilityCategories = new Set(
+      (liabilities ?? []).map((l) => liabilityTypeMeta(l.liability_type)?.installment_category).filter((c) => c != null)
+    );
+    if (liabilityCategories.has(code))
+      return true;
+    if (code === "debt_other" && liabilityCategories.size > 0)
+      return true;
+    return false;
+  }
+  if (cat.group === "O3") {
+    const policyCategories = new Set((policies ?? []).map((p) => premiumCategoryOf(p.policy_type)));
+    if (policyCategories.has(code))
+      return true;
+    if (code === "protection_other" && (policies?.length ?? 0) > 0)
+      return true;
+    return false;
+  }
+  return false;
+}
+function planCashflow(input) {
+  const { rows, liabilities, policies, basis } = input;
+  const today = input.today ?? /* @__PURE__ */ new Date();
+  const superseded = [];
+  const keptRows = [];
+  for (const r of rows ?? []) {
+    if (isSuperseded(r, liabilities, policies))
+      superseded.push(r);
+    else
+      keptRows.push(r);
+  }
+  const baseTotals = annualizeCashflow(keptRows, basis);
+  const loanItems = deriveLoanItems(liabilities, today);
+  const premiumItems = derivePremiumItems(policies, today);
+  const derived = [...loanItems, ...premiumItems];
+  let derivedMonthlyExpense = 0;
+  for (const item of derived) {
+    if (isTransferCode(item.category))
+      continue;
+    derivedMonthlyExpense += item.monthly_amount;
+  }
+  const monthly_expenses = round22(baseTotals.monthly_expenses + derivedMonthlyExpense);
+  const annual_expenses = round22(baseTotals.annual_expenses + derivedMonthlyExpense * 12);
+  const totals = {
+    ...baseTotals,
+    monthly_expenses,
+    annual_expenses
+  };
+  let monthly_debt_service = 0;
+  let monthly_principal = 0;
+  let monthly_interest = 0;
+  for (const l of liabilities ?? []) {
+    const meta = liabilityTypeMeta(l.liability_type);
+    if (!meta || meta.installment_category == null)
+      continue;
+    const est = estimateLoan(l, today);
+    monthly_debt_service += est.monthly_payment;
+    monthly_principal += est.principal_monthly;
+    monthly_interest += est.interest_monthly;
+  }
+  let monthly_premiums = 0;
+  for (const item of premiumItems)
+    monthly_premiums += item.monthly_amount;
+  return {
+    totals,
+    derived,
+    superseded,
+    monthly_debt_service: round22(monthly_debt_service),
+    monthly_principal: round22(monthly_principal),
+    monthly_interest: round22(monthly_interest),
+    monthly_premiums: round22(monthly_premiums)
+  };
+}
+
 // supabase/functions/_shared/taxonomy/index.ts
 function isTransferCategory(code, direction = "outflow") {
   return wealthEffectOf(code, direction) === "transfer";
@@ -577,6 +1024,7 @@ export {
   LEGACY_CATEGORY_MAP,
   LIABILITY_TYPES,
   LIQUID_ASSET_TYPES,
+  LOAN_DEFAULTS,
   TRANSFER_CATEGORY_CODES,
   allocationBucketOf,
   assetClassOf,
@@ -586,15 +1034,21 @@ export {
   categoryLabel,
   classifyAsset,
   classifyCashflowRow,
+  deriveLoanItems,
+  derivePremiumItems,
+  estimateLoan,
   groupOf,
   isLiquid,
   isRetirementCapital,
+  isSuperseded,
   isTransferCategory,
   levelUpAsset,
   levelUpLiabilityType,
   liabilityTypeLabel,
   liabilityTypeMeta,
   liquidityLevel,
+  planCashflow,
+  premiumCategoryOf,
   resolveCategory,
   wealthEffectOf
 };
