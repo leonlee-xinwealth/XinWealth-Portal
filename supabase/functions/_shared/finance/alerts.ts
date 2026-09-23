@@ -12,6 +12,10 @@
 //   annual_review_due      > 365 days since the last APPROVED annual review
 //   estimated_rate         a liability's interest_rate was D1-estimated, not given
 //   review_pending         a review sits in status = 'submitted' (awaiting approval)
+//   policy_missing_premium an in-force policy has no premium recorded (null/0,
+//     and not single_premium) — derivePremiumItems (./derived.ts) silently
+//     skips it, so the plan's cash flow understates spending with no signal.
+//     Fires once per client, counting every such policy.
 //
 // review-cadence alerts (quarterly/annual _due/_overdue) only fire once the
 // client HAS a prior approved review of that kind — with no baseline date to
@@ -40,7 +44,8 @@ export interface Alert {
     | "quarterly_review_overdue"
     | "annual_review_due"
     | "estimated_rate"
-    | "review_pending";
+    | "review_pending"
+    | "policy_missing_premium";
   severity: AlertSeverity;
   message_zh: string;
   message_en: string;
@@ -72,6 +77,21 @@ export interface AlertLiability extends LoanInput {
   name?: string | null;
 }
 
+/** Just the fields policy_missing_premium needs — same idea as AlertLiability,
+ *  a slimmed-down shape callers can build from a bulk `insurance_policies`
+ *  select without pulling in the full PolicyRow (./derived.ts) contract. */
+export interface AlertPolicy {
+  policy_type: string;
+  premium?: number | null;
+  premium_frequency?: string | null;
+  /** P5 决策 3: in_force/lapsed/paid_up/surrendered/matured; null/undefined
+   *  (every pre-P5 row) counts as in_force — same default as derived.ts's
+   *  isPremiumActive. */
+  status?: string | null;
+  provider?: string | null;
+  plan_name?: string | null;
+}
+
 export interface ComputeAlertsInput {
   client_id: string;
   /** any order — sorted by snapshot_date internally. */
@@ -81,6 +101,7 @@ export interface ComputeAlertsInput {
   latestSnapshot: AlertSnapshot;
   reviews: readonly AlertReview[];
   liabilities?: readonly AlertLiability[];
+  policies?: readonly AlertPolicy[];
   /** precomputed estimateLoan() results, index-aligned with `liabilities` —
    *  skips recomputation when the caller already has them (e.g. from the
    *  same planCashflow call that fed computeSnapshot). Falls back to calling
@@ -245,6 +266,25 @@ export function computeAlerts(input: ComputeAlertsInput): Alert[] {
         `${estimatedNames.length} liabilit${estimatedNames.length === 1 ? "y has" : "ies have"} an estimated interest rate (${estimatedNames.join(", ")}) — update it at the next review`,
       );
     }
+  }
+
+  // ---- policy_missing_premium ----
+  const policies = input.policies ?? [];
+  const missingPremiumCount = policies.filter((p) => {
+    const inForce = p.status == null || p.status === "in_force";
+    if (!inForce) return false;
+    if (p.premium_frequency === "single_premium") return false;
+    return p.premium == null || p.premium === 0;
+  }).length;
+  if (missingPremiumCount > 0) {
+    push(
+      "policy_missing_premium",
+      "medium",
+      `${missingPremiumCount} 份生效保单未记录保费，现金流可能少算`,
+      `${missingPremiumCount} in-force polic${missingPremiumCount === 1 ? "y" : "ies"} ${
+        missingPremiumCount === 1 ? "has" : "have"
+      } no premium recorded — cash flow may be understated`,
+    );
   }
 
   // ---- review_pending ----

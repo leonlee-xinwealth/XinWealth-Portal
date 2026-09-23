@@ -1,5 +1,5 @@
 import { assertEquals } from "https://deno.land/std@0.168.0/testing/asserts.ts";
-import { computeAlerts, type AlertLiability, type AlertReview, type AlertSnapshot } from "./alerts.ts";
+import { computeAlerts, type AlertLiability, type AlertPolicy, type AlertReview, type AlertSnapshot } from "./alerts.ts";
 
 const ASOF = new Date("2026-06-01T00:00:00Z");
 const CLIENT_ID = "client-1";
@@ -167,6 +167,40 @@ Deno.test("computeAlerts: estimated_rate fires only for liabilities missing an i
   ];
   const missingRate = computeAlerts({ client_id: CLIENT_ID, snapshots: [], latestSnapshot: { snapshot_date: "2026-06-01" }, reviews: [], liabilities: noRate, asOf: ASOF });
   assertEquals(codesOf(missingRate).includes("estimated_rate"), true);
+});
+
+// ---------------------------------------------------------------------------
+// policy_missing_premium: an in-force policy with no premium recorded.
+// ---------------------------------------------------------------------------
+
+Deno.test("computeAlerts: policy_missing_premium fires for an in-force policy with null/0 premium", () => {
+  const base = { client_id: CLIENT_ID, snapshots: [], latestSnapshot: { snapshot_date: "2026-06-01" }, reviews: [], asOf: ASOF };
+
+  const recorded: AlertPolicy[] = [{ policy_type: "life", premium: 1200, premium_frequency: "annual", status: "in_force" }];
+  assertEquals(codesOf(computeAlerts({ ...base, policies: recorded })).includes("policy_missing_premium"), false);
+
+  const nullPremium: AlertPolicy[] = [{ policy_type: "life", premium: null, premium_frequency: "annual", status: "in_force" }];
+  assertEquals(codesOf(computeAlerts({ ...base, policies: nullPremium })).includes("policy_missing_premium"), true);
+
+  const zeroPremium: AlertPolicy[] = [{ policy_type: "medical", premium: 0, premium_frequency: "monthly", status: null }];
+  assertEquals(codesOf(computeAlerts({ ...base, policies: zeroPremium })).includes("policy_missing_premium"), true);
+
+  // single_premium annualises to 0 by design (derived.ts) — not a data gap.
+  const singlePremium: AlertPolicy[] = [{ policy_type: "life", premium: null, premium_frequency: "single_premium", status: "in_force" }];
+  assertEquals(codesOf(computeAlerts({ ...base, policies: singlePremium })).includes("policy_missing_premium"), false);
+
+  // lapsed/surrendered/etc. no longer owe a premium — no signal needed.
+  const lapsed: AlertPolicy[] = [{ policy_type: "life", premium: null, premium_frequency: "annual", status: "lapsed" }];
+  assertEquals(codesOf(computeAlerts({ ...base, policies: lapsed })).includes("policy_missing_premium"), false);
+
+  // count is reflected in the message.
+  const two: AlertPolicy[] = [
+    { policy_type: "life", premium: null, premium_frequency: "annual", status: "in_force" },
+    { policy_type: "medical", premium: 0, premium_frequency: "monthly", status: "in_force" },
+  ];
+  const alert = computeAlerts({ ...base, policies: two }).find((a) => a.code === "policy_missing_premium");
+  assertEquals(alert?.message_zh.startsWith("2 "), true);
+  assertEquals(alert?.message_en.startsWith("2 "), true);
 });
 
 // ---------------------------------------------------------------------------
