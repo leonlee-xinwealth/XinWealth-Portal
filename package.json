@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:deno": "deno test --no-check --allow-env supabase/functions/",
     "typecheck": "tsc --noEmit",
-    "proofs": "tsx scripts/generate-proofs.ts"
+    "proofs": "tsx scripts/generate-proofs.ts",
+    "build:taxonomy-page": "node scripts/build-taxonomy-page.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
