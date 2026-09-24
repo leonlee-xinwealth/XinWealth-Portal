@@ -400,12 +400,26 @@ Deno.test("P2b: a standing salary item switches cashflow_source to 'items' and d
   // estimated automatically on the items path (taxable 96,000, reliefs
   // personal 9,000 + EPF 4,000 (capped) -> chargeable 83,000 -> annual tax
   // 6,170 -> 514.17/mo), folded into annual_expenses alongside SOCSO/EIS.
-  // (FinancialBaseline doesn't surface monthly_income_tax itself yet — that's
-  // a separate follow-up — so this is pinned via the annual_expenses total.)
   assertAlmostEquals(b.annual_expenses, (41.65 + 514.17) * 12, 0.5);
 
   // annual_disposable_surplus = annual_surplus − 12 × employee EPF.
   assertEquals(b.annual_disposable_surplus, b.annual_surplus - 880 * 12);
+
+  // P2b followup — the take-home / net-cash-flow waterfall: baseline.ts must
+  // copy planCashflow's own figures verbatim (no recomputation), so these
+  // assert the WIRING (each field's documented relationship to the others),
+  // not a hand-derived tax number — the tax/statutory math itself is pinned
+  // in _shared/finance/{incomeTax,statutory}.test.ts.
+  assertAlmostEquals(b.monthly_income_tax, 514.17, 0.5);
+  assertEquals(b.monthly_statutory, b.monthly_employee_epf + b.monthly_socso_eis);
+  assertAlmostEquals(b.monthly_take_home, b.monthly_income - b.monthly_statutory - b.monthly_income_tax, 0.01);
+  // No manually-keyed living costs in this fixture (only the salary item) —
+  // monthly_expenses is entirely the derived SOCSO/EIS + estimated tax, both
+  // stripped back out, so living lands on exactly 0.
+  assertAlmostEquals(b.monthly_living, 0, 0.5);
+  assertAlmostEquals(b.monthly_savable, b.monthly_take_home - b.monthly_living, 0.01);
+  assertEquals(b.monthly_planned_savings, 0); // no transfer items in this fixture
+  assertAlmostEquals(b.monthly_net_cash_flow, b.monthly_savable - b.monthly_planned_savings, 0.01);
 
   assert(b.baseline_notes.some((n) => n.includes("常设项目") && n.includes("2026-07")), b.baseline_notes.join(" | "));
   assert(b.baseline_notes.some((n) => n.includes("按法定比例估算")), b.baseline_notes.join(" | "));
@@ -421,6 +435,39 @@ Deno.test("P2b: no items stays on the actuals path — cashflow_source, statutor
   assertEquals(b.monthly_socso_eis, 0);
   assertEquals(b.annual_disposable_surplus, b.annual_surplus);
   assertEquals(b.one_off_items, []);
+
+  // P2b followup: the actuals path never estimates tax/statutory — this
+  // fixture has no manual income_tax row, so take-home collapses to plain
+  // income minus living costs.
+  assertEquals(b.monthly_income_tax, 0);
+  assertEquals(b.monthly_statutory, 0);
+  assertEquals(b.monthly_take_home, b.monthly_income);
+  assertEquals(b.monthly_living, b.monthly_essential_expenses);
+  assertEquals(b.monthly_savable, b.monthly_take_home - b.monthly_living);
+  assertEquals(b.monthly_planned_savings, 0);
+  assertEquals(b.monthly_net_cash_flow, b.monthly_savable);
+});
+
+Deno.test("P2b followup: a non-resident client's estimated tax uses the flat 30% (tax_residency wired through from db.ts)", () => {
+  const f = makeCfpData({
+    client: { ...makeCfpData().client, has_epf: false, tax_residency: "non_resident" },
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  const b = computeBaseline(f, {}, NOW);
+
+  // 96,000 taxable income * 30% flat rate, no reliefs/rebate — see
+  // estimateIncomeTax in _shared/finance/incomeTax.ts.
+  assertEquals(b.monthly_income_tax, 2400);
+  assertEquals(b.monthly_statutory, 0); // has_epf is false: no EPF/SOCSO/EIS
+  assertEquals(b.monthly_take_home, b.monthly_income - 2400);
+  assertEquals(b.monthly_living, 0); // no living costs in this fixture besides the estimated tax
+  assertEquals(b.monthly_savable, b.monthly_take_home);
+  assertEquals(b.monthly_net_cash_flow, b.monthly_savable);
 });
 
 Deno.test("P2b: has_epf true but no active salary items derives no statutory deductions", () => {

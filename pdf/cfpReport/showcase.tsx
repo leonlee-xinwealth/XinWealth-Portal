@@ -269,6 +269,16 @@ const DATA: CfpReportData = {
     monthly_employer_epf: 2_080,
     monthly_socso_eis: 112,
     annual_disposable_surplus: 32_880,
+    // P2b followup (WEI QI LEE case) — the take-home / net-cash-flow
+    // waterfall. Exercises CashflowOverview's compact block in the pageCount
+    // overflow tripwire — without these, that test never renders it at all.
+    monthly_income_tax: 220,
+    monthly_statutory: 1_872, // employee EPF 1,760 + SOCSO/EIS 112
+    monthly_take_home: 15_908, // 18,000 − 1,872 − 220
+    monthly_living: 11_668, // 12,000 monthly_expenses − 112 socso/eis − 220 tax
+    monthly_savable: 4_240, // 15,908 − 11,668
+    monthly_planned_savings: 1_500, // matches CASHFLOW.asset_transfers_monthly
+    monthly_net_cash_flow: 2_740, // 4,240 − 1,500
     monthly_principal: 1_150,
     derived_items: [
       {

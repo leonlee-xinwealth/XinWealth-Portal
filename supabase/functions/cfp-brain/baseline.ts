@@ -14,7 +14,7 @@ import {
 } from "../_shared/cashflow/periods.ts";
 import { monthStart } from "../_shared/cashflow/items.ts";
 import { LIQUID_ASSET_TYPES as TAXONOMY_LIQUID } from "../_shared/taxonomy/balance.ts";
-import { planCashflow, type PlanCashflowInput } from "../_shared/finance/derived.ts";
+import { planCashflow, type PlanCashflowClientInfo, type PlanCashflowInput } from "../_shared/finance/derived.ts";
 import { assessAssets } from "../_shared/finance/assetQuality.ts";
 import type {
   BaselineAssumptions,
@@ -150,16 +150,18 @@ export function computeBaseline(
   // household path is keyed by client_id (each spouse's items keep their own
   // client_id through the household merge — see household.ts) instead of a
   // single pooled `client`.
-  const clientsInfo: Record<string, { has_epf?: boolean | null; date_of_birth?: string | null }> | undefined =
+  const clientsInfo: Record<string, PlanCashflowClientInfo> | undefined =
     f.household
       ? {
         [f.household.primary.client.id]: {
           has_epf: f.household.primary.client.has_epf,
           date_of_birth: f.household.primary.client.date_of_birth,
+          tax_residency: f.household.primary.client.tax_residency,
         },
         [f.household.partner.client.id]: {
           has_epf: f.household.partner.client.has_epf,
           date_of_birth: f.household.partner.client.date_of_birth,
+          tax_residency: f.household.partner.client.tax_residency,
         },
       }
       : undefined;
@@ -180,7 +182,11 @@ export function computeBaseline(
     basis,
     today: now,
     items: f.items,
-    client: { has_epf: f.client.has_epf, date_of_birth: f.client.date_of_birth },
+    client: {
+      has_epf: f.client.has_epf,
+      date_of_birth: f.client.date_of_birth,
+      tax_residency: f.client.tax_residency,
+    },
     ...(clientsInfo ? { clients: clientsInfo } : {}),
   };
   const plan = planCashflow(planInput);
@@ -337,6 +343,17 @@ export function computeBaseline(
     monthly_employee_epf: plan.monthly_employee_epf,
     monthly_employer_epf: plan.monthly_employer_epf,
     monthly_socso_eis: plan.monthly_socso_eis,
+    // P2b followup — the cash-flow-correctness fix: take-home / net-cash-flow
+    // waterfall, copied verbatim from planCashflow (no recomputation here —
+    // see PlanCashflowResult in _shared/finance/derived.ts for what each one
+    // means and how the actuals path fills them).
+    monthly_income_tax: plan.monthly_income_tax,
+    monthly_statutory: plan.monthly_statutory,
+    monthly_take_home: plan.monthly_take_home,
+    monthly_living: plan.monthly_living,
+    monthly_savable: plan.monthly_savable,
+    monthly_planned_savings: plan.monthly_planned_savings,
+    monthly_net_cash_flow: plan.monthly_net_cash_flow,
     // P2b 决策 6: forced EPF savings can't be redirected by the budget
     // waterfall — subtract it from the surplus every allocation is measured
     // against. 0 employee EPF (actuals path, or no has_epf) leaves this equal

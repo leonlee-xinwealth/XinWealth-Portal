@@ -34,7 +34,7 @@ import {
 } from "../select/balanceSheet";
 import {
   selectCashflow, cashflowWaterfall, cashflowRows, expenseSlices,
-  autoItemRows, oneOffRows,
+  autoItemRows, oneOffRows, takeHomeWaterfallRows, type CashflowView,
 } from "../select/cashflow";
 import {
   selectInsurance, needsRows, policyRows, premiumBurden, INSURANCE_GAP_KEYS,
@@ -587,6 +587,56 @@ export function LiabilitiesDetail({ data }: CfpPageProps) {
   );
 }
 
+/** P6/P7 shared: a single compact label/value line, well below a full
+ *  DataTable row's weight — both pages are already tight, so this reuses the
+ *  row DATA (`autoItemRows`/`oneOffRows`/`takeHomeWaterfallRows`) without the
+ *  DataTable component's own padding/column-header overhead. */
+function CompactItemLine({ row }: { row: TableRow }) {
+  // Label and meta share ONE line (not stacked) — every extra line of height
+  // matters on a page this full.
+  const isHeadline = row.kind === "total";
+  return (
+    <View style={{ flexDirection: "row", marginBottom: 0.5 }}>
+      <Text
+        style={{
+          flex: 1, fontFamily: isHeadline ? FONT.sans : FONT.body,
+          fontWeight: isHeadline ? WEIGHT.bold : undefined,
+          fontSize: TYPE.micro, color: isHeadline ? T.blue : T.text,
+        }}
+      >
+        {row.label}
+        {row.meta ? <Text style={{ fontFamily: FONT.sans, color: T.faint }}>{`  ·  ${row.meta}`}</Text> : null}
+      </Text>
+      <Text
+        style={{
+          fontFamily: FONT.serif, fontWeight: isHeadline ? WEIGHT.bold : WEIGHT.medium,
+          fontSize: TYPE.micro,
+          color: isHeadline ? (row.value?.startsWith("(") ? STATUS.bad.fill : T.blue) : T.blue,
+        }}
+      >
+        {row.value}
+      </Text>
+    </View>
+  );
+}
+
+/** P2b followup (WEI QI LEE case) — the compact take-home / net-cash-flow
+ *  waterfall, read straight off `data.baseline`. Replaces the older
+ *  employee-EPF/disposable-surplus footnote lines (superseded: statutory
+ *  here already folds in SOCSO/EIS alongside EPF, and net cash flow is the
+ *  more complete headline figure) — but ONLY when the baseline actually has
+ *  these seven fields; a report saved before this fix keeps the old
+ *  footnotes exactly as before (see the `v.takeHome` branch below). */
+function TakeHomeWaterfallBlock({ v }: { v: CashflowView }) {
+  const rows = takeHomeWaterfallRows(v);
+  if (rows.length === 0) return null;
+  return (
+    <View style={{ marginTop: 2 }}>
+      {rows.map((r, i) => <CompactItemLine key={i} row={r} />)}
+    </View>
+  );
+}
+
 // --------------------------------------------------------------------------
 // P6 现金流概览
 // --------------------------------------------------------------------------
@@ -609,7 +659,17 @@ export function CashflowOverview({ data }: CfpPageProps) {
       </View>
 
       <View style={{ backgroundColor: T.white, borderWidth: 0.75, borderColor: T.hairline, borderRadius: 6, padding: SPACE.md }}>
-        <Waterfall steps={cashflowWaterfall(v)} width={chartW - SPACE.md * 2 - 2} height={230} format={money} />
+        {/* P2b followup: when the richer take-home waterfall renders below
+            (v.takeHome present), this chart only needs to carry 月收入/月支出/
+            月结余 at a glance — shrunk to make room on an already-tight page.
+            A legacy baseline without the new fields keeps the original,
+            larger chart exactly as before. */}
+        <Waterfall
+          steps={cashflowWaterfall(v)}
+          width={chartW - SPACE.md * 2 - 2}
+          height={v.takeHome ? 150 : 230}
+          format={money}
+        />
       </View>
 
       <H2>支出结构</H2>
@@ -646,19 +706,39 @@ export function CashflowOverview({ data }: CfpPageProps) {
         </Text>
       )}
 
-      {/* P2b 决策 6: compact micro-text, not a padded panel — this page is
-          already tight (waterfall + donut), and these are footnote-weight
-          facts, not headline ones. */}
-      {v.employeeEpfMonthly > 0 && (
-        <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 3 }}>
-          {`雇员 EPF 供款 ${money(v.employeeEpfMonthly)}/月已计入储蓄（非支出，已从月支出中剔除）`}
-          {v.employerEpfMonthly > 0 ? `；雇主另计 ${money(v.employerEpfMonthly)}/月，不进入现金流，仅供净资产对账。` : "。"}
-        </Text>
-      )}
-      {v.disposableSurplusAnnual != null && (
-        <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 2 }}>
-          {`可支配年结余（扣除强制 EPF 储蓄后）${money(v.disposableSurplusAnnual)} —— 预算与目标规划真正可动用的部分。`}
-        </Text>
+      {/* P2b followup: the compact take-home waterfall supersedes the older
+          employee-EPF/disposable-surplus footnotes below (monthly_statutory
+          already folds SOCSO/EIS in alongside EPF, and net cash flow is the
+          more complete headline figure) — but only once the baseline
+          actually carries those seven fields. A report saved before this fix
+          falls back to the exact footnotes it always had, so nothing
+          regresses. */}
+      {v.takeHome ? (
+        <>
+          <TakeHomeWaterfallBlock v={v} />
+          {v.employerEpfMonthly > 0 && (
+            <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 1 }}>
+              {`雇主另计 EPF 供款 ${money(v.employerEpfMonthly)}/月，不进入现金流，仅供净资产对账。`}
+            </Text>
+          )}
+        </>
+      ) : (
+        <>
+          {/* P2b 决策 6: compact micro-text, not a padded panel — this page is
+              already tight (waterfall + donut), and these are footnote-weight
+              facts, not headline ones. */}
+          {v.employeeEpfMonthly > 0 && (
+            <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 3 }}>
+              {`雇员 EPF 供款 ${money(v.employeeEpfMonthly)}/月已计入储蓄（非支出，已从月支出中剔除）`}
+              {v.employerEpfMonthly > 0 ? `；雇主另计 ${money(v.employerEpfMonthly)}/月，不进入现金流，仅供净资产对账。` : "。"}
+            </Text>
+          )}
+          {v.disposableSurplusAnnual != null && (
+            <Text style={{ fontFamily: FONT.sans, fontSize: TYPE.micro, color: T.faint, marginTop: 2 }}>
+              {`可支配年结余（扣除强制 EPF 储蓄后）${money(v.disposableSurplusAnnual)} —— 预算与目标规划真正可动用的部分。`}
+            </Text>
+          )}
+        </>
       )}
     </PageFrame>
   );
@@ -667,26 +747,6 @@ export function CashflowOverview({ data }: CfpPageProps) {
 // --------------------------------------------------------------------------
 // P7 现金流明细
 // --------------------------------------------------------------------------
-/** P7 附注: a single auto-included or one-off line, well below the full
- *  DataTable's row weight — the main table above already runs the page close
- *  to full, so this reuses the row DATA (`autoItemRows`/`oneOffRows`) without
- *  the DataTable component's own padding/column-header overhead. */
-function CompactItemLine({ row }: { row: TableRow }) {
-  // Label and meta share ONE line (not stacked) — this block sits under an
-  // already page-filling table, so every extra line of height matters.
-  return (
-    <View style={{ flexDirection: "row", marginBottom: 1 }}>
-      <Text style={{ flex: 1, fontFamily: FONT.body, fontSize: TYPE.micro, color: T.text }}>
-        {row.label}
-        {row.meta ? <Text style={{ fontFamily: FONT.sans, color: T.faint }}>{`  ·  ${row.meta}`}</Text> : null}
-      </Text>
-      <Text style={{ fontFamily: FONT.serif, fontWeight: WEIGHT.medium, fontSize: TYPE.micro, color: T.blue }}>
-        {row.value}
-      </Text>
-    </View>
-  );
-}
-
 export function CashflowDetail({ data }: CfpPageProps) {
   const v = selectCashflow(data);
   const autoRows = autoItemRows(v);

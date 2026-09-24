@@ -52,6 +52,21 @@ export default function CashflowRenderer({ c, setDraft, readOnly, t }: RendererP
   const employerEpf = typeof c.monthly_employer_epf === 'number' ? c.monthly_employer_epf : 0;
   const socsoEis = typeof c.monthly_socso_eis === 'number' ? c.monthly_socso_eis : 0;
   const disposableSurplus = typeof c.annual_disposable_surplus === 'number' ? c.annual_disposable_surplus : null;
+  // P2b followup (WEI QI LEE case) — the take-home / net-cash-flow waterfall.
+  // `monthly_net_cash_flow` is the sentinel: a report saved before this fix
+  // simply lacks it, and the whole block below stays hidden rather than
+  // printing a wrong zero.
+  const hasTakeHome = typeof c.monthly_net_cash_flow === 'number';
+  const takeHomeRows = hasTakeHome
+    ? [
+        { label: t('Total Income', '总收入'), value: c.monthly_income },
+        { label: t('Tax & Statutory Deductions', '税与法定扣款'), value: -((c.monthly_statutory ?? 0) + (c.monthly_income_tax ?? 0)) },
+        { label: t('Take-home Income', '实得收入'), value: c.monthly_take_home, strong: true },
+        { label: t('Living Costs', '开销'), value: -(c.monthly_living ?? 0) },
+        { label: t('Savable Amount', '可储蓄金额'), value: c.monthly_savable, strong: true },
+        { label: t('Planned Savings/Investment', '定期储蓄/投资'), value: -(c.monthly_planned_savings ?? 0) },
+      ]
+    : [];
 
   return (
     <>
@@ -165,6 +180,36 @@ export default function CashflowRenderer({ c, setDraft, readOnly, t }: RendererP
                 sub={t('After forced EPF savings', '扣除强制 EPF 储蓄后')}
               />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Take-home & net cash flow waterfall (P2b followup, WEI QI LEE case) —
+          总收入 → 税与法定扣款 → 实得收入 → 开销 → 可储蓄金额 → 定期储蓄/投资 →
+          净现金流. Every figure rides on this section's content, copied
+          verbatim from the baseline by modules/cashflow/calc.ts. Net cash
+          flow is the headline the client should actually watch — red when
+          negative, exactly like the PDF's version of this block. */}
+      {hasTakeHome && (
+        <div>
+          <SectionHeading hint={t('deterministic — edit client data to change', '确定性计算——改客户资料才会变')}>
+            {t('Take-home & Net Cash Flow', '实得收入与净现金流')}
+          </SectionHeading>
+          <div className="space-y-1">
+            {takeHomeRows.map((row, i) => (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                <span className={`flex-1 text-xs ${row.strong ? 'font-semibold text-slate-700' : 'text-slate-500'}`}>{row.label}</span>
+                <span className={`w-28 text-right text-xs ${row.strong ? 'font-semibold text-slate-800' : 'text-slate-500'}`}>
+                  {row.value < 0 ? `(${fmtRM(Math.abs(row.value))})` : fmtRM(row.value)}
+                </span>
+              </div>
+            ))}
+            <div className="flex items-center gap-2 border-t border-slate-200 pt-1.5 mt-1">
+              <span className="flex-1 text-xs font-bold text-xin-blue">{t('Net Cash Flow', '净现金流')}</span>
+              <span className={`w-28 text-right text-sm font-bold ${c.monthly_net_cash_flow >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {fmtRM(c.monthly_net_cash_flow)}
+              </span>
+            </div>
           </div>
         </div>
       )}

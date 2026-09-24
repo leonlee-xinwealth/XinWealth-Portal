@@ -225,4 +225,39 @@ Deno.test("plan facts are copied verbatim from the baseline — items path with 
   assertEquals(d.derived_items, b.derived_items);
   assert(d.derived_items.some((it) => it.category === "epf_employee"));
   assert(d.derived_items.some((it) => it.category === "socso_eis"));
+
+  // P2b followup: the take-home / net-cash-flow waterfall must be copied
+  // verbatim, byte for byte, from the baseline.
+  assertEquals(d.monthly_income_tax, b.monthly_income_tax);
+  assertEquals(d.monthly_statutory, b.monthly_statutory);
+  assertEquals(d.monthly_take_home, b.monthly_take_home);
+  assertEquals(d.monthly_living, b.monthly_living);
+  assertEquals(d.monthly_savable, b.monthly_savable);
+  assertEquals(d.monthly_planned_savings, b.monthly_planned_savings);
+  assertEquals(d.monthly_net_cash_flow, b.monthly_net_cash_flow);
+  // And the wiring is internally consistent, not just parroted:
+  assertEquals(d.monthly_statutory, d.monthly_employee_epf + d.monthly_socso_eis);
+  assertEquals(d.monthly_take_home, d.monthly_income - d.monthly_statutory - d.monthly_income_tax);
+  assertEquals(d.monthly_savable, d.monthly_take_home - d.monthly_living);
+  assertEquals(d.monthly_net_cash_flow, d.monthly_savable - d.monthly_planned_savings);
+});
+
+Deno.test("plan facts (take-home waterfall) are copied verbatim from the baseline — actuals path", () => {
+  const f = makeCfpData();
+  const b = computeBaseline(f, {}, NOW);
+  const d = computeCashflow(f, b);
+
+  assertEquals(d.monthly_income_tax, b.monthly_income_tax);
+  assertEquals(d.monthly_statutory, b.monthly_statutory);
+  assertEquals(d.monthly_take_home, b.monthly_take_home);
+  assertEquals(d.monthly_living, b.monthly_living);
+  assertEquals(d.monthly_savable, b.monthly_savable);
+  assertEquals(d.monthly_planned_savings, b.monthly_planned_savings);
+  assertEquals(d.monthly_net_cash_flow, b.monthly_net_cash_flow);
+  // No statutory/tax on the actuals path (no manual income_tax row in the
+  // fixture) — take-home collapses to plain income minus living costs.
+  assertEquals(d.monthly_statutory, 0);
+  assertEquals(d.monthly_income_tax, 0);
+  assertEquals(d.monthly_take_home, d.monthly_income);
+  assertEquals(d.monthly_net_cash_flow, d.monthly_savable);
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   selectCashflow, cashflowWaterfall, cashflowRows, expenseSlices,
-  autoItemRows, oneOffRows,
+  autoItemRows, oneOffRows, takeHomeWaterfallRows,
 } from "../cashflow";
 import { foldTail } from "../../viz/Donut";
 import type { CfpReportData } from "../../types";
@@ -387,5 +387,65 @@ describe("one-off items", () => {
   it("is empty when the content has none", () => {
     expect(selectCashflow(payload(CONTENT)).oneOffItems).toEqual([]);
     expect(oneOffRows(selectCashflow(payload(CONTENT)))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2b followup (WEI QI LEE case) — the take-home / net-cash-flow waterfall.
+// Lives on `financial_reports.baseline`, not the section content — see
+// computeBaseline in supabase/functions/cfp-brain/baseline.ts.
+// ---------------------------------------------------------------------------
+
+const TAKE_HOME_BASELINE = {
+  monthly_income_tax: 0,
+  monthly_statutory: 17.85,
+  monthly_take_home: 2_275.15,
+  monthly_living: 2_968,
+  monthly_savable: -692.85,
+  monthly_planned_savings: 0,
+  monthly_net_cash_flow: -692.85,
+};
+
+describe("take-home waterfall", () => {
+  it("reads every figure off the baseline verbatim", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, TAKE_HOME_BASELINE));
+    expect(v.takeHome).toEqual({
+      incomeTaxMonthly: 0,
+      statutoryMonthly: 17.85,
+      takeHomeMonthly: 2_275.15,
+      livingMonthly: 2_968,
+      savableMonthly: -692.85,
+      plannedSavingsMonthly: 0,
+      netCashFlowMonthly: -692.85,
+    });
+  });
+
+  it("is null on a baseline written before these fields existed — legacy reports hide the block", () => {
+    expect(selectCashflow(payloadWithBaseline(CONTENT, {})).takeHome).toBeNull();
+    expect(selectCashflow(payload(CONTENT)).takeHome).toBeNull();
+    expect(takeHomeWaterfallRows(selectCashflow(payload(CONTENT)))).toEqual([]);
+  });
+
+  it("builds the seven-step compact waterfall, tax+statutory and savings as negatives, ending on net cash flow", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, TAKE_HOME_BASELINE));
+    const rows = takeHomeWaterfallRows(v);
+    expect(rows.map((r) => r.label)).toEqual([
+      "总收入", "税与法定扣款", "实得收入", "开销", "可储蓄金额", "定期储蓄/投资", "净现金流",
+    ]);
+    expect(rows[0].value).toBe(`RM ${CONTENT.monthly_income.toLocaleString()}`);
+    expect(rows[1].value).toBe("(RM 18)"); // 17.85 statutory + 0 tax, rounded
+    expect(rows[2].value).toBe("RM 2,275");
+    expect(rows[3].value).toBe("(RM 2,968)");
+    expect(rows[6].label).toBe("净现金流");
+    expect(rows[6].kind).toBe("total");
+    expect(rows[6].value).toBe("(RM 693)");
+  });
+
+  it("shows a positive net cash flow without parentheses", () => {
+    const v = selectCashflow(payloadWithBaseline(CONTENT, {
+      ...TAKE_HOME_BASELINE, monthly_savable: 500, monthly_net_cash_flow: 500,
+    }));
+    const rows = takeHomeWaterfallRows(v);
+    expect(rows[6].value).toBe("RM 500");
   });
 });

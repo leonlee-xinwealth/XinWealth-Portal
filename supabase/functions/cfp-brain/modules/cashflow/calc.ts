@@ -76,6 +76,17 @@ export interface CashflowDet {
   /** P2a/P2b: installments, premiums and statutory deductions the plan
    *  folded in automatically — empty when the client has none. */
   derived_items: DerivedItem[];
+  /** P2b followup — the take-home / net-cash-flow waterfall, copied verbatim
+   *  from the baseline (no recomputation here — see FinancialBaseline in
+   *  ../../types.ts and PlanCashflowResult in
+   *  ../../../_shared/finance/derived.ts for what each one means). */
+  monthly_income_tax: number;
+  monthly_statutory: number;
+  monthly_take_home: number;
+  monthly_living: number;
+  monthly_savable: number;
+  monthly_planned_savings: number;
+  monthly_net_cash_flow: number;
 }
 
 const round = (n: number) => Math.round(n);
@@ -246,5 +257,12 @@ export function computeCashflow(
     annual_disposable_surplus: b.annual_disposable_surplus,
     monthly_principal: b.monthly_principal,
     derived_items: b.derived_items,
+    monthly_income_tax: b.monthly_income_tax,
+    monthly_statutory: b.monthly_statutory,
+    monthly_take_home: b.monthly_take_home,
+    monthly_living: b.monthly_living,
+    monthly_savable: b.monthly_savable,
+    monthly_planned_savings: b.monthly_planned_savings,
+    monthly_net_cash_flow: b.monthly_net_cash_flow,
   };
 }
