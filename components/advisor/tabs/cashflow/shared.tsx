@@ -12,6 +12,21 @@ import { assetTypeLabel } from '../../../../supabase/functions/_shared/taxonomy/
 
 export const fmt = (n: number) => n.toLocaleString('en-MY', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
+/**
+ * Like `fmt`, but keeps cents when the figure actually has them — the
+ * cash-flow waterfall (CashflowTab.tsx) shows exact take-home/savable/net
+ * figures (e.g. RM 2,275.15), which the whole-ringgit `fmt` above would
+ * silently round away. Whole numbers still print with no decimals.
+ */
+export function fmt2(n: number): string {
+  const rounded = Math.round((n + Number.EPSILON) * 100) / 100;
+  const hasCents = Math.abs(rounded - Math.round(rounded)) > 1e-9;
+  return rounded.toLocaleString('en-MY', {
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
+}
+
 export const inp = 'w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:border-xin-gold';
 
 export const Loader = () => <div className="flex items-center justify-center h-40"><div className="animate-spin rounded-full h-7 w-7 border-b-2 border-xin-blue" /></div>;

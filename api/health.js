@@ -105,7 +105,7 @@ export default async function handler(req, res) {
 
   const { data: clientRow, error: clientErr } = await supabaseAdmin
     .from('clients')
-    .select('id, has_epf, date_of_birth, risk_profile, number_of_dependants, onboarded_at, created_at')
+    .select('id, has_epf, date_of_birth, tax_residency, risk_profile, number_of_dependants, onboarded_at, created_at')
     .ilike('email', email)
     .maybeSingle();
 
@@ -343,7 +343,11 @@ export default async function handler(req, res) {
     liabilities: liabilities || [],
     policies: insurances || [],
     items: items || [],
-    client: { has_epf: clientRow.has_epf, date_of_birth: clientRow.date_of_birth },
+    // P2b followup (cash-flow-correctness fix): tax_residency feeds the
+    // income-tax estimate inside planCashflow (a non-resident pays the flat
+    // 30%, no reliefs) — has_epf/date_of_birth already fed the EPF/SOCSO/EIS
+    // estimate before this.
+    client: { has_epf: clientRow.has_epf, date_of_birth: clientRow.date_of_birth, tax_residency: clientRow.tax_residency },
   });
 
   // P3 决策 3: per-asset 2×2 — net monthly cash flow (linked standing items

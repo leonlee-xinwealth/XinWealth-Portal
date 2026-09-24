@@ -34,6 +34,10 @@ const emptyAddForm = () => ({
   category: '', amount: '', frequency: 'monthly', month: currentMonthInput(), name: '', linked_asset_id: '',
 });
 
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 export default function StandingItemsPanel({
   clientId, items, plan, oneOffItems, assets, liabilities, policies, language, t, onReload, onSaved,
 }: Props) {
@@ -80,7 +84,38 @@ export default function StandingItemsPanel({
 
   const inflowRows = useMemo(() => visibleStandingItems(items, 'inflow', today, showHistory), [items, today, showHistory]);
   const outflowRows = useMemo(() => visibleStandingItems(items, 'outflow', today, showHistory), [items, today, showHistory]);
-  const derivedOutflow = plan.derived; // P2a installments/premiums + D2 statutory — always outflow
+
+  // P2b followup — the cash-flow-correctness fix reshuffles the outflow side
+  // into three blocks instead of one flat "Expenses" table:
+  //   税与法定扣款 (under Income): derived epf_employee/socso_eis/estimated-tax
+  //     + any manual `income_tax` item — total = monthly_statutory + monthly_income_tax.
+  //   Expenses (living costs + installments + premiums only) — total = monthly_living.
+  //   储蓄与投资: every other transfer-category item (epf_employee excluded —
+  //     that's statutory, shown above) — total = monthly_planned_savings.
+  // Every "total" below is the corresponding planCashflow field itself, never
+  // re-summed from the visible rows, so it stays correct even when a
+  // superseded row is still shown (with its chip) alongside the real total.
+  const manualIncomeTaxRows = useMemo(
+    () => outflowRows.filter((r) => r.category === 'income_tax'),
+    [outflowRows],
+  );
+  const transferOutflowRows = useMemo(
+    () => outflowRows.filter((r) => r.category !== 'epf_employee' && wealthEffectOf(r.category, r.direction) === 'transfer'),
+    [outflowRows],
+  );
+  const livingExpenseRows = useMemo(
+    () => outflowRows.filter((r) => r.category !== 'income_tax' && wealthEffectOf(r.category, r.direction) !== 'transfer'),
+    [outflowRows],
+  );
+  const statutoryAndTaxDerived = useMemo(
+    () => plan.derived.filter((d) => d.source_type === 'statutory' || d.source_type === 'tax'),
+    [plan.derived],
+  );
+  const livingDerived = useMemo(
+    () => plan.derived.filter((d) => d.source_type === 'liability' || d.source_type === 'policy'),
+    [plan.derived],
+  );
+  const statutoryAndTaxTotal = round2(plan.monthly_statutory + plan.monthly_income_tax);
 
   function startAdd(direction: Direction) {
     setAddForm(emptyAddForm());
@@ -255,24 +290,54 @@ export default function StandingItemsPanel({
         </div>
       )}
       <div className="grid grid-cols-2 gap-4">
-        <ItemTable
-          title={t('Income (plan)', '收入（计划）')} color="text-emerald-600" borderColor="border-emerald-200"
-          direction="inflow" rows={inflowRows} derived={[]} total={plan.totals.monthly_income}
-          today={today} showHistory={showHistory} catLabel={catLabel} lang={lang} t={t}
-          assets={assets} supersededIds={supersededIds}
-          editingId={editingId} editForm={editForm} setEditForm={setEditForm} editError={editError} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
-          onRevise={startRevise} onEnd={startEnd} onDelete={handleDelete}
-          onAdd={() => startAdd('inflow')} addLabel={t('Add income item', '添加收入项目')}
-        />
-        <ItemTable
-          title={t('Expenses (plan)', '开销（计划）')} color="text-red-500" borderColor="border-red-200"
-          direction="outflow" rows={outflowRows} derived={derivedOutflow} total={plan.totals.monthly_expenses}
-          today={today} showHistory={showHistory} catLabel={catLabel} lang={lang} t={t}
-          assets={assets} supersededIds={supersededIds}
-          editingId={editingId} editForm={editForm} setEditForm={setEditForm} editError={editError} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
-          onRevise={startRevise} onEnd={startEnd} onDelete={handleDelete}
-          onAdd={() => startAdd('outflow')} addLabel={t('Add expense item', '添加支出项目')}
-        />
+        <div className="flex flex-col gap-4">
+          <ItemTable
+            title={t('Income (plan)', '收入（计划）')} color="text-emerald-600" borderColor="border-emerald-200"
+            direction="inflow" rows={inflowRows} derived={[]} total={plan.totals.monthly_income}
+            today={today} showHistory={showHistory} catLabel={catLabel} lang={lang} t={t}
+            assets={assets} supersededIds={supersededIds}
+            editingId={editingId} editForm={editForm} setEditForm={setEditForm} editError={editError} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
+            onRevise={startRevise} onEnd={startEnd} onDelete={handleDelete}
+            onAdd={() => startAdd('inflow')} addLabel={t('Add income item', '添加收入项目')}
+          />
+          {/* P2b followup: EPF/SOCSO/EIS + income tax (estimated or manual)
+              move out of Expenses and sit under Income — they're deductions
+              from pay, not spending. Total is monthly_statutory +
+              monthly_income_tax straight off the plan, so it always matches
+              the CashflowTab waterfall's own 税与法定扣款 row. */}
+          <ItemTable
+            title={t('Tax & statutory deductions (plan)', '税与法定扣款（计划）')} color="text-amber-600" borderColor="border-amber-200"
+            direction="outflow" rows={manualIncomeTaxRows} derived={statutoryAndTaxDerived} total={statutoryAndTaxTotal}
+            today={today} showHistory={showHistory} catLabel={catLabel} lang={lang} t={t}
+            assets={assets} supersededIds={supersededIds} hideTransferFootnote
+            editingId={editingId} editForm={editForm} setEditForm={setEditForm} editError={editError} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
+            onRevise={startRevise} onEnd={startEnd} onDelete={handleDelete}
+            onAdd={() => startAdd('outflow')} addLabel={t('Add manual tax item', '添加所得税项目')}
+          />
+        </div>
+        <div className="flex flex-col gap-4">
+          <ItemTable
+            title={t('Expenses (plan)', '开销（计划）')} color="text-red-500" borderColor="border-red-200"
+            direction="outflow" rows={livingExpenseRows} derived={livingDerived} total={plan.monthly_living}
+            today={today} showHistory={showHistory} catLabel={catLabel} lang={lang} t={t}
+            assets={assets} supersededIds={supersededIds}
+            editingId={editingId} editForm={editForm} setEditForm={setEditForm} editError={editError} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
+            onRevise={startRevise} onEnd={startEnd} onDelete={handleDelete}
+            onAdd={() => startAdd('outflow')} addLabel={t('Add expense item', '添加支出项目')}
+          />
+          {/* P2b followup: every other transfer-category standing item
+              (epf_employee excluded — that's statutory, shown above). Total
+              is monthly_planned_savings straight off the plan. */}
+          <ItemTable
+            title={t('Savings & investing (plan)', '储蓄与投资（计划）')} color="text-indigo-600" borderColor="border-indigo-200"
+            direction="outflow" rows={transferOutflowRows} derived={[]} total={plan.monthly_planned_savings}
+            today={today} showHistory={showHistory} catLabel={catLabel} lang={lang} t={t}
+            assets={assets} supersededIds={supersededIds} hideTransferFootnote
+            editingId={editingId} editForm={editForm} setEditForm={setEditForm} editError={editError} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
+            onRevise={startRevise} onEnd={startEnd} onDelete={handleDelete}
+            onAdd={() => startAdd('outflow')} addLabel={t('Add savings/investment item', '添加储蓄/投资项目')}
+          />
+        </div>
       </div>
 
       <div className="flex items-center justify-between mt-3">
@@ -409,6 +474,7 @@ function RowActions({ t, onEdit, onRevise, onEnd, onDelete }: {
 function ItemTable({
   title, color, borderColor, direction, rows, derived, total, today, showHistory, catLabel, lang, t, assets, supersededIds,
   editingId, editForm, setEditForm, editError, onEdit, onCancelEdit, onSaveEdit, savingEdit, onRevise, onEnd, onDelete, onAdd, addLabel,
+  hideTransferFootnote,
 }: {
   title: string; color: string; borderColor: string; direction: Direction;
   rows: StandingItemRow[]; derived: DerivedItem[]; total: number; today: Date; showHistory: boolean;
@@ -418,6 +484,12 @@ function ItemTable({
   onEdit: (item: StandingItemRow) => void; onCancelEdit: () => void; onSaveEdit: (item: StandingItemRow) => void; savingEdit: boolean;
   onRevise: (item: StandingItemRow) => void; onEnd: (item: StandingItemRow) => void; onDelete: (item: StandingItemRow) => void;
   onAdd: () => void; addLabel: string;
+  /** P2b followup: the 税与法定扣款 / 储蓄与投资 blocks are BUILT entirely
+   *  from transfer-category (or statutory) items — their own `total` already
+   *  counts every row shown, so the usual "Transfers (not in total)" caption
+   *  (correct for the plain Income/Expenses tables, where transfers really
+   *  are excluded from `total`) would be actively wrong here. */
+  hideTransferFootnote?: boolean;
 }) {
   const assetName = (id: string | null | undefined) => assets.find((a) => a.id === id)?.name;
   let transferTotal = 0;
@@ -528,7 +600,7 @@ function ItemTable({
             <span className="text-xs font-semibold text-slate-500">{t('Total', '合计')}</span>
             <span className={`text-sm font-bold ${color}`}>RM {fmt(total)}</span>
           </div>
-          {transferTotal > 0 && (
+          {!hideTransferFootnote && transferTotal > 0 && (
             <div className="flex items-center justify-between px-5 py-2 bg-slate-50 text-xs text-slate-500">
               <span>{t('Transfers (not in total)', '资产转移（不计入合计）')}</span>
               <span>RM {fmt(transferTotal)}</span>
