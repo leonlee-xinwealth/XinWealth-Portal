@@ -104,6 +104,26 @@ export interface CashflowView {
    *  baseline written before P2a/P2b. */
   autoItems: AutoItemRow[];
   oneOffItems: OneOffItemRow[];
+  /** P2b followup (WEI QI LEE case) — the take-home / net-cash-flow waterfall,
+   *  read straight off `data.baseline` (FinancialBaseline in
+   *  supabase/functions/cfp-brain/types.ts), same as every other baseline
+   *  field above. Null on a baseline written before these seven fields
+   *  existed — the compact waterfall block hides entirely rather than
+   *  printing zeros. */
+  takeHome: TakeHomeWaterfall | null;
+}
+
+/** P2b followup: 总收入 → 税与法定扣款 → 实得收入 → 开销 → 可储蓄金额 →
+ *  定期储蓄/投资 → 净现金流. Every figure here is monthly, copied verbatim
+ *  from the baseline — never recomputed in the PDF layer. */
+export interface TakeHomeWaterfall {
+  incomeTaxMonthly: number;
+  statutoryMonthly: number;
+  takeHomeMonthly: number;
+  livingMonthly: number;
+  savableMonthly: number;
+  plannedSavingsMonthly: number;
+  netCashFlowMonthly: number;
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
@@ -207,6 +227,28 @@ function oneOffItemRowsOf(raw: unknown): OneOffItemRow[] {
   }));
 }
 
+/**
+ * P2b followup: the take-home / net-cash-flow waterfall, read off
+ * `data.baseline` — the section content never carries these either (same
+ * pattern as `autoItemRowsOf` above). `monthly_net_cash_flow` — the headline
+ * figure every other field here builds toward — is the sentinel: a baseline
+ * saved before this fix simply lacks it, and the whole block returns null so
+ * callers hide it rather than printing a wrong zero.
+ */
+function takeHomeWaterfallOf(data: CfpReportData): TakeHomeWaterfall | null {
+  const b = data.baseline ?? null;
+  if (typeof b?.monthly_net_cash_flow !== "number") return null;
+  return {
+    incomeTaxMonthly: num(b?.monthly_income_tax),
+    statutoryMonthly: num(b?.monthly_statutory),
+    takeHomeMonthly: num(b?.monthly_take_home),
+    livingMonthly: num(b?.monthly_living),
+    savableMonthly: num(b?.monthly_savable),
+    plannedSavingsMonthly: num(b?.monthly_planned_savings),
+    netCashFlowMonthly: b.monthly_net_cash_flow,
+  };
+}
+
 export function selectCashflow(data: CfpReportData): CashflowView {
   const c = data.sections?.find((s) => s.section_type === "cashflow_planning")?.content ?? null;
   const basis = basisOf(data);
@@ -223,6 +265,7 @@ export function selectCashflow(data: CfpReportData): CashflowView {
       ? b.annual_disposable_surplus
       : null,
     autoItems: autoItemRowsOf(data),
+    takeHome: takeHomeWaterfallOf(data),
   };
 
   const empty: CashflowView = {
@@ -356,4 +399,26 @@ export function oneOffRows(v: CashflowView): TableRow[] {
     meta: it.month ? `${it.categoryLabel} · ${it.month}` : it.categoryLabel,
     value: it.direction === "inflow" ? money(it.amount) : money(-it.amount),
   }));
+}
+
+/**
+ * P2b followup: the compact take-home waterfall — 总收入 → 税与法定扣款 →
+ * 实得收入 → 开销 → 可储蓄金额 → 定期储蓄/投资 → 净现金流. Every step but the
+ * last two totals (实得收入, 净现金流) is signed as a delta so the page can
+ * print it as accounting negatives, exactly like `cashflowRows` above. Empty
+ * when the baseline predates these fields (`v.takeHome` is null) — the page
+ * hides the block entirely rather than rendering zeros.
+ */
+export function takeHomeWaterfallRows(v: CashflowView): TableRow[] {
+  const th = v.takeHome;
+  if (!th) return [];
+  return [
+    { kind: "row", label: "总收入", value: money(v.monthlyIncome) },
+    { kind: "row", label: "税与法定扣款", value: money(-(th.statutoryMonthly + th.incomeTaxMonthly)) },
+    { kind: "subtotal", label: "实得收入", value: money(th.takeHomeMonthly) },
+    { kind: "row", label: "开销", value: money(-th.livingMonthly) },
+    { kind: "subtotal", label: "可储蓄金额", value: money(th.savableMonthly) },
+    { kind: "row", label: "定期储蓄/投资", value: money(-th.plannedSavingsMonthly) },
+    { kind: "total", label: "净现金流", value: money(th.netCashFlowMonthly) },
+  ];
 }

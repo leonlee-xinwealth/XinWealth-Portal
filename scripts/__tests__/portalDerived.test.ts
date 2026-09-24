@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  MONTH_NAMES, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear, legacyHoldings,
+  MONTH_NAMES, buildCurrentPlan, buildDerivedExpenseRecords, isSupersededOutflow, latestMonthYear, legacyHoldings,
 } from "../../api/_lib/portalDerived.js";
 
 describe("latestMonthYear", () => {
@@ -114,5 +114,82 @@ describe("buildDerivedExpenseRecords", () => {
 
   it("produces nothing for an empty liabilities/policies list", () => {
     expect(buildDerivedExpenseRecords({ liabilities: [], policies: [], month: "June", year: "2026" })).toEqual([]);
+  });
+});
+
+// P2b followup (cash-flow-correctness fix): buildCurrentPlan exposes
+// take-home/statutory/living/savable/planned-savings/net-cash-flow, straight
+// off planCashflow's own fields — same fixture and figures as the plan's
+// Verification section and supabase/functions/_shared/finance/derived.test.ts's
+// own "乙 full waterfall" test.
+describe("buildCurrentPlan", () => {
+  const today = new Date("2026-06-15T00:00:00Z");
+  const weiQiLeeItems = [
+    { direction: "inflow", category: "salary_basic", amount: 2577, frequency: "monthly", effective_from: "2026-01-01" },
+    { direction: "outflow", category: "groceries", amount: 1548, frequency: "monthly", effective_from: "2026-01-01" },
+  ];
+  const weiQiLeeLiabilities = [
+    { liability_type: "car_loan", outstanding_balance: 10000, interest_rate: 3, monthly_payment: 420, rate_type: "flat" },
+    { liability_type: "personal_loan", outstanding_balance: 130000, interest_rate: 12, monthly_payment: 1000 },
+  ];
+
+  it("乙 has_epf=true: take-home 2,275.15, living 2,968, savable/net -692.85", () => {
+    const current = buildCurrentPlan({
+      rows: [],
+      liabilities: weiQiLeeLiabilities,
+      policies: [],
+      items: weiQiLeeItems,
+      client: { has_epf: true, date_of_birth: null },
+      today,
+    });
+
+    expect(current.source).toBe("items");
+    expect(current.monthly_employee_epf).toBe(284);
+    expect(current.monthly_socso_eis).toBeCloseTo(17.85, 2);
+    expect(current.monthly_income_tax).toBe(0); // wiped out by the RM400 rebate
+    expect(current.monthly_statutory).toBeCloseTo(301.85, 2);
+    expect(current.monthly_take_home).toBeCloseTo(2275.15, 2);
+    expect(current.monthly_living).toBeCloseTo(2968, 2);
+    expect(current.monthly_savable).toBeCloseTo(-692.85, 2);
+    expect(current.monthly_planned_savings).toBe(0);
+    expect(current.monthly_net_cash_flow).toBeCloseTo(-692.85, 2);
+  });
+
+  it("乙 has_epf=false: no statutory deductions, net cash flow -391", () => {
+    const current = buildCurrentPlan({
+      rows: [],
+      liabilities: weiQiLeeLiabilities,
+      policies: [],
+      items: weiQiLeeItems,
+      client: { has_epf: false, date_of_birth: null },
+      today,
+    });
+
+    expect(current.monthly_employee_epf).toBe(0);
+    expect(current.monthly_socso_eis).toBe(0);
+    expect(current.monthly_statutory).toBe(0);
+    expect(current.monthly_income_tax).toBe(0);
+    expect(current.monthly_take_home).toBeCloseTo(2577, 2);
+    expect(current.monthly_living).toBeCloseTo(2968, 2);
+    expect(current.monthly_net_cash_flow).toBeCloseTo(-391, 2);
+  });
+
+  it("a client with no standing items falls back to the actuals path and still fills every new field", () => {
+    const current = buildCurrentPlan({
+      rows: [
+        { direction: "inflow", amount: 5000, frequency: "monthly", period_month: "2026-06-01", category: "salary_basic" },
+        { direction: "outflow", amount: 600, frequency: "monthly", period_month: "2026-06-01", category: "income_tax" },
+      ],
+      liabilities: [],
+      policies: [],
+      items: [],
+      client: { has_epf: true, date_of_birth: null },
+      today,
+    });
+
+    expect(current.source).toBe("actuals");
+    expect(current.monthly_statutory).toBe(0); // actuals path never derives statutory
+    expect(current.monthly_income_tax).toBe(600); // only ever a manual row on this path
+    expect(current.monthly_take_home).toBeCloseTo(5000 - 600, 2);
   });
 });

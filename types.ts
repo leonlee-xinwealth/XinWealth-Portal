@@ -133,6 +133,16 @@ export interface CurrentPlan {
   monthly_employee_epf: number;
   monthly_employer_epf: number;
   monthly_socso_eis: number;
+  // P2b followup (cash-flow-correctness fix): take-home/statutory/living/
+  // savable/planned-savings/net-cash-flow, straight off planCashflow's own
+  // fields (api/_lib/portalDerived.js's buildCurrentPlan).
+  monthly_income_tax: number;
+  monthly_statutory: number;
+  monthly_take_home: number;
+  monthly_living: number;
+  monthly_savable: number;
+  monthly_planned_savings: number;
+  monthly_net_cash_flow: number;
 }
 
 // ── P4: quarterly-review due/pending status (api/health.js's `review_status`

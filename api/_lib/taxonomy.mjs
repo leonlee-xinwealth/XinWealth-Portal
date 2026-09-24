@@ -877,6 +877,48 @@ function annualizeCashflow(rows, basis) {
     annual_items_expenses: annualItemsExpenses
   };
 }
+function annualizeByCategory(rows, basis, opts = {}) {
+  const b = normalise(basis, (/* @__PURE__ */ new Date()).getFullYear());
+  const divisor = annualizeCashflow(rows, basis).months_with_data.length || 1;
+  const acc = /* @__PURE__ */ new Map();
+  for (const r of rows ?? []) {
+    if (!opts.includeTransfers && isAssetTransfer(r))
+      continue;
+    if (yearOf(r.period_month) !== b.year)
+      continue;
+    const key = r.category ?? "uncategorised";
+    const a = acc.get(key) ?? { mi: 0, me: 0, ai: 0, ae: 0 };
+    const amount = amountOf(r);
+    const inflow = r.direction === "inflow";
+    if (isMonthlyActual(r)) {
+      const m = monthOf(r.period_month);
+      if (m == null || m < b.from_month || m > b.to_month)
+        continue;
+      if (inflow)
+        a.mi += amount;
+      else
+        a.me += amount;
+    } else {
+      const annual = amount * (ANNUAL_OCCURRENCES[r.frequency] ?? 12);
+      if (inflow)
+        a.ai += annual;
+      else
+        a.ae += annual;
+    }
+    acc.set(key, a);
+  }
+  return [...acc.entries()].map(([category, a]) => {
+    const annual_income = a.mi / divisor * 12 + a.ai;
+    const annual_expenses = a.me / divisor * 12 + a.ae;
+    return {
+      category,
+      annual_income,
+      annual_expenses,
+      monthly_income: annual_income / 12,
+      monthly_expenses: annual_expenses / 12
+    };
+  });
+}
 
 // supabase/functions/_shared/cashflow/items.ts
 function monthStart(d) {
@@ -1154,19 +1196,46 @@ var EPF_EMPLOYER_RATE_LOW = 0.13;
 var EPF_EMPLOYER_RATE_HIGH = 0.12;
 var EPF_EMPLOYER_RATE_SENIOR = 0.04;
 var EPF_EMPLOYER_WAGE_THRESHOLD = 5e3;
+var EPF_SCHEDULE_ZERO_FLOOR = 10;
+var EPF_SCHEDULE_LOW_BAND_CEILING = 5e3;
+var EPF_SCHEDULE_HIGH_BAND_CEILING = 2e4;
 var SOCSO_EMPLOYEE_RATE = 5e-3;
 var EIS_EMPLOYEE_RATE = 2e-3;
 var SOCSO_EIS_WAGE_CEILING = 6e3;
+var SOCSO_EIS_TOP_BAND_MIDPOINT = SOCSO_EIS_WAGE_CEILING - 50;
+var SOCSO_EIS_LOW_WAGE_THRESHOLD = 300;
 var STATUTORY_SENIOR_AGE = 60;
 var STATUTORY_NOTE = "\u6309\u6CD5\u5B9A\u6BD4\u4F8B\u4F30\u7B97";
+var SOCSO_EIS_LOW_WAGE_NOTE = "\u6708\u85AA\u4F4E\u4E8E RM300\uFF0CSOCSO/EIS \u6309\u6BD4\u4F8B\u4F30\u7B97\uFF0C\u975E\u5B98\u65B9\u5206\u7EA7\u8868\u6570\u503C";
 var EPF_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission", "bonus"];
 var REGULAR_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission"];
 var SOCSO_EIS_WAGE_CATEGORIES = ["salary_basic", "fixed_allowance", "commission", "overtime"];
+var FREQUENCY_OCCURRENCES_PER_YEAR = {
+  weekly: 52,
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  one_off: 0
+};
 function round23(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 function roundUpToRinggit(n) {
   return Math.ceil(n - 1e-9);
+}
+function epfBandUpper(wage) {
+  const w = Math.max(0, wage);
+  if (w <= EPF_SCHEDULE_ZERO_FLOOR)
+    return 0;
+  if (w <= EPF_SCHEDULE_LOW_BAND_CEILING)
+    return Math.ceil(w / 20) * 20;
+  if (w <= EPF_SCHEDULE_HIGH_BAND_CEILING)
+    return Math.ceil(w / 100) * 100;
+  return w;
+}
+function epfSide(wage, rate) {
+  return roundUpToRinggit(epfBandUpper(wage) * rate);
 }
 function ageAt(dob, asOf) {
   if (!dob)
@@ -1191,6 +1260,57 @@ function sumWage(items, asOf, categories) {
   }
   return total;
 }
+function sumRegularMonthlyWage(items, asOf, categories) {
+  let total = 0;
+  for (const item of activeItems(items ?? [], asOf)) {
+    if (item.direction !== "inflow")
+      continue;
+    if (!categories.includes(item.category))
+      continue;
+    if ((item.frequency ?? "monthly") !== "monthly")
+      continue;
+    total += itemMonthlyAmount(item);
+  }
+  return total;
+}
+function epfMarginalMonthly(items, asOf, W, rate) {
+  let delta = 0;
+  for (const item of activeItems(items ?? [], asOf)) {
+    if (item.direction !== "inflow")
+      continue;
+    if (!EPF_WAGE_CATEGORIES.includes(item.category))
+      continue;
+    const freq = item.frequency ?? "monthly";
+    if (freq === "monthly")
+      continue;
+    const occurrences = FREQUENCY_OCCURRENCES_PER_YEAR[freq] ?? 12;
+    if (occurrences <= 0)
+      continue;
+    const amount = Number(item.amount);
+    const perOccurrence = Number.isFinite(amount) ? amount : 0;
+    const marginalPerOccurrence = epfSide(W + perOccurrence, rate) - epfSide(W, rate);
+    delta += occurrences * marginalPerOccurrence / 12;
+  }
+  return delta;
+}
+function socsoEisContribution(wage) {
+  const w = Math.max(0, wage);
+  if (w <= 0)
+    return { socso: 0, eis: 0, approx: false };
+  if (w <= SOCSO_EIS_LOW_WAGE_THRESHOLD) {
+    return {
+      socso: round23(w * SOCSO_EMPLOYEE_RATE),
+      eis: round23(w * EIS_EMPLOYEE_RATE),
+      approx: true
+    };
+  }
+  const midpoint = Math.min(Math.ceil(w / 100) * 100 - 50, SOCSO_EIS_TOP_BAND_MIDPOINT);
+  return {
+    socso: round23(midpoint * SOCSO_EMPLOYEE_RATE),
+    eis: round23(midpoint * EIS_EMPLOYEE_RATE),
+    approx: false
+  };
+}
 function deriveStatutoryItems(items, client, asOf = /* @__PURE__ */ new Date()) {
   const nothing = {
     items: [],
@@ -1205,17 +1325,25 @@ function deriveStatutoryItems(items, client, asOf = /* @__PURE__ */ new Date()) 
   const epfWage = sumWage(items, asOf, EPF_WAGE_CATEGORIES);
   if (epfWage <= 0)
     return nothing;
-  const regularWage = sumWage(items, asOf, REGULAR_WAGE_CATEGORIES);
-  const socsoEisWage = Math.min(sumWage(items, asOf, SOCSO_EIS_WAGE_CATEGORIES), SOCSO_EIS_WAGE_CEILING);
+  const W = sumRegularMonthlyWage(items, asOf, REGULAR_WAGE_CATEGORIES);
+  const socsoEisWage = sumWage(items, asOf, SOCSO_EIS_WAGE_CATEGORIES);
   const age = ageAt(client.date_of_birth, asOf);
   const isSenior = age != null && age >= STATUTORY_SENIOR_AGE;
   const employeeRate = isSenior ? EPF_EMPLOYEE_RATE_SENIOR : EPF_EMPLOYEE_RATE;
-  const employerRate = isSenior ? EPF_EMPLOYER_RATE_SENIOR : regularWage <= EPF_EMPLOYER_WAGE_THRESHOLD ? EPF_EMPLOYER_RATE_LOW : EPF_EMPLOYER_RATE_HIGH;
-  const employeeEpf = roundUpToRinggit(epfWage * employeeRate);
-  const employerEpf = roundUpToRinggit(epfWage * employerRate);
-  const socsoRate = isSenior ? 0 : SOCSO_EMPLOYEE_RATE;
-  const eisRate = isSenior ? 0 : EIS_EMPLOYEE_RATE;
-  const socsoEis = round23(socsoEisWage * (socsoRate + eisRate));
+  const employerRate = isSenior ? EPF_EMPLOYER_RATE_SENIOR : W <= EPF_EMPLOYER_WAGE_THRESHOLD ? EPF_EMPLOYER_RATE_LOW : EPF_EMPLOYER_RATE_HIGH;
+  const employeeEpf = round23(
+    epfSide(W, employeeRate) + epfMarginalMonthly(items, asOf, W, employeeRate)
+  );
+  const employerEpf = round23(
+    epfSide(W, employerRate) + epfMarginalMonthly(items, asOf, W, employerRate)
+  );
+  let socsoEis = 0;
+  let socsoEisApprox = false;
+  if (!isSenior) {
+    const contrib = socsoEisContribution(socsoEisWage);
+    socsoEis = round23(contrib.socso + contrib.eis);
+    socsoEisApprox = contrib.approx;
+  }
   const resultItems = [];
   if (employeeEpf > 0) {
     resultItems.push({
@@ -1244,7 +1372,7 @@ function deriveStatutoryItems(items, client, asOf = /* @__PURE__ */ new Date()) 
       interest_monthly: 0,
       principal_monthly: 0,
       estimated: ["statutory_rate"],
-      warnings: [STATUTORY_NOTE]
+      warnings: socsoEisApprox ? [STATUTORY_NOTE, SOCSO_EIS_LOW_WAGE_NOTE] : [STATUTORY_NOTE]
     });
   }
   return {
@@ -1257,11 +1385,263 @@ function deriveStatutoryItems(items, client, asOf = /* @__PURE__ */ new Date()) 
   };
 }
 
-// supabase/functions/_shared/finance/derived.ts
+// supabase/functions/_shared/finance/incomeTax.ts
+var TAX_BANDS = [
+  { up_to: 5e3, rate: 0 },
+  { up_to: 2e4, rate: 0.01 },
+  { up_to: 35e3, rate: 0.03 },
+  { up_to: 5e4, rate: 0.06 },
+  { up_to: 7e4, rate: 0.11 },
+  { up_to: 1e5, rate: 0.19 },
+  { up_to: 4e5, rate: 0.25 },
+  { up_to: 6e5, rate: 0.26 },
+  { up_to: 2e6, rate: 0.28 },
+  { up_to: null, rate: 0.3 }
+];
+var NON_RESIDENT_FLAT_RATE = 0.3;
+var REBATE_THRESHOLD = 35e3;
+var REBATE_AMOUNT = 400;
+var RELIEFS = [
+  { key: "personal", label_zh: "\u4E2A\u4EBA\u53CA\u53D7\u6276\u517B\u4EB2\u5C5E", cap: 9e3, auto: "always" },
+  { key: "epf", label_zh: "EPF \u96C7\u5458\u516C\u79EF\u91D1", cap: 4e3, auto: "epf" },
+  { key: "life_insurance", label_zh: "\u4EBA\u5BFF\u4FDD\u9669\u4FDD\u8D39", cap: 3e3, auto: "life_premium" },
+  { key: "medical_insurance", label_zh: "\u533B\u7597/\u6559\u80B2\u4FDD\u9669\u4FDD\u8D39", cap: 3e3, auto: "none" },
+  { key: "prs", label_zh: "\u79C1\u4EBA\u9000\u4F11\u8BA1\u5212 PRS", cap: 3e3, auto: "none" },
+  { key: "lifestyle", label_zh: "\u751F\u6D3B\u65B9\u5F0F", cap: 2500, auto: "none" },
+  { key: "sspn", label_zh: "SSPN \u6559\u80B2\u50A8\u84C4", cap: 8e3, auto: "none" },
+  { key: "medical_expenses", label_zh: "\u533B\u7597\u8D39\u7528\uFF08\u4E25\u91CD\u75BE\u75C5\u7B49\uFF09", cap: 8e3, auto: "none" }
+];
+function progressiveTax(chargeableIncome) {
+  if (chargeableIncome <= 0)
+    return 0;
+  let tax = 0;
+  let lower = 0;
+  for (const band of TAX_BANDS) {
+    const upper = band.up_to ?? Infinity;
+    if (chargeableIncome <= lower)
+      break;
+    const taxableInBand = Math.min(chargeableIncome, upper) - lower;
+    tax += taxableInBand * band.rate;
+    lower = upper;
+  }
+  return tax;
+}
+function marginalRateFor(chargeableIncome) {
+  if (chargeableIncome <= 0)
+    return 0;
+  for (const band of TAX_BANDS) {
+    const upper = band.up_to ?? Infinity;
+    if (chargeableIncome <= upper)
+      return band.rate;
+  }
+  return TAX_BANDS[TAX_BANDS.length - 1].rate;
+}
+function taxAfterRebate(tax, chargeableIncome) {
+  if (chargeableIncome <= REBATE_THRESHOLD) {
+    return Math.max(0, tax - REBATE_AMOUNT);
+  }
+  return tax;
+}
+var RELIEF_BY_CATEGORY = {
+  medical_card: "medical_insurance",
+  health_medical: "medical_expenses",
+  sspn: "sspn",
+  prs_contribution: "prs",
+  fitness: "lifestyle",
+  self_education: "lifestyle",
+  telco: "lifestyle",
+  subscriptions: "lifestyle"
+};
+var TAXABLE_I1_CATEGORIES = [
+  "salary_basic",
+  "fixed_allowance",
+  "overtime",
+  "bonus",
+  "commission",
+  "director_fee",
+  "business_income",
+  "side_income",
+  "active_income_other"
+];
+var RENTAL_INCOME_CATEGORY = "rental_income";
+var FREQUENCY_OCCURRENCES_PER_YEAR2 = {
+  weekly: 52,
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  one_off: 0
+};
+function monthStartLocal(d) {
+  if (typeof d === "string") {
+    const m = /^(\d{4})-(\d{2})/.exec(d);
+    if (m)
+      return `${m[1]}-${m[2]}-01`;
+    const parsed = new Date(d);
+    if (isNaN(parsed.getTime())) {
+      throw new Error(`incomeTax: unusable date "${d}"`);
+    }
+    return monthStartLocal(parsed);
+  }
+  const y = d.getUTCFullYear();
+  const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+  return `${y}-${mo}-01`;
+}
+function isItemActiveAt(item, asOf) {
+  const asOfMonth = monthStartLocal(asOf);
+  if (item.effective_from > asOfMonth)
+    return false;
+  if (item.effective_to != null && item.effective_to < asOfMonth)
+    return false;
+  return true;
+}
+function itemMonthlyAmountLocal(item) {
+  const occurrences = FREQUENCY_OCCURRENCES_PER_YEAR2[item.frequency] ?? 12;
+  const amount = Number(item.amount);
+  const n = Number.isFinite(amount) ? amount : 0;
+  return n * occurrences / 12;
+}
 function round24(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
+var round = (n) => Math.round(n);
+function taxableIncomeFromItems(items, asOf = /* @__PURE__ */ new Date()) {
+  let total = 0;
+  for (const item of items ?? []) {
+    if (item.direction !== "inflow")
+      continue;
+    if (!isItemActiveAt(item, asOf))
+      continue;
+    const isI1 = TAXABLE_I1_CATEGORIES.includes(item.category);
+    const isRental = item.category === RENTAL_INCOME_CATEGORY;
+    if (!isI1 && !isRental)
+      continue;
+    total += itemMonthlyAmountLocal(item) * 12;
+  }
+  return round24(total);
+}
+function detectReliefsFromItems(items, asOf = /* @__PURE__ */ new Date()) {
+  const totals = {};
+  for (const item of items ?? []) {
+    if (!isItemActiveAt(item, asOf))
+      continue;
+    const key = RELIEF_BY_CATEGORY[item.category];
+    if (!key)
+      continue;
+    const annual = itemMonthlyAmountLocal(item) * 12;
+    if (annual <= 0)
+      continue;
+    totals[key] = (totals[key] ?? 0) + annual;
+  }
+  return totals;
+}
 var PREMIUM_OCCURRENCES = {
+  monthly: 12,
+  quarterly: 4,
+  semi_annual: 2,
+  annual: 1,
+  single_premium: 0
+};
+var LIFE_RELIEF_POLICY_TYPES = ["life", "investment_linked"];
+function isPolicyPremiumActive(status) {
+  return status == null || status === "in_force";
+}
+function isPolicyExpired(endDate, asOf) {
+  if (!endDate)
+    return false;
+  const end = new Date(endDate);
+  if (isNaN(end.getTime()))
+    return false;
+  const cutoff = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()));
+  return end.getTime() < cutoff.getTime();
+}
+function lifeInsurancePremiumAnnual(policies, asOf = /* @__PURE__ */ new Date()) {
+  let total = 0;
+  for (const p of policies ?? []) {
+    if (!LIFE_RELIEF_POLICY_TYPES.includes(p.policy_type))
+      continue;
+    if (!isPolicyPremiumActive(p.status))
+      continue;
+    if (isPolicyExpired(p.end_date, asOf))
+      continue;
+    const occurrences = PREMIUM_OCCURRENCES[p.premium_frequency ?? "annual"] ?? 12;
+    total += (p.premium ?? 0) * occurrences;
+  }
+  return round24(total);
+}
+function estimateIncomeTax(input) {
+  const asOf = input.asOf ?? /* @__PURE__ */ new Date();
+  const items = input.items ?? [];
+  const notes = [];
+  const taxableIncome = taxableIncomeFromItems(items, asOf);
+  const hasRental = items.some(
+    (it) => it.category === RENTAL_INCOME_CATEGORY && it.direction === "inflow" && isItemActiveAt(it, asOf)
+  );
+  if (hasRental)
+    notes.push("\u79DF\u91D1\u6309\u603B\u989D\u4F30\u7B97\uFF0C\u672A\u6263\u53EF\u6263\u9664\u8D39\u7528");
+  if (input.nonResident) {
+    const tax2 = Math.max(0, round(taxableIncome * NON_RESIDENT_FLAT_RATE));
+    notes.push("\u975E\u5C45\u6C11\uFF1A\u6309\u5E94\u8BFE\u7A0E\u6536\u5165\u7EDF\u4E00\u7A0E\u7387 30% \u4F30\u7B97\uFF0C\u4E0D\u9002\u7528\u4E2A\u4EBA\u51CF\u514D\u4E0E\u56DE\u6263");
+    return {
+      annual_tax: tax2,
+      monthly_tax: round24(tax2 / 12),
+      chargeable_income: taxableIncome,
+      taxable_income: taxableIncome,
+      reliefs: [],
+      notes
+    };
+  }
+  const capByKey = new Map(RELIEFS.map((r) => [r.key, r.cap]));
+  const reliefs = [];
+  reliefs.push({ key: "personal", amount: capByKey.get("personal") ?? 9e3 });
+  const epfCap = capByKey.get("epf") ?? 4e3;
+  const epfAmount = Math.min(epfCap, Math.max(0, round(input.employeeEpfAnnual ?? 0)));
+  if (epfAmount > 0)
+    reliefs.push({ key: "epf", amount: epfAmount });
+  const lifeCap = capByKey.get("life_insurance") ?? 3e3;
+  const lifeAmount = Math.min(lifeCap, round(lifeInsurancePremiumAnnual(input.policies ?? [], asOf)));
+  if (lifeAmount > 0)
+    reliefs.push({ key: "life_insurance", amount: lifeAmount });
+  const detected = detectReliefsFromItems(items, asOf);
+  for (const key of Object.keys(detected)) {
+    const cap = capByKey.get(key) ?? detected[key];
+    const amount = Math.min(cap, round(detected[key]));
+    if (amount > 0)
+      reliefs.push({ key, amount });
+  }
+  const totalReliefs = reliefs.reduce((s, r) => s + r.amount, 0);
+  const chargeableIncome = Math.max(0, round(taxableIncome - totalReliefs));
+  const rawTax = round(progressiveTax(chargeableIncome));
+  const tax = taxAfterRebate(rawTax, chargeableIncome);
+  if (tax !== rawTax) {
+    notes.push(`\u5E94\u8BFE\u7A0E\u6536\u5165 \u2264 RM${REBATE_THRESHOLD.toLocaleString()}\uFF0C\u5DF2\u51CF\u514D RM${REBATE_AMOUNT}`);
+  }
+  return {
+    annual_tax: tax,
+    monthly_tax: round24(tax / 12),
+    chargeable_income: chargeableIncome,
+    taxable_income: taxableIncome,
+    reliefs,
+    notes
+  };
+}
+
+// supabase/functions/_shared/finance/derived.ts
+function round25(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+function plannedSavingsFromCategoryTotals(totals) {
+  let net = 0;
+  for (const t of totals) {
+    if (t.category === "epf_employee")
+      continue;
+    if (!isTransferCode(t.category))
+      continue;
+    net += t.monthly_expenses - t.monthly_income;
+  }
+  return round25(net);
+}
+var PREMIUM_OCCURRENCES2 = {
   monthly: 12,
   quarterly: 4,
   semi_annual: 2,
@@ -1316,7 +1696,7 @@ function deriveLoanItems(liabilities, today = /* @__PURE__ */ new Date()) {
       source_name: l.name ?? meta.label_zh,
       category,
       direction: "outflow",
-      monthly_amount: round24(amount),
+      monthly_amount: round25(amount),
       interest_monthly: est.interest_monthly,
       principal_monthly: est.principal_monthly,
       estimated: est.estimated,
@@ -1332,8 +1712,8 @@ function derivePremiumItems(policies, today = /* @__PURE__ */ new Date()) {
       continue;
     if (!isPremiumActive(p.status))
       continue;
-    const occurrences = PREMIUM_OCCURRENCES[p.premium_frequency ?? "annual"] ?? 12;
-    const monthly = round24((p.premium ?? 0) * occurrences / 12);
+    const occurrences = PREMIUM_OCCURRENCES2[p.premium_frequency ?? "annual"] ?? 12;
+    const monthly = round25((p.premium ?? 0) * occurrences / 12);
     if (monthly === 0)
       continue;
     items.push({
@@ -1404,8 +1784,8 @@ function planCashflowFromActuals(input) {
       continue;
     derivedMonthlyExpense += item.monthly_amount;
   }
-  const monthly_expenses = round24(baseTotals.monthly_expenses + derivedMonthlyExpense);
-  const annual_expenses = round24(baseTotals.annual_expenses + derivedMonthlyExpense * 12);
+  const monthly_expenses = round25(baseTotals.monthly_expenses + derivedMonthlyExpense);
+  const annual_expenses = round25(baseTotals.annual_expenses + derivedMonthlyExpense * 12);
   const totals = {
     ...baseTotals,
     monthly_expenses,
@@ -1426,19 +1806,36 @@ function planCashflowFromActuals(input) {
   let monthly_premiums = 0;
   for (const item of premiumItems)
     monthly_premiums += item.monthly_amount;
+  const incomeTaxByCategory = annualizeByCategory(keptRows, basis).find((t) => t.category === "income_tax");
+  const monthly_income_tax = round25(incomeTaxByCategory?.monthly_expenses ?? 0);
+  const monthly_statutory = 0;
+  const monthly_take_home = round25(totals.monthly_income - monthly_statutory - monthly_income_tax);
+  const monthly_living = round25(totals.monthly_expenses - monthly_income_tax);
+  const monthly_savable = round25(monthly_take_home - monthly_living);
+  const monthly_planned_savings = plannedSavingsFromCategoryTotals(
+    annualizeByCategory(keptRows, basis, { includeTransfers: true })
+  );
+  const monthly_net_cash_flow = round25(monthly_savable - monthly_planned_savings);
   return {
     totals,
     derived,
     superseded,
-    monthly_debt_service: round24(monthly_debt_service),
-    monthly_principal: round24(monthly_principal),
-    monthly_interest: round24(monthly_interest),
-    monthly_premiums: round24(monthly_premiums),
+    monthly_debt_service: round25(monthly_debt_service),
+    monthly_principal: round25(monthly_principal),
+    monthly_interest: round25(monthly_interest),
+    monthly_premiums: round25(monthly_premiums),
     source: "actuals",
     monthly_employee_epf: 0,
     monthly_employer_epf: 0,
     monthly_socso_eis: 0,
-    one_off_items: []
+    one_off_items: [],
+    monthly_income_tax,
+    monthly_statutory,
+    monthly_take_home,
+    monthly_living,
+    monthly_savable,
+    monthly_planned_savings,
+    monthly_net_cash_flow
   };
 }
 function deriveStatutoryForHousehold(items, clientInfo, clients, today) {
@@ -1473,12 +1870,43 @@ function deriveStatutoryForHousehold(items, clientInfo, clients, today) {
   }
   return {
     items: items_out,
-    employee_epf_monthly: round24(employee_epf_monthly),
-    employer_epf_monthly: round24(employer_epf_monthly),
-    socso_eis_monthly: round24(socso_eis_monthly),
-    epf_wage_monthly: round24(epf_wage_monthly),
+    employee_epf_monthly: round25(employee_epf_monthly),
+    employer_epf_monthly: round25(employer_epf_monthly),
+    socso_eis_monthly: round25(socso_eis_monthly),
+    epf_wage_monthly: round25(epf_wage_monthly),
     notes: [...notes]
   };
+}
+function isNonResident(info) {
+  return !!info?.tax_residency && info.tax_residency !== "resident";
+}
+function estimateIncomeTaxMonthlyForPlan(items, policies, client, clients, today) {
+  const estimateFor = (groupItems, info) => {
+    const statutory = deriveStatutoryItems(groupItems, info ?? {}, today);
+    return estimateIncomeTax({
+      items: groupItems,
+      policies,
+      employeeEpfAnnual: 12 * statutory.employee_epf_monthly,
+      nonResident: isNonResident(info),
+      asOf: today
+    }).monthly_tax;
+  };
+  if (!clients)
+    return round25(estimateFor(items, client));
+  const byClient = /* @__PURE__ */ new Map();
+  for (const it of items ?? []) {
+    const cid = it.client_id ?? "";
+    const group = byClient.get(cid);
+    if (group)
+      group.push(it);
+    else
+      byClient.set(cid, [it]);
+  }
+  let total = 0;
+  for (const [cid, groupItems] of byClient) {
+    total += estimateFor(groupItems, clients[cid]);
+  }
+  return round25(total);
 }
 function planCashflowFromItems(input) {
   const { liabilities, policies, client, clients } = input;
@@ -1499,15 +1927,36 @@ function planCashflowFromItems(input) {
   const loanItems = deriveLoanItems(liabilities, today);
   const premiumItems = derivePremiumItems(policies, today);
   const statutory = deriveStatutoryForHousehold(items, client, clients, today);
-  const derived = [...loanItems, ...premiumItems, ...statutory.items];
+  const hasManualIncomeTax = active.some((it) => it.category === "income_tax");
+  const manualIncomeTaxMonthly = round25(
+    annualizeItemsByCategory(kept, today).find((t) => t.category === "income_tax")?.monthly_expenses ?? 0
+  );
+  const estimatedIncomeTaxMonthly = hasManualIncomeTax ? 0 : estimateIncomeTaxMonthlyForPlan(items, policies, client, clients, today);
+  const taxItems = [];
+  if (!hasManualIncomeTax && estimatedIncomeTaxMonthly > 0) {
+    taxItems.push({
+      key: "tax:income_tax",
+      source_type: "tax",
+      source_id: null,
+      source_name: "\u6240\u5F97\u7A0E\uFF08\u4F30\u7B97\uFF09",
+      category: "income_tax",
+      direction: "outflow",
+      monthly_amount: round25(estimatedIncomeTaxMonthly),
+      interest_monthly: 0,
+      principal_monthly: 0,
+      estimated: ["tax_estimate"],
+      warnings: ["\u6309 2026 \u7A0E\u7387\u4E0E\u57FA\u672C\u51CF\u514D\u4F30\u7B97"]
+    });
+  }
+  const derived = [...loanItems, ...premiumItems, ...statutory.items, ...taxItems];
   let derivedMonthlyExpense = 0;
   for (const item of derived) {
     if (isTransferCode(item.category))
       continue;
     derivedMonthlyExpense += item.monthly_amount;
   }
-  const monthly_expenses = round24(itemTotals.monthly_expenses + derivedMonthlyExpense);
-  const annual_expenses = round24(itemTotals.annual_expenses + derivedMonthlyExpense * 12);
+  const monthly_expenses = round25(itemTotals.monthly_expenses + derivedMonthlyExpense);
+  const annual_expenses = round25(itemTotals.annual_expenses + derivedMonthlyExpense * 12);
   const { one_off_items: _itemTotalsOneOff, ...itemTotalsRest } = itemTotals;
   const totals = {
     ...itemTotalsRest,
@@ -1529,19 +1978,35 @@ function planCashflowFromItems(input) {
   let monthly_premiums = 0;
   for (const item of premiumItems)
     monthly_premiums += item.monthly_amount;
+  const monthly_income_tax = hasManualIncomeTax ? manualIncomeTaxMonthly : round25(estimatedIncomeTaxMonthly);
+  const monthly_statutory = round25(statutory.employee_epf_monthly + statutory.socso_eis_monthly);
+  const monthly_take_home = round25(totals.monthly_income - monthly_statutory - monthly_income_tax);
+  const monthly_living = round25(monthly_expenses - statutory.socso_eis_monthly - monthly_income_tax);
+  const monthly_savable = round25(monthly_take_home - monthly_living);
+  const monthly_planned_savings = plannedSavingsFromCategoryTotals(
+    annualizeItemsByCategory(kept, today, { includeTransfers: true })
+  );
+  const monthly_net_cash_flow = round25(monthly_savable - monthly_planned_savings);
   return {
     totals,
     derived,
     superseded,
-    monthly_debt_service: round24(monthly_debt_service),
-    monthly_principal: round24(monthly_principal),
-    monthly_interest: round24(monthly_interest),
-    monthly_premiums: round24(monthly_premiums),
+    monthly_debt_service: round25(monthly_debt_service),
+    monthly_principal: round25(monthly_principal),
+    monthly_interest: round25(monthly_interest),
+    monthly_premiums: round25(monthly_premiums),
     source: "items",
     monthly_employee_epf: statutory.employee_epf_monthly,
     monthly_employer_epf: statutory.employer_epf_monthly,
     monthly_socso_eis: statutory.socso_eis_monthly,
-    one_off_items
+    one_off_items,
+    monthly_income_tax,
+    monthly_statutory,
+    monthly_take_home,
+    monthly_living,
+    monthly_savable,
+    monthly_planned_savings,
+    monthly_net_cash_flow
   };
 }
 
@@ -1551,7 +2016,7 @@ var MIN_SPAN_DAYS = 60;
 var TARGET_SPAN_DAYS = 365;
 var VEHICLE_DEFAULT_DEPRECIATION_PCT = -0.1;
 var VEHICLE_ASSET_TYPE = "vehicle";
-function round25(n) {
+function round26(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 function round5(n) {
@@ -1578,7 +2043,7 @@ function valueChangeAnnual(valuations, asOf, opts) {
   const none = () => {
     if (opts.assetType === VEHICLE_ASSET_TYPE) {
       return {
-        annual_change: round25(VEHICLE_DEFAULT_DEPRECIATION_PCT * currentValue),
+        annual_change: round26(VEHICLE_DEFAULT_DEPRECIATION_PCT * currentValue),
         source: "default_depreciation"
       };
     }
@@ -1607,7 +2072,7 @@ function valueChangeAnnual(valuations, asOf, opts) {
     return none();
   const contributions = list.filter((v) => v._ts > earlier._ts && v._ts <= latest._ts).reduce((s, v) => s + (Number(v.net_contribution) || 0), 0);
   const rawChange = latest.value - earlier.value - contributions;
-  const annual_change = round25(rawChange * (TARGET_SPAN_DAYS / days));
+  const annual_change = round26(rawChange * (TARGET_SPAN_DAYS / days));
   return {
     annual_change,
     source: "history",
@@ -1657,7 +2122,7 @@ var QUADRANTS = [
 var NOTE_MISSING_VALUATION_HISTORY = "\u7F3A\u5C11\u4F30\u503C\u5386\u53F2";
 var NOTE_UNLINKED_PERSONAL_USE = "\u81EA\u7528\u8D44\u4EA7\u901A\u5E38\u6709\u6301\u6709\u6210\u672C\uFF08\u8D37\u6B3E\u3001\u4FDD\u9669\u3001\u4FDD\u517B\u3001\u7A0E\u8D39\uFF09\uFF0C\u8BF7\u5148\u5173\u8054\u76F8\u5173\u8D37\u6B3E\u6216\u6536\u652F";
 var NOTE_UNLINKED_INVESTMENT = "\u672A\u5173\u8054\u4EFB\u4F55\u6536\u652F";
-function round26(n) {
+function round27(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 function round4(n) {
@@ -1683,7 +2148,7 @@ function assessAsset(asset, ctx, asOf) {
   );
   let itemsMonthly = 0;
   const linked_items = linkedItems.map((it) => {
-    const monthly = round26(itemMonthlyAmount(it));
+    const monthly = round27(itemMonthlyAmount(it));
     itemsMonthly += it.direction === "inflow" ? monthly : -monthly;
     return { id: it.id, category: it.category, direction: it.direction, monthly_amount: monthly };
   });
@@ -1696,7 +2161,7 @@ function assessAsset(asset, ctx, asOf) {
     liabilitiesMonthly += est.monthly_payment;
     return { id: l.id ?? null, liability_type: l.liability_type, monthly_payment: est.monthly_payment };
   });
-  const net_cash_flow_monthly = round26(itemsMonthly - liabilitiesMonthly);
+  const net_cash_flow_monthly = round27(itemsMonthly - liabilitiesMonthly);
   const ownValuations = (ctx.valuations ?? []).filter(
     (v) => v.asset_id == null || v.asset_id === asset.id
   );
@@ -1722,7 +2187,7 @@ function assessAsset(asset, ctx, asOf) {
       notes.push(NOTE_UNLINKED_INVESTMENT);
     }
   }
-  const total_return_annual = round26(net_cash_flow_monthly * 12 + effectiveValueChange);
+  const total_return_annual = round27(net_cash_flow_monthly * 12 + effectiveValueChange);
   const return_pct = currentValue > 0 ? round4(total_return_annual / currentValue) : null;
   return {
     asset_id: asset.id,
@@ -1753,15 +2218,15 @@ function assessAssets(assets, ctx, asOf) {
     const r = results[i];
     if (r.unlinked && r.asset_class === "D") {
       by_quadrant.unlinked.count += 1;
-      by_quadrant.unlinked.value = round26(by_quadrant.unlinked.value + (Number(list[i].current_value) || 0));
+      by_quadrant.unlinked.value = round27(by_quadrant.unlinked.value + (Number(list[i].current_value) || 0));
       continue;
     }
     if (r.quadrant == null)
       continue;
     const bucket = by_quadrant[r.quadrant];
     bucket.count += 1;
-    bucket.value = round26(bucket.value + (Number(list[i].current_value) || 0));
-    bucket.net_cash_flow_monthly = round26(bucket.net_cash_flow_monthly + r.net_cash_flow_monthly);
+    bucket.value = round27(bucket.value + (Number(list[i].current_value) || 0));
+    bucket.net_cash_flow_monthly = round27(bucket.net_cash_flow_monthly + r.net_cash_flow_monthly);
   }
   return { assets: results, by_quadrant };
 }
@@ -1902,7 +2367,7 @@ function computeSnapshot(input) {
 }
 
 // supabase/functions/_shared/finance/reconcile.ts
-function round27(n) {
+function round28(n) {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 function toUtcMs2(d) {
@@ -1960,10 +2425,10 @@ var isTransferCategory = (code) => code != null && TRANSFER_CATEGORIES.has(code)
 var NOTE_UNLINKED_TRANSFERS = "\u672A\u5173\u8054\u7684\u5B9A\u671F\u6295\u5165\u4F1A\u8BA9\u5BF9\u8D26\u5931\u771F";
 function reconcile(input) {
   const { prev, curr, months, plan, assets, valuationsByAsset, items = [] } = input;
-  const deltaNetWorth = round27(curr.net_worth - prev.net_worth);
-  const savings = round27(months * plan.monthly_surplus);
-  const principal = round27(months * plan.monthly_principal);
-  const employerEpf = round27(months * plan.monthly_employer_epf);
+  const deltaNetWorth = round28(curr.net_worth - prev.net_worth);
+  const savings = round28(months * plan.monthly_surplus);
+  const principal = round28(months * plan.monthly_principal);
+  const employerEpf = round28(months * plan.monthly_employer_epf);
   const employeeEpf = plan.monthly_employee_epf ?? 0;
   const prevMs = toUtcMs2(prev.asOf);
   const currMs = toUtcMs2(curr.asOf);
@@ -1984,7 +2449,7 @@ function reconcile(input) {
         anyHistory = true;
       }
     }
-    const contribution = round27(months * (employeeEpf + plan.monthly_employer_epf));
+    const contribution = round28(months * (employeeEpf + plan.monthly_employer_epf));
     if (!anyHistory) {
       notes.push(`EPF \u8D26\u6237\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55\uFF0C\u5E02\u573A\u53D8\u52A8\u8BB0\u4E3A 0\uFF08\u5408\u8BA1 ${epfAssets.length} \u4E2A\u8D26\u6237\uFF09`);
       market_by_asset.push({
@@ -1992,16 +2457,16 @@ function reconcile(input) {
         asset_type: "epf",
         value_change: 0,
         contribution_adjustment: contribution,
-        market_change: round27(0 - contribution),
+        market_change: round28(0 - contribution),
         source: "none",
         note: "\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55"
       });
     } else {
-      const marketChange = round27(rawChange - contribution);
+      const marketChange = round28(rawChange - contribution);
       market_by_asset.push({
         asset_id: "epf_combined",
         asset_type: "epf",
-        value_change: round27(rawChange),
+        value_change: round28(rawChange),
         contribution_adjustment: contribution,
         market_change: marketChange,
         source: "epf_combined"
@@ -2011,7 +2476,7 @@ function reconcile(input) {
   for (const a of otherAssets) {
     const before = valueAt(valuationsByAsset[a.id], prevMs);
     const after = valueAt(valuationsByAsset[a.id], currMs);
-    const contribution = round27(months * linkedContributionMonthly(items, a.id, curr.asOf, isTransferCategory));
+    const contribution = round28(months * linkedContributionMonthly(items, a.id, curr.asOf, isTransferCategory));
     if (before == null || after == null) {
       notes.push(`\u8D44\u4EA7\u300C${a.id}\u300D\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55\uFF0C\u5E02\u573A\u53D8\u52A8\u8BB0\u4E3A 0`);
       market_by_asset.push({
@@ -2019,19 +2484,19 @@ function reconcile(input) {
         asset_type: a.asset_type,
         value_change: 0,
         contribution_adjustment: contribution,
-        market_change: round27(0 - contribution),
+        market_change: round28(0 - contribution),
         source: "none",
         note: "\u7F3A\u5C11\u4F30\u503C\u8BB0\u5F55"
       });
       continue;
     }
-    const valueChange = round27(after - before);
+    const valueChange = round28(after - before);
     market_by_asset.push({
       asset_id: a.id,
       asset_type: a.asset_type,
       value_change: valueChange,
       contribution_adjustment: contribution,
-      market_change: round27(valueChange - contribution),
+      market_change: round28(valueChange - contribution),
       source: "history"
     });
   }
@@ -2040,9 +2505,9 @@ function reconcile(input) {
   );
   if (hasUnlinkedTransfer)
     notes.push(NOTE_UNLINKED_TRANSFERS);
-  const marketChangeTotal = round27(market_by_asset.reduce((s, m) => s + m.market_change, 0));
-  const explainedTotal = round27(savings + principal + employerEpf + marketChangeTotal);
-  const unexplainedGap = round27(deltaNetWorth - explainedTotal);
+  const marketChangeTotal = round28(market_by_asset.reduce((s, m) => s + m.market_change, 0));
+  const explainedTotal = round28(savings + principal + employerEpf + marketChangeTotal);
+  const unexplainedGap = round28(deltaNetWorth - explainedTotal);
   return {
     delta_net_worth: deltaNetWorth,
     explained: {
@@ -2228,7 +2693,7 @@ var CNA_DEFAULTS = {
   ci_income_multiple: 3,
   rounding: 1e3
 };
-var round = (n) => Math.round(n / CNA_DEFAULTS.rounding) * CNA_DEFAULTS.rounding;
+var round3 = (n) => Math.round(n / CNA_DEFAULTS.rounding) * CNA_DEFAULTS.rounding;
 function incomeBandMidpoint(band) {
   const map = {
     "RM3,000 \u4EE5\u4E0B": 2e3,
@@ -2266,10 +2731,10 @@ function defaultCoverageDetail(input) {
   };
 }
 function lineItem(need, cover, notes) {
-  const item = { cover: round(cover), notes };
+  const item = { cover: round3(cover), notes };
   if (need != null) {
-    item.need = round(need);
-    item.gap = round(Math.max(0, need - cover));
+    item.need = round3(need);
+    item.gap = round3(Math.max(0, need - cover));
   }
   return item;
 }
@@ -2322,7 +2787,7 @@ function buildProtectionSet(cov, needBasis) {
     medical: {
       ...lineItem(void 0, cov.medical_annual_limit, medicalNotes),
       has_cover: cov.has_medical,
-      annual_limit: round(cov.medical_annual_limit),
+      annual_limit: round3(cov.medical_annual_limit),
       low_limit: lowLimit,
       limit_unknown: limitUnknown
     },
@@ -2375,31 +2840,31 @@ function computeCna(input) {
     assumptions,
     inputs: input,
     needs: {
-      income_replacement: round(incomeReplacement),
-      liabilities: round(netLiabilitiesMain),
-      education: round(education),
-      total_life: round(totalLifeNeed),
-      ci: round(ciNeed)
+      income_replacement: round3(incomeReplacement),
+      liabilities: round3(netLiabilitiesMain),
+      education: round3(education),
+      total_life: round3(totalLifeNeed),
+      ci: round3(ciNeed)
     },
     resources: {
-      life_cover: round(input.life_cover),
-      ci_cover: round(input.ci_cover),
-      liquid_assets: round(liquidAssets)
+      life_cover: round3(input.life_cover),
+      ci_cover: round3(input.ci_cover),
+      liquid_assets: round3(liquidAssets)
     },
     gaps: [
       {
         key: "life",
         label: "\u4EBA\u5BFF\u4FDD\u969C",
-        need: round(totalLifeNeed),
-        covered: round(lifeCovered),
-        gap: round(lifeGap)
+        need: round3(totalLifeNeed),
+        covered: round3(lifeCovered),
+        gap: round3(lifeGap)
       },
       {
         key: "ci",
         label: "\u91CD\u75BE\u4FDD\u969C",
-        need: round(ciNeed),
-        covered: round(input.ci_cover),
-        gap: round(ciGap)
+        need: round3(ciNeed),
+        covered: round3(input.ci_cover),
+        gap: round3(ciGap)
       },
       {
         key: "medical",
@@ -2643,7 +3108,7 @@ function riskBandFromSuitability(band) {
   }
 }
 var REBALANCE_THRESHOLD_PP = 5;
-var round3 = (n) => Math.round(n);
+var round6 = (n) => Math.round(n);
 function allocationOf(assets, holdings = [], cash = 0) {
   const sumBucket = (bucket) => (assets ?? []).filter((a) => allocationBucketOf(a.asset_type) === bucket).reduce((s, a) => s + (a.current_value ?? 0), 0);
   const equity = sumBucket("equity") + (holdings ?? []).reduce((s, h) => s + (h.market_value ?? 0), 0);
@@ -2655,7 +3120,7 @@ function currentAllocationRows(amounts) {
   const investable_total = ALLOCATION_BUCKETS.reduce((s, k) => s + amounts[k], 0);
   const rows = ALLOCATION_BUCKETS.map((bucket) => ({
     bucket,
-    amount: round3(amounts[bucket]),
+    amount: round6(amounts[bucket]),
     pct: investable_total > 0 ? Number((amounts[bucket] / investable_total * 100).toFixed(1)) : null
   }));
   return { investable_total, rows };
@@ -2664,7 +3129,7 @@ function driftAgainst(model, allocation) {
   const investable_total = allocation.reduce((s, r) => s + r.amount, 0);
   const target_allocation = ALLOCATION_BUCKETS.map((bucket) => ({
     bucket,
-    amount: round3(model[bucket] / 100 * investable_total),
+    amount: round6(model[bucket] / 100 * investable_total),
     pct: model[bucket]
   }));
   const drift = ALLOCATION_BUCKETS.map((bucket) => {
@@ -2680,7 +3145,7 @@ function driftAgainst(model, allocation) {
   const rebalancing_actions = drift.filter((d) => d.drift_pp != null && Math.abs(d.drift_pp) > REBALANCE_THRESHOLD_PP).map((d) => ({
     bucket: d.bucket,
     action: d.drift_pp > 0 ? "reduce" : "increase",
-    amount: round3(Math.abs(d.drift_pp) / 100 * investable_total)
+    amount: round6(Math.abs(d.drift_pp) / 100 * investable_total)
   }));
   return { target_allocation, drift, rebalancing_actions };
 }
@@ -2705,16 +3170,30 @@ export {
   EPF_EMPLOYER_RATE_LOW,
   EPF_EMPLOYER_RATE_SENIOR,
   EPF_EMPLOYER_WAGE_THRESHOLD,
+  EPF_SCHEDULE_HIGH_BAND_CEILING,
+  EPF_SCHEDULE_LOW_BAND_CEILING,
+  EPF_SCHEDULE_ZERO_FLOOR,
   LEGACY_CATEGORY_MAP,
   LIABILITY_TYPES,
   LIQUID_ASSET_TYPES,
   LOAN_DEFAULTS,
   MODEL_PORTFOLIOS,
+  NON_RESIDENT_FLAT_RATE,
   QUADRANTS,
+  REBATE_AMOUNT,
+  REBATE_THRESHOLD,
+  RELIEFS,
+  RELIEF_BY_CATEGORY,
+  RENTAL_INCOME_CATEGORY,
+  SOCSO_EIS_LOW_WAGE_NOTE,
+  SOCSO_EIS_LOW_WAGE_THRESHOLD,
+  SOCSO_EIS_TOP_BAND_MIDPOINT,
   SOCSO_EIS_WAGE_CEILING,
   SOCSO_EMPLOYEE_RATE,
   STATUTORY_NOTE,
   STATUTORY_SENIOR_AGE,
+  TAXABLE_I1_CATEGORIES,
+  TAX_BANDS,
   TRANSFER_CATEGORY_CODES,
   activeItems,
   allocationBucketOf,
@@ -2741,8 +3220,10 @@ export {
   deriveLoanItems,
   derivePremiumItems,
   deriveStatutoryItems,
+  detectReliefsFromItems,
   driftAgainst,
   endItem,
+  estimateIncomeTax,
   estimateLoan,
   groupOf,
   incomeBandMidpoint,
@@ -2757,16 +3238,21 @@ export {
   levelUpLiabilityType,
   liabilityTypeLabel,
   liabilityTypeMeta,
+  lifeInsurancePremiumAnnual,
   liquidityLevel,
+  marginalRateFor,
   monthStart,
   parseAmount,
   parseDependents,
   planCashflow,
   premiumCategoryOf,
+  progressiveTax,
   reconcile,
   resolveCategory,
   reviseItem,
   riskBandFromSuitability,
+  taxAfterRebate,
+  taxableIncomeFromItems,
   twr,
   valueChangeAnnual,
   wealthEffectOf

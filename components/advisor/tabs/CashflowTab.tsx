@@ -9,11 +9,15 @@ import {
 import {
   planCashflow, type LiabilityRow, type PolicyRow,
 } from '../../../supabase/functions/_shared/finance/derived';
-import { fmt, Loader } from './cashflow/shared';
+import { fmt, fmt2, Loader } from './cashflow/shared';
 import type { AssetOption } from './cashflow/shared';
 import type { StandingItemRow } from './cashflow/standingItemRows';
 import StandingItemsPanel from './cashflow/StandingItemsPanel';
 import ActualsPanel from './cashflow/ActualsPanel';
+import {
+  buildStatutoryBreakdown, buildWaterfallRows, hasManualIncomeTaxItem,
+  type StatutoryBreakdownKey, type WaterfallRowKey,
+} from './cashflow/waterfall';
 
 // CFP P2b — 现金流页. The plan (cashflow_items, "常设项目") is now the primary
 // view: a standing item is defined once (amount + frequency + effective
@@ -31,6 +35,7 @@ import ActualsPanel from './cashflow/ActualsPanel';
 interface ClientEpfInfo {
   has_epf: boolean | null;
   date_of_birth: string | null;
+  tax_residency: string | null;
 }
 
 export default function CashflowTab({ clientId }: { clientId: string }) {
@@ -42,7 +47,7 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
   const [policies, setPolicies] = useState<PolicyRow[]>([]);
   const [items, setItems] = useState<StandingItemRow[]>([]);
   const [assets, setAssets] = useState<AssetOption[]>([]);
-  const [client, setClient] = useState<ClientEpfInfo>({ has_epf: false, date_of_birth: null });
+  const [client, setClient] = useState<ClientEpfInfo>({ has_epf: false, date_of_birth: null, tax_residency: null });
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [ok, setOk] = useState(false);
@@ -60,14 +65,14 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
         .select('id, policy_type, plan_name, provider, premium, premium_frequency, end_date')
         .eq('client_id', clientId),
       supabase.from('cashflow_items').select('*').eq('client_id', clientId),
-      supabase.from('clients').select('has_epf, date_of_birth').eq('id', clientId).maybeSingle(),
+      supabase.from('clients').select('has_epf, date_of_birth, tax_residency').eq('id', clientId).maybeSingle(),
       supabase.from('assets').select('id, name, asset_type').eq('client_id', clientId).order('asset_type'),
     ]);
     setEntries(e || []);
     setLiabilities((l || []) as LiabilityRow[]);
     setPolicies((p || []) as PolicyRow[]);
     setItems((it || []) as StandingItemRow[]);
-    setClient((cl || { has_epf: false, date_of_birth: null }) as ClientEpfInfo);
+    setClient((cl || { has_epf: false, date_of_birth: null, tax_residency: null }) as ClientEpfInfo);
     setAssets((as || []) as AssetOption[]);
     setLoading(false);
   }
@@ -88,7 +93,7 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
     basis: defaultBasis(entries as PeriodRow[]),
     today,
     items,
-    client: { has_epf: client.has_epf, date_of_birth: client.date_of_birth },
+    client: { has_epf: client.has_epf, date_of_birth: client.date_of_birth, tax_residency: client.tax_residency },
   }), [entries, liabilities, policies, items, client, today]);
 
   // planCashflow pre-filters to items active "now" before handing them to
@@ -100,6 +105,16 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
     () => annualizeItems(items, today).one_off_items,
     [items, today],
   );
+
+  // P2b followup — the cash-flow summary waterfall (总收入 → 税与法定扣款 →
+  // 实得收入 → 开销 → 可储蓄金额 → 定期储蓄/投资 → 净现金流). Every row's
+  // figure comes straight off `plan`'s own fields (buildWaterfallRows does no
+  // re-derivation), so they add up exactly. `manualIncomeTax` picks the
+  // 所得税 vs 所得税（估算）label the same way planCashflow itself decided
+  // whether to add the automatic estimate.
+  const waterfallRows = useMemo(() => buildWaterfallRows(plan), [plan]);
+  const statutoryBreakdown = useMemo(() => buildStatutoryBreakdown(plan), [plan]);
+  const manualIncomeTax = useMemo(() => hasManualIncomeTaxItem(items, today), [items, today]);
 
   async function toggleHasEpf(checked: boolean) {
     const prev = client;
@@ -130,7 +145,25 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
 
   if (loading) return <Loader />;
 
-  const net = plan.totals.monthly_income - plan.totals.monthly_expenses;
+  function waterfallLabel(key: WaterfallRowKey): string {
+    switch (key) {
+      case 'gross_income': return t('Total income', '总收入');
+      case 'tax_and_statutory': return t('Tax & statutory deductions', '税与法定扣款');
+      case 'take_home': return t('Take-home income', '实得收入');
+      case 'living': return t('Living costs, installments & premiums', '开销');
+      case 'savable': return t('Savable amount', '可储蓄金额');
+      case 'planned_savings': return t('Planned savings / investing', '定期储蓄/投资');
+      case 'net_cash_flow': return t('Net cash flow', '净现金流');
+    }
+  }
+
+  function statutoryLabel(key: StatutoryBreakdownKey): string {
+    switch (key) {
+      case 'epf_employee': return t('EPF (employee)', 'EPF 雇员');
+      case 'socso_eis': return t('SOCSO/EIS', 'SOCSO/EIS');
+      case 'income_tax': return manualIncomeTax ? t('Income tax', '所得税') : t('Income tax (estimated)', '所得税（估算）');
+    }
+  }
 
   return (
     <div>
@@ -153,17 +186,43 @@ export default function CashflowTab({ clientId }: { clientId: string }) {
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-4 mb-2">
-        {[
-          { label: t('Monthly income', '月收入'), val: plan.totals.monthly_income, c: 'text-emerald-600', bg: 'bg-emerald-50' },
-          { label: t('Monthly expenses', '月开销'), val: plan.totals.monthly_expenses, c: 'text-red-500', bg: 'bg-red-50' },
-          { label: t('Monthly net', '月结余'), val: net, c: net >= 0 ? 'text-xin-blue' : 'text-red-500', bg: net >= 0 ? 'bg-blue-50' : 'bg-red-50' },
-        ].map((card) => (
-          <div key={card.label} className={`${card.bg} rounded-2xl p-4`}>
-            <div className="text-xs text-slate-500 font-medium mb-1">{card.label}</div>
-            <div className={`text-2xl font-bold ${card.c}`}>RM {fmt(card.val)}</div>
-          </div>
-        ))}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm px-5 py-4 mb-2">
+        {waterfallRows.map((row) => {
+          const isHeadline = row.kind === 'headline';
+          const isSubtotal = row.kind === 'subtotal';
+          const isDeduction = row.kind === 'deduction';
+          const amountColor = isHeadline
+            ? (row.amount < 0 ? 'text-red-500' : 'text-xin-blue')
+            : isDeduction ? 'text-red-500' : row.kind === 'total' ? 'text-emerald-600' : 'text-slate-700';
+          return (
+            <div key={row.key}>
+              <div
+                className={`flex items-center justify-between gap-3 py-2 ${isSubtotal ? 'border-t border-slate-100' : ''} ${isHeadline ? 'border-t-2 border-slate-200 mt-1 pt-3' : ''}`}
+              >
+                <span className={`flex items-center gap-1.5 ${isHeadline ? 'text-sm font-bold text-slate-700' : isSubtotal ? 'text-sm font-semibold text-slate-600' : 'text-xs text-slate-500'}`}>
+                  {isDeduction && <span className="text-slate-300">−</span>}
+                  {(isSubtotal || isHeadline) && <span className="text-slate-300">=</span>}
+                  {waterfallLabel(row.key)}
+                </span>
+                <span className={`${isHeadline ? 'text-2xl font-extrabold' : isSubtotal ? 'text-base font-bold' : 'text-sm font-semibold'} ${amountColor}`}>
+                  RM {fmt2(row.amount)}
+                </span>
+              </div>
+              {row.key === 'tax_and_statutory' && statutoryBreakdown.length > 0 && (
+                <div className="pl-4 pb-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-400">
+                  {statutoryBreakdown.map((b) => (
+                    <span key={b.key}>{statutoryLabel(b.key)} RM {fmt2(b.amount)}</span>
+                  ))}
+                </div>
+              )}
+              {row.key === 'living' && (
+                <div className="pl-4 pb-1.5 text-[11px] text-slate-400">
+                  {t('Living costs + loan installments + insurance premiums', '生活开销 + 月供 + 保费')}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {plan.monthly_employer_epf > 0 && (

@@ -135,8 +135,9 @@ Deno.test("P2b: items-path breakdown comes from standing items + statutory; epf_
 
   assertEquals(d.income_breakdown.find((c) => c.category === "salary_basic")?.monthly_amount, 8000);
   assertEquals(d.expense_breakdown.find((c) => c.category === "groceries")?.monthly_amount, 1000);
-  // SOCSO/EIS (42/mo on an uncapped 8,000 wage) is a real expense.
-  assertEquals(d.expense_breakdown.find((c) => c.category === "socso_eis")?.monthly_amount, 42);
+  // SOCSO/EIS (P2b followup band-midpoint formula: wage 8,000 caps at the
+  // top band's midpoint 5,950 -> 41.65/mo) is a real expense.
+  assertEquals(d.expense_breakdown.find((c) => c.category === "socso_eis")?.monthly_amount, 42); // round()'d in the breakdown
   // epf_employee (880/mo) is a transfer — never in the expense breakdown,
   // but it does count toward asset_transfers_monthly.
   assertEquals(d.expense_breakdown.find((c) => c.category === "epf_employee"), undefined);
@@ -209,12 +210,13 @@ Deno.test("plan facts are copied verbatim from the baseline — items path with 
   assertEquals(d.items_as_of, b.items_as_of);
   assert(d.items_as_of !== null);
   // 8,000 wage: employee EPF 880/mo (11%), employer EPF ~910/mo (per the
-  // statutory table), SOCSO/EIS 42/mo — same figures baseline.test.ts pins.
+  // statutory table), SOCSO/EIS 41.65/mo (P2b followup band-midpoint formula
+  // — same figures baseline.test.ts pins).
   assertEquals(d.monthly_employee_epf, 880);
   assertEquals(d.monthly_employee_epf, b.monthly_employee_epf);
   assertEquals(d.monthly_employer_epf, b.monthly_employer_epf);
   assert(d.monthly_employer_epf > 0);
-  assertEquals(d.monthly_socso_eis, 42);
+  assertEquals(d.monthly_socso_eis, 41.65);
   assertEquals(d.monthly_socso_eis, b.monthly_socso_eis);
   // Disposable surplus = annual surplus minus the forced-savings employee EPF.
   assertEquals(d.annual_disposable_surplus, b.annual_disposable_surplus);
@@ -223,4 +225,39 @@ Deno.test("plan facts are copied verbatim from the baseline — items path with 
   assertEquals(d.derived_items, b.derived_items);
   assert(d.derived_items.some((it) => it.category === "epf_employee"));
   assert(d.derived_items.some((it) => it.category === "socso_eis"));
+
+  // P2b followup: the take-home / net-cash-flow waterfall must be copied
+  // verbatim, byte for byte, from the baseline.
+  assertEquals(d.monthly_income_tax, b.monthly_income_tax);
+  assertEquals(d.monthly_statutory, b.monthly_statutory);
+  assertEquals(d.monthly_take_home, b.monthly_take_home);
+  assertEquals(d.monthly_living, b.monthly_living);
+  assertEquals(d.monthly_savable, b.monthly_savable);
+  assertEquals(d.monthly_planned_savings, b.monthly_planned_savings);
+  assertEquals(d.monthly_net_cash_flow, b.monthly_net_cash_flow);
+  // And the wiring is internally consistent, not just parroted:
+  assertEquals(d.monthly_statutory, d.monthly_employee_epf + d.monthly_socso_eis);
+  assertEquals(d.monthly_take_home, d.monthly_income - d.monthly_statutory - d.monthly_income_tax);
+  assertEquals(d.monthly_savable, d.monthly_take_home - d.monthly_living);
+  assertEquals(d.monthly_net_cash_flow, d.monthly_savable - d.monthly_planned_savings);
+});
+
+Deno.test("plan facts (take-home waterfall) are copied verbatim from the baseline — actuals path", () => {
+  const f = makeCfpData();
+  const b = computeBaseline(f, {}, NOW);
+  const d = computeCashflow(f, b);
+
+  assertEquals(d.monthly_income_tax, b.monthly_income_tax);
+  assertEquals(d.monthly_statutory, b.monthly_statutory);
+  assertEquals(d.monthly_take_home, b.monthly_take_home);
+  assertEquals(d.monthly_living, b.monthly_living);
+  assertEquals(d.monthly_savable, b.monthly_savable);
+  assertEquals(d.monthly_planned_savings, b.monthly_planned_savings);
+  assertEquals(d.monthly_net_cash_flow, b.monthly_net_cash_flow);
+  // No statutory/tax on the actuals path (no manual income_tax row in the
+  // fixture) — take-home collapses to plain income minus living costs.
+  assertEquals(d.monthly_statutory, 0);
+  assertEquals(d.monthly_income_tax, 0);
+  assertEquals(d.monthly_take_home, d.monthly_income);
+  assertEquals(d.monthly_net_cash_flow, d.monthly_savable);
 });

@@ -290,6 +290,34 @@ export interface FinancialBaseline {
   /** P2b 决策 6: SOCSO + EIS — a real expense (O9), already folded into
    *  annual_expenses like any other derived item. */
   monthly_socso_eis: number;
+  /** P2b followup — the cash-flow-correctness fix (WEI QI LEE case): estimated
+   *  monthly income tax (PCB/CP500), already folded into annual_expenses on
+   *  the items path. Only ever a manual `income_tax` row's amount on the
+   *  actuals path — never estimated there. See planCashflow in
+   *  _shared/finance/derived.ts for the full derivation. */
+  monthly_income_tax: number;
+  /** monthly_employee_epf + monthly_socso_eis — the statutory-deductions
+   *  block shown above 实得收入 on the cash-flow waterfall. 0 on the actuals
+   *  path. */
+  monthly_statutory: number;
+  /** monthly_income − monthly_statutory − monthly_income_tax: what's
+   *  actually left in hand after EPF/SOCSO/EIS/tax, before any spending. */
+  monthly_take_home: number;
+  /** monthly_essential_expenses minus the SOCSO/EIS and tax already shown
+   *  separately under statutory deductions — i.e. just living costs,
+   *  installments and premiums. */
+  monthly_living: number;
+  /** monthly_take_home − monthly_living. */
+  monthly_savable: number;
+  /** active transfer items (O1/I4 etc., excluding statutory epf_employee),
+   *  outflow minus inflow — money actually set aside/withdrawn on purpose, as
+   *  opposed to the forced statutory EPF already counted under
+   *  monthly_statutory. */
+  monthly_planned_savings: number;
+  /** monthly_savable − monthly_planned_savings — the headline net-cash-flow
+   *  figure (replaces annual_disposable_surplus as the number the client
+   *  should actually watch). */
+  monthly_net_cash_flow: number;
   /** P2b 决策 6: annual_surplus minus the employee EPF that's forced savings
    *  and can't be redirected — what the budget waterfall actually allocates.
    *  Equals annual_surplus when there's no statutory EPF (monthly_employee_epf

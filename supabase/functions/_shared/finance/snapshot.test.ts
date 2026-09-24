@@ -77,10 +77,17 @@ Deno.test("computeSnapshot: debt_service_ratio, non_mortgage_dsr and savings_rat
 
   assertEquals(r.monthly_income, 10000);
   // monthly_debt_service = 2000 (mortgage) + 500 (car), both literal payments
+  // — debt_service_ratio/non_mortgage_dsr are unaffected by the P2b followup
+  // tax estimate below (they're built from monthly_debt_service directly).
   assertEquals(r.debt_service_ratio, 0.25); // 2500 / 10000
   assertEquals(r.non_mortgage_dsr, 0.05); // (2500 - 2000) / 10000
-  assertEquals(r.savings_ratio, 0.75); // (10000 - 2500) / 10000
-  assertEquals(r.monthly_surplus, 7500);
+  // P2b followup: a salary of 10,000/mo owes real income tax, estimated
+  // automatically on the items path regardless of has_epf/EPF status — this
+  // now sits inside monthly_expenses alongside the debt service. Taxable
+  // income 120,000, personal relief 9,000 (no EPF/policies here) -> chargeable
+  // 111,000 -> progressiveTax(111,000) = 12,150/yr = 1,012.50/mo.
+  assertEquals(r.savings_ratio, 0.6488); // (10000 - 2500 - 1012.5) / 10000
+  assertEquals(r.monthly_surplus, 6488); // round0(10000 - 3512.5)
 });
 
 Deno.test("computeSnapshot: DSR-family ratios are null when there is no income", () => {

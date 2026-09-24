@@ -132,5 +132,15 @@ export function buildCurrentPlan({ rows, liabilities, policies, items, client, b
     monthly_employee_epf: plan.monthly_employee_epf,
     monthly_employer_epf: plan.monthly_employer_epf,
     monthly_socso_eis: plan.monthly_socso_eis,
+    // P2b followup (cash-flow-correctness fix): the client portal's own
+    // take-home/savable/net-cash-flow figures — straight off planCashflow's
+    // fields, same as everything else here, never re-derived.
+    monthly_income_tax: plan.monthly_income_tax,
+    monthly_statutory: plan.monthly_statutory,
+    monthly_take_home: plan.monthly_take_home,
+    monthly_living: plan.monthly_living,
+    monthly_savable: plan.monthly_savable,
+    monthly_planned_savings: plan.monthly_planned_savings,
+    monthly_net_cash_flow: plan.monthly_net_cash_flow,
   };
 }

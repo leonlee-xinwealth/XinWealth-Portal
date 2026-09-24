@@ -311,7 +311,12 @@ Deno.test("planCashflow: a non-empty `items` array switches to the items path", 
   const result = planCashflow({ rows: [], liabilities: [], policies: [], basis: null, items, today: TODAY });
   assertEquals(result.source, "items");
   assertEquals(result.totals.monthly_income, 8000);
-  assertEquals(result.totals.monthly_expenses, 1000);
+  // P2b followup: a salary of 8,000/mo owes real income tax regardless of
+  // has_epf/EPF status (self-employed clients pay tax too), so the items
+  // path now ALWAYS estimates it (unless a manual income_tax item exists) —
+  // monthly_expenses is no longer just the manual groceries row.
+  assertEquals(result.monthly_income_tax, 577.5);
+  assertEquals(result.totals.monthly_expenses, 1000 + 577.5);
 });
 
 Deno.test("planCashflow (items path) 决策 8: a manual car_installment item is superseded by a matching liability, same as an actuals row would be", () => {
@@ -340,7 +345,11 @@ Deno.test("planCashflow (items path) 决策 6: EPF/SOCSO/EIS derived from standi
 
   assertEquals(result.monthly_employee_epf, 880);
   assertEquals(result.monthly_employer_epf, 960);
-  assertAlmostEquals(result.monthly_socso_eis, 42, 0.01);
+  // P2b followup: SOCSO/EIS now uses the official band-MIDPOINT formula
+  // (band upper - 50, capped at the top band's midpoint 5,950) instead of a
+  // flat 0.7% of the 6,000-capped wage — wage 8,000 caps at the 5,950
+  // midpoint: 0.005*5,950 + 0.002*5,950 = 29.75 + 11.90 = 41.65 (was 42.00).
+  assertAlmostEquals(result.monthly_socso_eis, 41.65, 0.01);
 
   const epfDerived = result.derived.find((d) => d.category === "epf_employee");
   const socsoDerived = result.derived.find((d) => d.category === "socso_eis");
@@ -348,9 +357,12 @@ Deno.test("planCashflow (items path) 决策 6: EPF/SOCSO/EIS derived from standi
   assert(socsoDerived);
   assertEquals(epfDerived!.source_type, "statutory");
 
-  // Only socso_eis (an expense) reaches monthly_expenses; epf_employee (O1,
-  // a transfer) is excluded exactly like periods.ts excludes any transfer.
-  assertAlmostEquals(result.totals.monthly_expenses, 42, 0.01);
+  // socso_eis (an expense) reaches monthly_expenses; epf_employee (O1, a
+  // transfer) is excluded exactly like periods.ts excludes any transfer. A
+  // salary of 8,000/mo also owes real income tax (P2b followup), estimated
+  // and folded in here alongside socso_eis — see monthly_income_tax below.
+  assertAlmostEquals(result.monthly_income_tax, 514.17, 0.01);
+  assertAlmostEquals(result.totals.monthly_expenses, 41.65 + 514.17, 0.01);
 });
 
 Deno.test("planCashflow: no client (or has_epf not true) on the items path derives no statutory items", () => {
@@ -382,17 +394,20 @@ Deno.test("planCashflow `clients`: two earners each get their own statutory calc
   const result = planCashflow({ rows: [], liabilities: [], policies: [], basis: null, items, clients, today: TODAY });
 
   // c-1 alone: 8000 * 11% = 880 employee, 8000 > 5000 so 12% employer = 960,
-  // SOCSO/EIS wage capped at 6000 -> 0.7% * 6000 = 42.
+  // SOCSO/EIS wage 8,000 -> midpoint capped at the top band (5,950) ->
+  // 0.005*5,950 + 0.002*5,950 = 41.65.
   // c-2 alone: 4000 * 11% = 440 employee, 4000 <= 5000 so 13% employer = 520,
-  // SOCSO/EIS wage 4000 (under the cap) -> 0.7% * 4000 = 28.
+  // SOCSO/EIS wage 4,000 -> midpoint = ceil(4000/100)*100-50 = 3,950 ->
+  // 0.005*3,950 + 0.002*3,950 = 27.65.
   assertEquals(result.monthly_employee_epf, 880 + 440);
   assertEquals(result.monthly_employer_epf, 960 + 520);
-  assertAlmostEquals(result.monthly_socso_eis, 42 + 28, 0.01);
+  assertAlmostEquals(result.monthly_socso_eis, 41.65 + 27.65, 0.01);
 
   // Pooling both salaries into one 12,000 wage base would cap SOCSO/EIS at
-  // 6,000 once (42 total) instead of twice (70) — the exact bug `clients`
-  // exists to prevent.
-  assert(result.monthly_socso_eis > 42, "must not be computed off a single pooled wage base");
+  // its single top-band midpoint once (41.65 total) instead of pricing each
+  // employee's own wage separately (69.30) — the exact bug `clients` exists
+  // to prevent.
+  assert(result.monthly_socso_eis > 41.65, "must not be computed off a single pooled wage base");
 
   const statutoryItems = result.derived.filter((d) => d.source_type === "statutory");
   assertEquals(statutoryItems.length, 4); // epf_employee + socso_eis, per person
@@ -448,4 +463,124 @@ Deno.test("planCashflow (items path): one_off items are surfaced; the actuals pa
 
   const actualsResult = planCashflow({ rows: [], liabilities: [], policies: [], basis: null, today: TODAY });
   assertEquals(actualsResult.one_off_items, []);
+});
+
+// ---------------------------------------------------------------------------
+// P2b followup — the cash-flow correctness fix: income-tax estimate + the
+// take-home/living/savable/net-cash-flow waterfall.
+// ---------------------------------------------------------------------------
+
+Deno.test("planCashflow (items path): a large-enough income gets an estimated income_tax derived item, folded into monthly_expenses", () => {
+  const items: StandingItem[] = [
+    { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+  ];
+  const client = { has_epf: true, date_of_birth: null as string | null };
+  const result = planCashflow({ rows: [], liabilities: [], policies: [], basis: null, items, client, today: TODAY });
+
+  const taxItem = result.derived.find((d) => d.category === "income_tax");
+  assert(taxItem, "a salary of 8,000/mo owes real tax — the estimate must appear");
+  assertEquals(taxItem!.source_type, "tax");
+  assertEquals(taxItem!.estimated, ["tax_estimate"]);
+  assert(taxItem!.warnings.includes("按 2026 税率与基本减免估算"));
+  assert(taxItem!.monthly_amount > 0);
+  assertEquals(result.monthly_income_tax, taxItem!.monthly_amount);
+  assert(result.totals.monthly_expenses >= taxItem!.monthly_amount);
+});
+
+Deno.test("planCashflow (items path): an active manual income_tax item suppresses the estimate entirely", () => {
+  const items: StandingItem[] = [
+    { direction: "inflow", category: "salary_basic", amount: 8000, frequency: "monthly", effective_from: "2026-01-01" },
+    { direction: "outflow", category: "income_tax", amount: 500, frequency: "monthly", effective_from: "2026-01-01" },
+  ];
+  const client = { has_epf: true, date_of_birth: null as string | null };
+  const result = planCashflow({ rows: [], liabilities: [], policies: [], basis: null, items, client, today: TODAY });
+
+  // No estimated duplicate: exactly the manual row's worth of income_tax.
+  assertEquals(result.derived.filter((d) => d.category === "income_tax").length, 0);
+  assertEquals(result.monthly_income_tax, 500);
+});
+
+Deno.test("planCashflow (actuals path): monthly_income_tax comes only from a manual income_tax row, never estimated", () => {
+  const rows: PeriodRow[] = [
+    { direction: "inflow", amount: 10000, frequency: "monthly", period_month: "2026-06-01", category: "salary_basic" },
+    { direction: "outflow", amount: 600, frequency: "monthly", period_month: "2026-06-01", category: "income_tax" },
+  ];
+  const result = planCashflow({ rows, liabilities: [], policies: [], basis: { year: 2026, from_month: 6, to_month: 6 }, today: TODAY });
+  assertEquals(result.source, "actuals");
+  assertEquals(result.monthly_income_tax, 600);
+  assertEquals(result.monthly_statutory, 0);
+  assertEquals(result.derived.filter((d) => d.source_type === "tax").length, 0);
+});
+
+// 乙 (WEI QI LEE): self-employed, ticking "受雇，有 EPF" on the standing items
+// path. This is the shape the whole task exists to fix — see the plan's
+// Context section. has_epf=true and has_epf=false both land on tax=0 (the
+// RM400 rebate wipes out the small progressive tax either way), so the two
+// scenarios below isolate exactly what statutory deductions change.
+function weiQiLeeItems(): StandingItem[] {
+  return [
+    { direction: "inflow", category: "salary_basic", amount: 2577, frequency: "monthly", effective_from: "2026-01-01" },
+    { direction: "outflow", category: "groceries", amount: 1548, frequency: "monthly", effective_from: "2026-01-01" },
+  ];
+}
+const weiQiLeeLiabilities: LiabilityRow[] = [
+  { liability_type: "car_loan", outstanding_balance: 10000, interest_rate: 3, monthly_payment: 420, rate_type: "flat" },
+  { liability_type: "personal_loan", outstanding_balance: 130000, interest_rate: 12, monthly_payment: 1000 },
+];
+
+Deno.test("乙 full waterfall, has_epf=true: take_home 2,275.15, living 2,968, savable/net -692.85, planned_savings 0", () => {
+  const client = { has_epf: true, date_of_birth: null as string | null };
+  const result = planCashflow({
+    rows: [],
+    liabilities: weiQiLeeLiabilities,
+    policies: [],
+    basis: null,
+    items: weiQiLeeItems(),
+    client,
+    today: TODAY,
+  });
+
+  assertEquals(result.monthly_employee_epf, 284);
+  assertAlmostEquals(result.monthly_socso_eis, 17.85, 0.01);
+  assertEquals(result.monthly_income_tax, 0); // wiped out by the RM400 rebate
+  assertAlmostEquals(result.monthly_take_home, 2275.15, 0.01);
+  assertAlmostEquals(result.monthly_living, 2968, 0.01);
+  assertAlmostEquals(result.monthly_savable, -692.85, 0.01);
+  assertEquals(result.monthly_planned_savings, 0);
+  assertAlmostEquals(result.monthly_net_cash_flow, -692.85, 0.01);
+});
+
+Deno.test("乙 full waterfall, has_epf=false: no statutory deductions at all, net cash flow -391", () => {
+  const client = { has_epf: false, date_of_birth: null as string | null };
+  const result = planCashflow({
+    rows: [],
+    liabilities: weiQiLeeLiabilities,
+    policies: [],
+    basis: null,
+    items: weiQiLeeItems(),
+    client,
+    today: TODAY,
+  });
+
+  assertEquals(result.monthly_employee_epf, 0);
+  assertEquals(result.monthly_socso_eis, 0);
+  assertEquals(result.monthly_income_tax, 0);
+  assertEquals(result.monthly_statutory, 0);
+  assertAlmostEquals(result.monthly_take_home, 2577, 0.01);
+  assertAlmostEquals(result.monthly_living, 2968, 0.01);
+  assertAlmostEquals(result.monthly_savable, -391, 0.01);
+  assertAlmostEquals(result.monthly_net_cash_flow, -391, 0.01);
+});
+
+Deno.test("monthly_planned_savings: active transfer items (excluding statutory epf_employee), outflow minus inflow", () => {
+  const items: StandingItem[] = [
+    { direction: "inflow", category: "salary_basic", amount: 10000, frequency: "monthly", effective_from: "2026-01-01" },
+    { direction: "outflow", category: "to_savings", amount: 1000, frequency: "monthly", effective_from: "2026-01-01" },
+    { direction: "outflow", category: "unit_trust_contribution", amount: 500, frequency: "monthly", effective_from: "2026-01-01" },
+    { direction: "inflow", category: "savings_withdrawal", amount: 200, frequency: "monthly", effective_from: "2026-01-01" },
+  ];
+  const result = planCashflow({ rows: [], liabilities: [], policies: [], basis: null, items, today: TODAY });
+  // 1,000 + 500 - 200 = 1,300 net set aside on purpose.
+  assertAlmostEquals(result.monthly_planned_savings, 1300, 0.01);
+  assertAlmostEquals(result.monthly_net_cash_flow, result.monthly_savable - 1300, 0.01);
 });

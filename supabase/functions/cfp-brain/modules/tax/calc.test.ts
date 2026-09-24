@@ -185,3 +185,38 @@ Deno.test("detectReliefsFromCashflow sums matched categories across frequencies"
   assertEquals(detected.sspn, 500 * 4);
   assertEquals(detected.medical_expenses, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// P2b followup: computeTax now shares incomeTax.ts's RM400 rebate and (on the
+// items path) its taxable-income definition with the cash-flow estimate —
+// added so the report and the cash-flow page can never quietly disagree.
+// ---------------------------------------------------------------------------
+
+Deno.test("computeTax applies the shared RM400 rebate when chargeable income <= 35,000", () => {
+  const d = det({
+    cashflow: [
+      { direction: "inflow", amount: 2500, frequency: "monthly", category: "salary", period_month: "2026-06-01" },
+    ],
+  });
+  assert(d.chargeable_income <= 35000, `chargeable_income was ${d.chargeable_income}`);
+  // Without the rebate, progressiveTax(chargeable_income) would be > 0 — the
+  // rebate is what brings tax_payable down to 0, not a coincidental zero.
+  assert(progressiveTax(d.chargeable_income) > 0);
+  assertEquals(d.tax_payable, 0);
+});
+
+Deno.test("computeTax (items path): taxable income uses the shared I1-plus-rental definition, not the baseline's broader annual_income", () => {
+  const d = det({
+    cashflow: [],
+    liabilities: [],
+    policies: [],
+    items: [
+      { direction: "inflow", category: "salary_basic", amount: 2000, frequency: "monthly", effective_from: "2026-01-01" },
+      // A big non-taxable inflow (I2, tax-exempt) that b.annual_income would
+      // still count — proving computeTax reads the NARROWER shared taxable-
+      // income definition on the items path, not the baseline's own figure.
+      { direction: "inflow", category: "dividend_investment", amount: 5000, frequency: "monthly", effective_from: "2026-01-01" },
+    ],
+  });
+  assertEquals(d.employment_income_est, 2000 * 12); // NOT (2000+5000)*12
+});

@@ -559,6 +559,33 @@ const Cashflow: React.FC = () => {
               <p className="text-sm font-semibold text-slate-600">{formatCurrency(currentPlan.monthly_socso_eis)}</p>
             </div>
           </div>
+
+          {/* P2b followup (cash-flow-correctness fix): take-home pay after
+              EPF/SOCSO/EIS/income tax, living costs, what's actually left to
+              save, and the true bottom line after planned savings/investing —
+              every figure straight off the plan, same as the tiles above. */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-6 pt-6 border-t border-slate-100">
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Take-Home Income</p>
+              <p className="text-xl font-bold text-emerald-500">{formatCurrency(currentPlan.monthly_take_home)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Living Expenses</p>
+              <p className="text-xl font-bold text-rose-500">{formatCurrency(currentPlan.monthly_living)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Savable Amount</p>
+              <p className={`text-xl font-bold ${currentPlan.monthly_savable >= 0 ? 'text-xin-blue' : 'text-rose-500'}`}>
+                {formatCurrency(currentPlan.monthly_savable)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-1">Net Cash Flow</p>
+              <p className={`text-2xl font-extrabold ${currentPlan.monthly_net_cash_flow >= 0 ? 'text-xin-blue' : 'text-rose-500'}`}>
+                {formatCurrency(currentPlan.monthly_net_cash_flow)}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
