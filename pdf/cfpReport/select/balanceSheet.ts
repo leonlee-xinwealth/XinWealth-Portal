@@ -64,12 +64,23 @@ export function selectAssetQuality(data: CfpReportData): AssetQualityView {
 
   const perAsset: AssetQualityView["perAsset"] = {};
   for (const raw of assets) {
-    const a = raw as { asset_id?: string; quadrant?: Quadrant | null; net_cash_flow_monthly?: number; value_change_annual?: number | null };
-    if (!a || a.quadrant == null || !a.asset_id) continue;
-    const meta = QUADRANTS.find((q) => q.id === a.quadrant);
+    const a = raw as {
+      asset_id?: string;
+      quadrant?: Quadrant | null;
+      unlinked?: boolean;
+      net_cash_flow_monthly?: number;
+      value_change_annual?: number | null;
+    };
+    if (!a || !a.asset_id) continue;
+    // Unlabeled A/B assets (quadrant: null, unlinked: false) have nothing to
+    // print here — same as before. A class-D asset with nothing linked also
+    // has quadrant: null, but IS worth a row: 待关联 rather than silence,
+    // so the advisor notices it on the printed statement too.
+    if (a.quadrant == null && !a.unlinked) continue;
+    const meta = a.quadrant != null ? QUADRANTS.find((q) => q.id === a.quadrant) : null;
     perAsset[a.asset_id] = {
-      labelZh: meta?.label_zh ?? String(a.quadrant),
-      labelEn: meta?.label_en ?? String(a.quadrant),
+      labelZh: meta?.label_zh ?? "待关联",
+      labelEn: meta?.label_en ?? "Pending link",
       netCashFlowMonthly: typeof a.net_cash_flow_monthly === "number" ? a.net_cash_flow_monthly : 0,
       valueChangeAnnual: typeof a.value_change_annual === "number" ? a.value_change_annual : null,
     };

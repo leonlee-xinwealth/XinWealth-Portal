@@ -227,3 +227,62 @@ describe("asset rows with a matched quadrant", () => {
     expect(withQuality.map((r) => r.meta)).toEqual(without.map((r) => r.meta));
   });
 });
+
+// ---------------------------------------------------------------------------
+// Prod incident fix: a class-D asset with nothing linked now comes back as
+// `quadrant: null, unlinked: true` instead of a wrong "productive" label.
+// The printed row must show 「待关联」 rather than silently dropping the
+// label (which is what plain quadrant === null already did for A/B assets).
+// ---------------------------------------------------------------------------
+
+const UNLINKED_BASELINE = {
+  asset_quality: {
+    assets: [
+      {
+        asset_id: "asset-property-1", asset_class: "D", quadrant: null, unlinked: true,
+        net_cash_flow_monthly: 0, value_change_annual: null,
+      },
+    ],
+    by_quadrant: {
+      productive: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+      yielding_depreciating: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+      appreciating_cash_consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+      consuming: { count: 0, value: 0, net_cash_flow_monthly: 0 },
+      unlinked: { count: 1, value: 500_000 },
+    },
+  },
+};
+
+describe("selectAssetQuality with an unlinked class-D asset", () => {
+  it("shows 待关联/Pending link instead of silently dropping the row", () => {
+    const q = selectAssetQuality(payload(ASSETS, [], UNLINKED_BASELINE));
+    expect(q.perAsset["asset-property-1"]).toMatchObject({
+      labelZh: "待关联", labelEn: "Pending link",
+    });
+  });
+
+  it("does not crash and reports no quadrant data when every C/D asset is unlinked", () => {
+    const q = selectAssetQuality(payload(ASSETS, [], UNLINKED_BASELINE));
+    expect(q.hasData).toBe(false);
+  });
+
+  it("still leaves an unlabeled A/B asset (quadrant null, not unlinked) with no row", () => {
+    const baseline = {
+      asset_quality: {
+        assets: [{ asset_id: "asset-epf-1", asset_class: "B", quadrant: null, unlinked: false }],
+        by_quadrant: UNLINKED_BASELINE.asset_quality.by_quadrant,
+      },
+    };
+    const q = selectAssetQuality(payload(ASSETS, [], baseline));
+    expect(q.perAsset["asset-epf-1"]).toBeUndefined();
+  });
+
+  it("appends 待关联 to the property row's meta on the printed asset table", () => {
+    const assetsWithId = ASSETS.map((a) =>
+      a.asset_type === "property" ? { ...a, id: "asset-property-1" } : a,
+    );
+    const rows = assetRows(payload(assetsWithId, [], UNLINKED_BASELINE));
+    const propertyRow = rows.find((r) => r.label === "自住房产")!;
+    expect(propertyRow.meta).toContain("待关联");
+  });
+});

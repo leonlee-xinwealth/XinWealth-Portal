@@ -229,8 +229,14 @@ export type AssetQualityQuadrant =
 export interface AssetQualityAssessment {
   asset_id: string;
   asset_class: 'A' | 'B' | 'C' | 'D';
-  /** null for class A/B — they don't get a 2×2 label. */
+  /** null for class A/B (never labeled) and for a class D asset with no
+   *  linked items/liabilities (withheld until something is linked — see
+   *  `unlinked`). */
   quadrant: AssetQualityQuadrant | null;
+  /** true for a class C or D asset with zero linked standing items AND zero
+   *  linked liabilities. A class D one also has `quadrant: null`; a class C
+   *  one keeps its computed quadrant. Always false for class A/B. */
+  unlinked: boolean;
   net_cash_flow_monthly: number;
   value_change_annual: number | null;
   value_change_source: 'history' | 'default_depreciation' | 'none';
@@ -245,9 +251,16 @@ export interface AssetQualityQuadrantTotal {
   net_cash_flow_monthly: number;
 }
 
+export interface AssetQualityUnlinkedTotal {
+  count: number;
+  value: number;
+}
+
 export interface AssetQualitySummary {
   assets: AssetQualityAssessment[];
-  by_quadrant: Record<AssetQualityQuadrant, AssetQualityQuadrantTotal>;
+  /** the four framework quadrants, plus `unlinked` — class-D assets with no
+   *  linked items/liabilities, which get no quadrant at all. */
+  by_quadrant: Record<AssetQualityQuadrant, AssetQualityQuadrantTotal> & { unlinked: AssetQualityUnlinkedTotal };
 }
 
 export type PortfolioAllocationBucket = 'equity' | 'bond' | 'cash' | 'alternatives';

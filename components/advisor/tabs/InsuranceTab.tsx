@@ -289,6 +289,11 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
   // coverage; the list must say so, matching _shared/insurance/mapping.ts's
   // isCoverageCounted.
   const isInForce = (p: any) => !p.status || p.status === 'in_force';
+  // P5 alerts follow-up: an in-force, non-single-premium policy with no
+  // premium recorded silently contributes nothing to cash flow
+  // (derivePremiumItems in _shared/finance/derived.ts skips it) — flag it on
+  // the card so it isn't a silent gap, mirroring alerts.ts's policy_missing_premium.
+  const isMissingPremium = (p: any) => isInForce(p) && p.premium_frequency !== 'single_premium' && (p.premium == null || Number(p.premium) === 0);
   const statusLabel = (status: string) => { const l = STATUS_LABELS[status || 'in_force']; return l ? (language === 'zh' ? l[1] : l[0]) : (status || ''); };
   const nominationLabel = (nom: string) => { const l = NOMINATION_LABELS[nom]; return l ? (language === 'zh' ? l[1] : l[0]) : nom; };
 
@@ -329,6 +334,14 @@ export default function InsuranceTab({ clientId }: { clientId: string }) {
                 </span>
                 {p.is_group_employer && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-600">{t('Group · lapses on resignation','团保 · 离职即失效')}</span>}
                 {p.nomination_type && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">{nominationLabel(p.nomination_type)}</span>}
+                {isMissingPremium(p) && (
+                  <span
+                    className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-600"
+                    title={t('Premium not counted in cash flow — please fill it in.', '保费不会计入现金流，请补填')}
+                  >
+                    {t('Premium not recorded','未记录保费')}
+                  </span>
+                )}
               </div>
               <div className="mt-3 mb-1 font-bold text-xin-blue text-base">{p.provider}</div>
               {p.plan_name && <div className="text-sm text-slate-600 -mt-0.5 mb-1">{p.plan_name}</div>}

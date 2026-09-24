@@ -1,0 +1,239 @@
+<title>XinWealth 科目表</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+:root{
+  --ground:#F4F5F0; --surface:#FFFFFF; --ink:#18211D; --muted:#5A655F; --rule:#DADFD6; --soft:#ECEFE8;
+  --accent:#0E6B57; --accent-soft:#DDEDE7;
+  --inc:#2F7A45; --inc-bg:#E3F1E6; --exp:#A8432C; --exp-bg:#F6E4DE; --tra:#2C5C8A; --tra-bg:#E1EAF4; --spl:#6A4C9C; --spl-bg:#ECE5F5;
+  --warn:#8A6A12; --warn-bg:#F5EDD3;
+  --sans:"IBM Plex Sans","Noto Sans SC",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --cond:"IBM Plex Sans Condensed","Noto Sans SC","Arial Narrow",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#111613; --surface:#18201C; --ink:#E4E9E3; --muted:#98A39C; --rule:#2A342E; --soft:#1F2823;
+    --accent:#5CC4A6; --accent-soft:#1C3A31;
+    --inc:#7BCB8F; --inc-bg:#1D3324; --exp:#EE9A83; --exp-bg:#3A231D; --tra:#8FB6E0; --tra-bg:#1C2B3B; --spl:#BBA2E6; --spl-bg:#2B2340;
+    --warn:#E2C067; --warn-bg:#352C14;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#111613; --surface:#18201C; --ink:#E4E9E3; --muted:#98A39C; --rule:#2A342E; --soft:#1F2823;
+  --accent:#5CC4A6; --accent-soft:#1C3A31;
+  --inc:#7BCB8F; --inc-bg:#1D3324; --exp:#EE9A83; --exp-bg:#3A231D; --tra:#8FB6E0; --tra-bg:#1C2B3B; --spl:#BBA2E6; --spl-bg:#2B2340;
+  --warn:#E2C067; --warn-bg:#352C14;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font:15px/1.6 var(--sans);padding-inline:20px;padding-block:28px 64px}
+.wrap{max-width:1180px;margin:0 auto}
+header.top{display:grid;gap:10px;padding-bottom:18px;border-bottom:1px solid var(--rule)}
+.eyebrow{font:500 12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+h1{font:600 clamp(28px,4.4vw,40px)/1.15 var(--cond);margin:0;text-wrap:balance;letter-spacing:-.01em}
+.lede{margin:0;color:var(--muted);max-width:68ch}
+.formula{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:6px;font:500 14px/1.5 var(--mono);color:var(--ink)}
+.formula span{background:var(--soft);border:1px solid var(--rule);border-radius:6px;padding:4px 10px}
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--ground);display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding-block:14px;border-bottom:1px solid var(--rule)}
+.tabs{display:flex;flex-wrap:wrap;gap:4px}
+.tab{font:500 14px/1 var(--sans);color:var(--muted);background:transparent;border:1px solid transparent;border-radius:999px;padding:8px 14px;cursor:pointer}
+.tab:hover{color:var(--ink);background:var(--soft)}
+.tab[aria-selected="true"]{color:var(--accent);background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 30%,transparent)}
+.tab .n{font:500 12px/1 var(--mono);margin-left:6px;opacity:.75}
+.search{flex:1 1 220px;display:flex;align-items:center;gap:8px;min-width:0}
+.search input{width:100%;font:15px/1.4 var(--sans);color:var(--ink);background:var(--surface);border:1px solid var(--rule);border-radius:8px;padding:9px 12px}
+.search input:focus{outline:2px solid var(--accent);outline-offset:1px}
+.count{font:12px/1 var(--mono);color:var(--muted);white-space:nowrap}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+section.grp{margin-top:30px}
+.grp-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;margin-bottom:10px}
+.grp-h h2{font:600 20px/1.3 var(--cond);margin:0}
+.grp-id{font:500 13px/1 var(--mono);color:var(--accent);background:var(--accent-soft);border-radius:4px;padding:4px 7px}
+.grp-note{color:var(--muted);font-size:13px}
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:14px}
+th{font:500 12px/1.3 var(--sans);color:var(--muted);text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule);background:var(--soft);white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid var(--rule);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.code{font:500 13px/1.5 var(--mono);color:var(--ink);white-space:nowrap}
+td.en{color:var(--muted)}
+td.num{font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:13px;white-space:nowrap}
+.chip{display:inline-block;font:500 12px/1 var(--sans);border-radius:999px;padding:4px 9px;white-space:nowrap}
+.e-income{color:var(--inc);background:var(--inc-bg)} .e-expense{color:var(--exp);background:var(--exp-bg)}
+.e-transfer{color:var(--tra);background:var(--tra-bg)} .e-split{color:var(--spl);background:var(--spl-bg)}
+.tag{display:inline-block;font:12px/1 var(--sans);color:var(--muted);border:1px solid var(--rule);border-radius:4px;padding:3px 6px;margin:1px 4px 1px 0;white-space:nowrap}
+.tag.auto{color:var(--warn);background:var(--warn-bg);border-color:transparent}
+.dim{color:var(--muted)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:10px;padding:16px 18px;display:grid;gap:6px;align-content:start}
+.card h3{font:600 16px/1.3 var(--cond);margin:0}
+.card p{margin:0;color:var(--muted);font-size:14px}
+.quad{display:grid;grid-template-columns:auto 1fr 1fr;gap:6px;max-width:720px}
+.quad .ax{font:500 12px/1.3 var(--sans);color:var(--muted);display:flex;align-items:center;padding:6px}
+.quad .cell{border-radius:8px;padding:14px;font-weight:600;display:grid;gap:4px}
+.quad .cell small{font-weight:400;color:var(--muted);font-size:13px}
+.q-productive{background:var(--inc-bg);color:var(--inc)} .q-yield{background:var(--warn-bg);color:var(--warn)}
+.q-appr{background:var(--tra-bg);color:var(--tra)} .q-cons{background:var(--exp-bg);color:var(--exp)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+footer{margin-top:40px;color:var(--muted);font-size:13px;border-top:1px solid var(--rule);padding-top:14px}
+@media (max-width:560px){ body{padding-inline:16px} .quad{grid-template-columns:1fr} .quad .ax.corner{display:none} }
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">CFP 数据框架 · 开发者参考</div>
+    <h1>XinWealth 科目表</h1>
+    <p class="lede">每一笔钱都有「财富效应」：收入、开销、转移，或月供这种一半转移一半开销的拆分。系统只看<strong>类别</strong>判断是否转移，从不看关联对象。本页数据直接取自系统代码（<code>_shared/taxonomy</code>），与线上计算完全一致。</p>
+    <div class="formula"><span>净资产变化 = 收入 − 开销 + 市值变化</span><span>未解释差额 = 实际变化 − 可解释变化</span></div>
+  </header>
+
+  <nav class="bar" aria-label="分类">
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <label class="search" for="q"><input id="q" type="search" placeholder="搜索代码、中文或英文名称…" autocomplete="off"><span class="count" id="count"></span></label>
+  </nav>
+
+  <main id="view"></main>
+
+  <footer>数据来源：<code>supabase/functions/_shared/taxonomy</code> 与 <code>_shared/finance</code>（估算器、法定扣款、资产质量）。改代码后重新生成本页即可同步。</footer>
+</div>
+
+<script>
+const DATA = /*DATA*/;
+const EFFECT = {income:"收入",expense:"开销",transfer:"转移",split:"拆分（本金转移 + 利息开销）"};
+const REC = {recurring:"经常性",irregular:"每年固定但非每月",one_off:"一次性"};
+const FV = {fixed:"固定",variable:"变动"};
+const NW = {need:"需要",want:"想要"};
+const LINK = {asset:"资产",liability:"负债",policy:"保单",none:""};
+const LIQ = {liquid:"流动",semi:"半流动",illiquid:"非流动"};
+const PURPOSE = {personal_use:"自用",income_producing:"生财",investment:"投资"};
+const RATE = {reducing:"递减余额",flat:"平息",revolving:"循环",interest_only:"只付利息"};
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const chip = e => e ? `<span class="chip e-${e}">${esc(EFFECT[e] || e)}</span>` : "";
+const tag = (t, cls="") => t ? `<span class="tag ${cls}">${esc(t)}</span>` : "";
+const pct = v => v == null ? "—" : (Math.round(v * 1000) / 10) + "%";
+const match = (q, ...xs) => !q || xs.some(x => String(x ?? "").toLowerCase().includes(q));
+
+const TABS = [
+  {id:"cashflow", label:"现金流", n:DATA.categories.length},
+  {id:"assets", label:"资产", n:DATA.assetTypes.length},
+  {id:"liabilities", label:"负债", n:DATA.liabilityTypes.length},
+  {id:"insurance", label:"保险", n:Object.keys(DATA.premium).length},
+  {id:"rules", label:"联动规则", n:null},
+];
+let active = "cashflow";
+try { const h = location.hash.slice(1); if (TABS.some(t => t.id === h)) active = h; } catch (e) {}
+
+function renderTabs(){
+  document.getElementById("tabs").innerHTML = TABS.map(t =>
+    `<button class="tab" role="tab" id="tab-${t.id}" aria-selected="${t.id===active}" data-tab="${t.id}">${t.label}${t.n!=null?`<span class="n">${t.n}</span>`:""}</button>`).join("");
+}
+
+function cashflow(q){
+  let shown = 0;
+  const html = DATA.groups.map(g => {
+    const rows = DATA.categories.filter(c => c.group === g.id && match(q, c.code, c.label_zh, c.label_en, g.label_zh));
+    if (!rows.length) return "";
+    shown += rows.length;
+    return `<section class="grp"><div class="grp-h"><span class="grp-id">${g.id}</span><h2>${esc(g.label_zh)}</h2><span class="grp-note">${esc(g.label_en)} · ${g.direction==="inflow"?"流入":"流出"}</span></div>
+      <div class="tbl"><table><thead><tr><th>代码</th><th>名称</th><th>English</th><th>财富效应</th><th>发生方式</th><th>属性</th><th>关联</th></tr></thead><tbody>
+      ${rows.map(c => `<tr><td class="code">${esc(c.code)}</td><td>${esc(c.label_zh)}</td><td class="en">${esc(c.label_en)}</td><td>${chip(c.wealth_effect)}</td>
+        <td>${esc(REC[c.recurrence] || c.recurrence || "")}</td>
+        <td>${tag(FV[c.fixed_variable])}${tag(NW[c.need_want])}${c.auto_generated?tag("自动生成","auto"):""}</td>
+        <td class="dim">${esc(LINK[c.link_to] || "")}</td></tr>`).join("")}
+      </tbody></table></div></section>`;
+  }).join("");
+  return {html, shown};
+}
+
+function assets(q){
+  let shown = 0;
+  const html = DATA.assetClasses.map(k => {
+    const rows = DATA.assetTypes.filter(a => a.class === k.id && match(q, a.code, a.label_zh, a.label_en, k.label_zh));
+    if (!rows.length) return "";
+    shown += rows.length;
+    return `<section class="grp"><div class="grp-h"><span class="grp-id">${k.id}</span><h2>${esc(k.label_zh)}</h2><span class="grp-note">${esc(k.label_en)}</span></div>
+      <div class="tbl"><table><thead><tr><th>代码</th><th>名称</th><th>English</th><th>流动性</th><th>默认用途</th><th>配置桶</th><th>备注</th></tr></thead><tbody>
+      ${rows.map(a => `<tr><td class="code">${esc(a.code)}</td><td>${esc(a.label_zh)}</td><td class="en">${esc(a.label_en)}</td>
+        <td>${esc(LIQ[a.liquidity] || a.liquidity || "")}</td><td>${esc(PURPOSE[a.default_purpose] || "—")}</td><td class="dim">${esc(a.allocation || "—")}</td>
+        <td>${a.retirement_capital?tag("计入退休本金"):""}${a.offered===false?tag("仅旧数据","auto"):""}</td></tr>`).join("")}
+      </tbody></table></div></section>`;
+  }).join("");
+  return {html, shown};
+}
+
+function liabilities(q){
+  const rows = DATA.liabilityTypes.filter(l => match(q, l.code, l.label_zh, l.label_en, l.installment_category));
+  const html = rows.length ? `<section class="grp"><div class="grp-h"><h2>负债类型与月供估算默认值（D1）</h2><span class="grp-note">缺什么补什么：有余额 + 利率 + 期数算月供；缺利率用月供反推；缺期数用到期日推，再退回默认值。估算值不落库。</span></div>
+    <div class="tbl"><table><thead><tr><th>代码</th><th>名称</th><th>期限</th><th>月供类别</th><th>默认年利率</th><th>默认剩余期数</th><th>计息方式</th><th>属性</th></tr></thead><tbody>
+    ${rows.map(l => { const d = DATA.loanDefaults[l.code] || {}; return `<tr><td class="code">${esc(l.code)}</td><td>${esc(l.label_zh)}<div class="en">${esc(l.label_en)}</div></td>
+      <td>${l.term==="short"?"短期":"长期"}</td><td class="code">${esc(l.installment_category || "—")}</td>
+      <td class="num">${d.rate_pct!=null?d.rate_pct+"%":"—"}</td><td class="num">${d.months!=null?d.months+" 个月":"—"}</td><td>${esc(RATE[d.rate_type] || "—")}</td>
+      <td>${l.high_interest?tag("高息"):""}${l.secured?tag("有抵押"):""}</td></tr>`; }).join("")}
+    </tbody></table></div></section>` : "";
+  return {html, shown: rows.length};
+}
+
+function insurance(q){
+  const map = Object.entries(DATA.premium).filter(([p, c]) => match(q, p, c));
+  const html = `<section class="grp"><div class="grp-h"><h2>保费自动计入现金流（O3）</h2><span class="grp-note">所有保费都是开销（D3）。只计生效中的保单；年缴 ÷12，季缴 ×4 ÷12，半年缴 ×2 ÷12，趸缴不计入月均。</span></div>
+    <div class="tbl"><table><thead><tr><th>保单类型 policy_type</th><th>保费进入的类别</th></tr></thead><tbody>
+    ${map.map(([p, c]) => `<tr><td class="code">${esc(p)}</td><td class="code">${esc(c)}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">没有匹配项</td></tr>`}
+    </tbody></table></div></section>
+    <section class="grp"><div class="grp-h"><h2>保单规则</h2></div><div class="cards">
+      <div class="card"><h3>现金价值不计入净资产</h3><p>只在保险页显示为参考。退保或满期所得记为一次性收入 policy_surrender_maturity。</p></div>
+      <div class="card"><h3>状态</h3><p>in_force 生效 · paid_up 缴清（有保障、无保费）· lapsed 失效 · surrendered 已退保 · matured 已满期。只有生效/缴清计入保障。</p></div>
+      <div class="card"><h3>提名与受益人</h3><p>nomination_type：trust / hibah / conditional / none；受益人列表 [姓名、关系、比例]，比例合计 100%。</p></div>
+      <div class="card"><h3>MRTA / MLTA 与团保</h3><p>MRTA 通过 covers_liability_id 关联房贷，身故需求中扣除该房贷余额。团保计入保障，但另算「不含团保」缺口：离职即失效。</p></div>
+      <div class="card"><h3>统一缺口公式</h3><p>身故 = 年收入×10 + 负债 + 教育 − 流动资产 − 已有保障；TPD 同身故；重疾 = 年收入×3；医药看年限额（&lt; RM 1,000,000 提示偏低）。</p></div>
+      <div class="card"><h3>保单贷款</h3><p>记为负债 policy_loan，linked_policy_id 关联保单；不产生月供现金流。</p></div>
+    </div></section>`;
+  return {html, shown: map.length};
+}
+
+function rules(q){
+  const s = DATA.statutory;
+  const legacy = Object.entries(DATA.legacy).filter(([a, b]) => match(q, a, b));
+  const html = `<section class="grp"><div class="grp-h"><h2>自动生成的现金流</h2><span class="grp-note">计算，不存储：读取时由源头推导，改源头即更新。</span></div><div class="cards">
+      <div class="card"><h3>负债 → 月供（O2）</h3><p>按类型映射到月供类别，拆本金（转移）与利息（开销）。信用卡只把利息记为 finance_charges，最低还款计入偿债比率。手工录的同类月供自动标记「已由负债取代」。</p></div>
+      <div class="card"><h3>保单 → 保费（O3）</h3><p>按保单类型映射类别，频率换算为月额；手工录的同类保费自动取代。</p></div>
+      <div class="card"><h3>薪水 → EPF / SOCSO / EIS（D2）</h3><p>仅在客户勾选「受雇，有 EPF」时计算。雇员 EPF ${pct(s.EPF_EMPLOYEE_RATE)}（转移，不是开销）；雇主 ${pct(s.EPF_EMPLOYER_RATE_LOW)}（月薪 ≤ RM ${s.EPF_EMPLOYER_WAGE_THRESHOLD.toLocaleString()}）/ ${pct(s.EPF_EMPLOYER_RATE_HIGH)}，不经口袋、不计入收入合计；SOCSO ${pct(s.SOCSO_EMPLOYEE_RATE)} + EIS ${pct(s.EIS_EMPLOYEE_RATE)}，封顶月薪 RM ${s.SOCSO_EIS_WAGE_CEILING.toLocaleString()}。${s.STATUTORY_SENIOR_AGE} 岁起雇员 ${pct(s.EPF_EMPLOYEE_RATE_SENIOR)}、雇主 ${pct(s.EPF_EMPLOYER_RATE_SENIOR)}，SOCSO/EIS 为 0。</p></div>
+      <div class="card"><h3>常设项目与版本</h3><p>每个项目只定义一次：金额、频率、生效月。更正 = 原地改；变更 = 旧版在上月结束、新版从本月起。按月实际数另存，用于计划 vs 实际。</p></div>
+    </div></section>
+    <section class="grp"><div class="grp-h"><h2>资产质量 2×2（D6）</h2><span class="grp-note">净现金流 = 关联常设项目 − 关联负债月供（全额）；价值变动来自估值历史，自用车无历史时按每年 −10%。流动资产与退休专户不贴标签。</span></div>
+      <div class="quad" role="table" aria-label="资产质量四象限">
+        <div class="ax corner"></div><div class="ax">价值 ↑ 或持平</div><div class="ax">价值 ↓</div>
+        <div class="ax">净现金流 ≥ 0</div><div class="cell q-productive">生财资产<small>出租房、派息投资</small></div><div class="cell q-yield">收益但贬值<small>跑 Grab 的车</small></div>
+        <div class="ax">净现金流 &lt; 0</div><div class="cell q-appr">增值但吃现金<small>自住房、未出租的地</small></div><div class="cell q-cons">消耗型资产<small>自用车</small></div>
+      </div></section>
+    <section class="grp"><div class="grp-h"><h2>复检与监控（D4、D5）</h2></div><div class="cards">
+      <div class="card"><h3>季度轻复检</h3><p>客户在客户端更新余额（预填上次数字，无变化一键确认），提交后等待顾问批准才写入。</p></div>
+      <div class="card"><h3>年度全面复检</h3><p>逐项确认常设项目、保单、目标与假设，然后生成新一版 CFP 报告。</p></div>
+      <div class="card"><h3>快照与对账</h3><p>每次批准留下快照；可解释变化 = 月数 × (计划结余 + 本金 + 雇主 EPF) + 资产市场变动，余下为未解释差额。</p></div>
+      <div class="card"><h3>提醒</h3><p>未解释差额过大、紧急基金 &lt; 3 个月、偿债比率上升、复检到期或逾期、利率为估算、有待审核复检。</p></div>
+    </div></section>
+    <section class="grp"><div class="grp-h"><h2>旧类别迁移对照</h2><span class="grp-note">旧数据的类别代码自动读成新类别。</span></div>
+      <div class="tbl"><table><thead><tr><th>旧代码</th><th>新代码</th></tr></thead><tbody>
+      ${legacy.map(([a, b]) => `<tr><td class="code">${esc(a)}</td><td class="code">${esc(b)}</td></tr>`).join("") || `<tr><td colspan="2" class="empty">没有匹配项</td></tr>`}
+      </tbody></table></div></section>`;
+  return {html, shown: legacy.length};
+}
+
+const RENDER = {cashflow, assets, liabilities, insurance, rules};
+function render(){
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const {html, shown} = RENDER[active](q);
+  document.getElementById("view").innerHTML = html || `<div class="empty">没有匹配「${esc(q)}」的项目。试试代码（如 car_loan）或中文名称。</div>`;
+  document.getElementById("count").textContent = q ? `${shown} 项匹配` : "";
+}
+document.getElementById("tabs").addEventListener("click", e => {
+  const b = e.target.closest("[data-tab]"); if (!b) return;
+  active = b.dataset.tab; renderTabs(); render();
+  try { history.replaceState(null, "", "#" + active); } catch (err) {}
+});
+document.getElementById("q").addEventListener("input", render);
+renderTabs(); render();
+</script>

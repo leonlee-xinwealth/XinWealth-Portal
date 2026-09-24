@@ -10,6 +10,7 @@ import { estimateLoan } from '../../../supabase/functions/_shared/finance/loans'
 import { type StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
 import { assessAssets, type AssetAssessment, type Quadrant } from '../../../supabase/functions/_shared/finance/assetQuality';
 import { QUADRANT_GRID, QUADRANT_STYLES, quadrantExplanation, quadrantLabel } from '../assets/quadrant';
+import { defaultLinkedAssetId } from '../assets/linkAsset';
 import { AlertTriangle } from 'lucide-react';
 
 // Exported so pdf/cfpReport/labels/__tests__/enums.test.ts can assert the
@@ -48,7 +49,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<'asset'|'liability'|null>(null);
   const [aForm, setAForm] = useState({ asset_type:'', name:'', institution:'', current_value:'', cost_value:'', ownership_type:'sole', purpose:'', ownership_pct:'100' });
-  const [lForm, setLForm] = useState({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'', linked_policy_id:'' });
+  const [lForm, setLForm] = useState({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'', linked_policy_id:'', linked_asset_id:'' });
   const [saving, setSaving] = useState(false);
 
   const [editing, setEditing] = useState<{ table: 'assets'|'liabilities'; id: string } | null>(null);
@@ -89,6 +90,35 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
     () => new Map(assessment.assets.map(a => [a.asset_id, a] as const)),
     [assessment],
   );
+  // 关联资产 (linked_asset_id FK) — used to preselect a default when adding a
+  // liability and to show the "↔ asset name" chip in the liability list.
+  const assetById = useMemo(
+    () => new Map(assets.map(a => [a.id, a] as const)),
+    [assets],
+  );
+
+  // Prod incident fix (assessAsset unlinked): an un-linked liability is very
+  // often exactly why a personal-use asset shows up in 「待关联」 below —
+  // linkAsset.ts already knows which liability types finance which asset
+  // types, so surface a one-click 「关联」 suggestion instead of making the
+  // advisor go find and edit the liability manually.
+  const linkSuggestions = useMemo(() => {
+    return liabilities
+      .filter(l => !l.linked_asset_id)
+      .map(l => {
+        const assetId = defaultLinkedAssetId(l.liability_type, assets);
+        if (!assetId) return null;
+        const asset = assetById.get(assetId);
+        if (!asset) return null;
+        return { liabilityId: l.id as string, liabilityName: l.name as string, assetId, assetName: asset.name as string };
+      })
+      .filter((s): s is { liabilityId: string; liabilityName: string; assetId: string; assetName: string } => s != null);
+  }, [liabilities, assets, assetById]);
+
+  async function linkLiabilityToAsset(liabilityId: string, assetId: string) {
+    await supabase.from('liabilities').update({ linked_asset_id: assetId }).eq('id', liabilityId);
+    load();
+  }
 
   async function addAsset() {
     if (!aForm.name || !aForm.current_value) return;
@@ -107,8 +137,8 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   async function addLiability() {
     if (!lForm.name || !lForm.outstanding_balance) return;
     setSaving(true);
-    await supabase.from('liabilities').insert({ client_id: clientId, liability_type: lForm.liability_type||'other', name: lForm.name, lender: lForm.lender||null, outstanding_balance: parseFloat(lForm.outstanding_balance), monthly_payment: lForm.monthly_payment?parseFloat(lForm.monthly_payment):null, interest_rate: lForm.interest_rate?parseFloat(lForm.interest_rate):null, start_date: lForm.start_date||null, end_date: lForm.end_date||null, remaining_months: lForm.remaining_months?parseInt(lForm.remaining_months,10):null, rate_type: lForm.rate_type||null, linked_policy_id: lForm.liability_type==='policy_loan' ? (lForm.linked_policy_id||null) : null });
-    setSaving(false); setModal(null); setLForm({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'', linked_policy_id:'' }); load();
+    await supabase.from('liabilities').insert({ client_id: clientId, liability_type: lForm.liability_type||'other', name: lForm.name, lender: lForm.lender||null, outstanding_balance: parseFloat(lForm.outstanding_balance), monthly_payment: lForm.monthly_payment?parseFloat(lForm.monthly_payment):null, interest_rate: lForm.interest_rate?parseFloat(lForm.interest_rate):null, start_date: lForm.start_date||null, end_date: lForm.end_date||null, remaining_months: lForm.remaining_months?parseInt(lForm.remaining_months,10):null, rate_type: lForm.rate_type||null, linked_policy_id: lForm.liability_type==='policy_loan' ? (lForm.linked_policy_id||null) : null, linked_asset_id: lForm.linked_asset_id||null });
+    setSaving(false); setModal(null); setLForm({ liability_type:'', name:'', lender:'', outstanding_balance:'', monthly_payment:'', interest_rate:'', start_date:'', end_date:'', remaining_months:'', rate_type:'', linked_policy_id:'', linked_asset_id:'' }); load();
   }
   async function del(table: string, id: string) {
     if (!confirm(t('Delete?','确定删除？'))) return;
@@ -121,7 +151,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
   }
   function startEditLiability(l: any) {
     setEditing({ table: 'liabilities', id: l.id });
-    setEditForm({ liability_type: l.liability_type, name: l.name, lender: l.lender||'', outstanding_balance: String(l.outstanding_balance), monthly_payment: l.monthly_payment!=null?String(l.monthly_payment):'', interest_rate: l.interest_rate!=null?String(l.interest_rate):'', start_date: l.start_date||'', end_date: l.end_date||'', remaining_months: l.remaining_months!=null?String(l.remaining_months):'', rate_type: l.rate_type||'', linked_policy_id: l.linked_policy_id||'' });
+    setEditForm({ liability_type: l.liability_type, name: l.name, lender: l.lender||'', outstanding_balance: String(l.outstanding_balance), monthly_payment: l.monthly_payment!=null?String(l.monthly_payment):'', interest_rate: l.interest_rate!=null?String(l.interest_rate):'', start_date: l.start_date||'', end_date: l.end_date||'', remaining_months: l.remaining_months!=null?String(l.remaining_months):'', rate_type: l.rate_type||'', linked_policy_id: l.linked_policy_id||'', linked_asset_id: l.linked_asset_id||'' });
   }
   function cancelEdit() {
     setEditing(null); setEditForm({});
@@ -141,7 +171,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
           ownership_pct: parseFloat(editForm.ownership_pct) || 100,
           needs_review: false, review_reason: null,
         }
-      : { liability_type: editForm.liability_type||'other', name: editForm.name, lender: editForm.lender||null, outstanding_balance: parseFloat(editForm.outstanding_balance), monthly_payment: editForm.monthly_payment?parseFloat(editForm.monthly_payment):null, interest_rate: editForm.interest_rate?parseFloat(editForm.interest_rate):null, start_date: editForm.start_date||null, end_date: editForm.end_date||null, remaining_months: editForm.remaining_months?parseInt(editForm.remaining_months,10):null, rate_type: editForm.rate_type||null, linked_policy_id: editForm.liability_type==='policy_loan' ? (editForm.linked_policy_id||null) : null };
+      : { liability_type: editForm.liability_type||'other', name: editForm.name, lender: editForm.lender||null, outstanding_balance: parseFloat(editForm.outstanding_balance), monthly_payment: editForm.monthly_payment?parseFloat(editForm.monthly_payment):null, interest_rate: editForm.interest_rate?parseFloat(editForm.interest_rate):null, start_date: editForm.start_date||null, end_date: editForm.end_date||null, remaining_months: editForm.remaining_months?parseInt(editForm.remaining_months,10):null, rate_type: editForm.rate_type||null, linked_policy_id: editForm.liability_type==='policy_loan' ? (editForm.linked_policy_id||null) : null, linked_asset_id: editForm.linked_asset_id||null };
     await supabase.from(editing.table).update(payload).eq('id', editing.id);
     setSavingEdit(false); setEditing(null);
     setOk(true); setTimeout(() => setOk(false), 3000);
@@ -166,7 +196,14 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
         ))}
       </div>
 
-      <AssetQualityPanel assessment={assessment} assets={assets} t={t} lang={lang} />
+      <AssetQualityPanel
+        assessment={assessment}
+        assets={assets}
+        suggestions={linkSuggestions}
+        onLink={linkLiabilityToAsset}
+        t={t}
+        lang={lang}
+      />
 
       <div className="grid grid-cols-2 gap-4">
         <NwTable title={t('Assets','资产')} color="text-emerald-600" addLabel={t('Add Asset','添加资产')} onAdd={() => setModal('asset')}>
@@ -197,13 +234,17 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
         <NwTable title={t('Liabilities','负债')} color="text-red-500" addLabel={t('Add Liability','添加负债')} onAdd={() => setModal('liability')}>
           {liabilities.map(l => {
             if (editing?.table==='liabilities' && editing.id===l.id) {
-              return <LiabilityEditRow key={l.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} policies={policies} />;
+              return <LiabilityEditRow key={l.id} form={editForm} setForm={setEditForm} onSave={saveEdit} onCancel={cancelEdit} saving={savingEdit} t={t} lang={lang} policies={policies} assets={assets} />;
             }
             // The estimated monthly payment (D1 estimator, spec 2026-09-24-cfp-p2a
             // decision 2) is what actually drives the client's cash flow and DSR —
             // shown here read-only so an advisor can sanity-check it against what
             // the client reported without having to open the Cashflow tab.
             const est = estimateLoan(l as any);
+            // linked_asset_id (FK -> assets) — the asset this liability finances,
+            // so the P3 2×2 (_shared/finance/assetQuality.ts) can subtract this
+            // installment from that asset's own net cash flow.
+            const linkedAsset = l.linked_asset_id ? assetById.get(l.linked_asset_id) : null;
             return (
               <Item
                 key={l.id}
@@ -213,12 +254,19 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
                 color="text-red-500"
                 onEdit={() => startEditLiability(l)}
                 onDel={() => del('liabilities',l.id)}
-                extra={est.monthly_payment > 0 ? (
+                extra={(linkedAsset || est.monthly_payment > 0) ? (
                   <div className="mt-0.5">
-                    <span className="text-[11px] text-slate-400 flex items-center gap-1 flex-wrap">
-                      {t(`RM ${fmt(est.monthly_payment)}/mo`, `RM ${fmt(est.monthly_payment)}/月`)}
-                      {est.estimated.length > 0 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{t('Estimated','估算')}</span>}
-                    </span>
+                    {linkedAsset && (
+                      <span className="inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 mb-0.5">
+                        ↔ {linkedAsset.name}
+                      </span>
+                    )}
+                    {est.monthly_payment > 0 && (
+                      <span className="text-[11px] text-slate-400 flex items-center gap-1 flex-wrap">
+                        {t(`RM ${fmt(est.monthly_payment)}/mo`, `RM ${fmt(est.monthly_payment)}/月`)}
+                        {est.estimated.length > 0 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600">{t('Estimated','估算')}</span>}
+                      </span>
+                    )}
                     {est.warnings.map((w, i) => (
                       <div key={i} className="text-[11px] text-amber-600 flex items-center gap-1 mt-0.5">
                         <AlertTriangle size={11} className="shrink-0" />{w}
@@ -248,7 +296,7 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
       )}
       {modal === 'liability' && (
         <Modal title={t('Add Liability','添加负债')} onClose={() => setModal(null)}>
-          <Fr label={t('Liability Type','负债类型')}><LiabilityTypeSel value={lForm.liability_type} onChange={v => setLForm(p => ({...p,liability_type:v}))} lang={lang} allowEmpty /></Fr>
+          <Fr label={t('Liability Type','负债类型')}><LiabilityTypeSel value={lForm.liability_type} onChange={v => setLForm(p => ({...p, liability_type:v, linked_asset_id: p.linked_asset_id || defaultLinkedAssetId(v, assets) || ''}))} lang={lang} allowEmpty /></Fr>
           <Fr label={`${t('Name','名称')} *`}><Inp value={lForm.name} onChange={v => setLForm(p => ({...p,name:v}))} placeholder="e.g. Maybank Home Loan" /></Fr>
           <Fr label={t('Lender','贷款机构')}><Inp value={lForm.lender} onChange={v => setLForm(p => ({...p,lender:v}))} /></Fr>
           <Fr label={`${t('Outstanding Balance','未偿还余额')} (RM) *`}><Inp type="number" value={lForm.outstanding_balance} onChange={v => setLForm(p => ({...p,outstanding_balance:v}))} placeholder="0.00" /></Fr>
@@ -262,6 +310,9 @@ export default function NetworthTab({ clientId }: { clientId: string }) {
             <Fr label={t('Start Date','开始日期')}><Inp type="date" value={lForm.start_date} onChange={v => setLForm(p => ({...p,start_date:v}))} /></Fr>
             <Fr label={t('End Date','到期日期')}><Inp type="date" value={lForm.end_date} onChange={v => setLForm(p => ({...p,end_date:v}))} /></Fr>
           </div>
+          <Fr label={t('Linked Asset','关联资产')}>
+            <AssetLinkSel value={lForm.linked_asset_id} onChange={v => setLForm(p => ({...p,linked_asset_id:v}))} assets={assets} lang={lang} t={t} />
+          </Fr>
           {lForm.liability_type === 'policy_loan' && (
             <Fr label={t('Linked Policy','关联保单')}>
               <PolicyLinkSel value={lForm.linked_policy_id} onChange={v => setLForm(p => ({...p,linked_policy_id:v}))} policies={policies} t={t} />
@@ -354,52 +405,122 @@ const AssetQualityExtra = ({ row, t, lang }: { row: AssetAssessment | undefined;
 // P3 决策 3 — 「资产质量」2×2 panel: rows = net monthly cashflow (≥0 top,
 // <0 bottom), columns = value change (≥0 left, <0 right), each cell listing
 // the class C/D assets that landed there plus the quadrant's totals.
-const AssetQualityPanel = ({ assessment, assets, t, lang }: {
-  assessment: ReturnType<typeof assessAssets>; assets: any[]; t: (en: string, zh: string) => string; lang: 'zh' | 'en';
+//
+// Prod incident fix: a class-D (自用) asset with nothing linked used to
+// silently default into "productive"/"yielding_depreciating" on a false 0
+// net cash flow — a house with an unlinked RM 3,298/mo mortgage read as 生财
+// 资产. assessAsset now withholds the quadrant for that case (quadrant: null,
+// unlinked: true) instead, so this panel surfaces it as its own 「待关联」
+// group rather than letting it disappear, plus one-click 「建议关联」
+// suggestions (from linkAsset.ts's defaultLinkedAssetId) for the liability
+// that's probably the missing link.
+const AssetQualityPanel = ({ assessment, assets, suggestions, onLink, t, lang }: {
+  assessment: ReturnType<typeof assessAssets>;
+  assets: any[];
+  suggestions: Array<{ liabilityId: string; liabilityName: string; assetId: string; assetName: string }>;
+  onLink: (liabilityId: string, assetId: string) => void;
+  t: (en: string, zh: string) => string;
+  lang: 'zh' | 'en';
 }) => {
-  const hasLabeled = assessment.assets.some(a => a.quadrant != null);
-  if (!hasLabeled) return null;
+  const hasLabeled = assessment.assets.some(a => a.quadrant != null || a.unlinked);
+  if (!hasLabeled && suggestions.length === 0) return null;
   const assetById = new Map(assets.map(a => [a.id, a]));
+  // Class-D assets with quadrant: null + unlinked: true — the 「待关联」
+  // group. (A class-C unlinked asset keeps its computed quadrant and still
+  // shows in the normal grid above, just flagged via its own notes.)
+  const unlinkedRows = assessment.assets.filter(a => a.unlinked && a.quadrant == null);
   return (
     <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4 mb-6">
       <div className="text-sm font-semibold text-xin-blue mb-3">{t('Asset Quality','资产质量')}</div>
-      <div className="grid grid-cols-2 gap-3">
-        {QUADRANT_GRID.map((q: Quadrant) => {
-          const rows = assessment.assets.filter(a => a.quadrant === q);
-          const total = assessment.by_quadrant[q];
-          const style = QUADRANT_STYLES[q];
-          return (
-            <div key={q} className={`rounded-xl p-3 ${style.bg}`}>
-              <div className={`flex items-center justify-between mb-1`}>
-                <span className={`text-xs font-bold ${style.text}`}>{quadrantLabel(q, lang)}</span>
-                <span className={`text-xs font-bold ${style.text}`}>{total.count > 0 ? `RM ${fmt(total.value)}` : '—'}</span>
+      {hasLabeled && (
+        <div className="grid grid-cols-2 gap-3">
+          {QUADRANT_GRID.map((q: Quadrant) => {
+            const rows = assessment.assets.filter(a => a.quadrant === q);
+            const total = assessment.by_quadrant[q];
+            const style = QUADRANT_STYLES[q];
+            return (
+              <div key={q} className={`rounded-xl p-3 ${style.bg}`}>
+                <div className={`flex items-center justify-between mb-1`}>
+                  <span className={`text-xs font-bold ${style.text}`}>{quadrantLabel(q, lang)}</span>
+                  <span className={`text-xs font-bold ${style.text}`}>{total.count > 0 ? `RM ${fmt(total.value)}` : '—'}</span>
+                </div>
+                <div className="text-[11px] text-slate-500 mb-2">{quadrantExplanation(q, lang)}</div>
+                {rows.length === 0 ? (
+                  <div className="text-[11px] text-slate-300">—</div>
+                ) : (
+                  <div className="space-y-0.5">
+                    {rows.map(r => {
+                      const a = assetById.get(r.asset_id);
+                      if (!a) return null;
+                      return (
+                        <div key={r.asset_id} className="flex items-center justify-between text-[11px] text-slate-600">
+                          <span className="truncate">{a.name}</span>
+                          <span className="font-semibold shrink-0 ml-2">RM {fmt(a.current_value)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {total.count > 0 && (
+                  <div className={`mt-2 pt-2 border-t border-white/60 text-[11px] font-semibold ${style.text}`}>
+                    {t('Net monthly cashflow','月净现金流')}: {total.net_cash_flow_monthly >= 0 ? '+' : '−'}RM {fmt(Math.abs(total.net_cash_flow_monthly))}
+                  </div>
+                )}
               </div>
-              <div className="text-[11px] text-slate-500 mb-2">{quadrantExplanation(q, lang)}</div>
-              {rows.length === 0 ? (
-                <div className="text-[11px] text-slate-300">—</div>
-              ) : (
-                <div className="space-y-0.5">
-                  {rows.map(r => {
-                    const a = assetById.get(r.asset_id);
-                    if (!a) return null;
-                    return (
-                      <div key={r.asset_id} className="flex items-center justify-between text-[11px] text-slate-600">
-                        <span className="truncate">{a.name}</span>
-                        <span className="font-semibold shrink-0 ml-2">RM {fmt(a.current_value)}</span>
-                      </div>
-                    );
-                  })}
+            );
+          })}
+        </div>
+      )}
+
+      {unlinkedRows.length > 0 && (
+        <div className={`rounded-xl p-3 bg-slate-50 ${hasLabeled ? 'mt-3' : ''}`}>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs font-bold text-slate-500">{t('Pending link','待关联')}</span>
+            <span className="text-xs font-bold text-slate-500">
+              RM {fmt(unlinkedRows.reduce((s, r) => s + (assetById.get(r.asset_id)?.current_value || 0), 0))}
+            </span>
+          </div>
+          <div className="text-[11px] text-slate-500 mb-2">
+            {t(
+              'Personal-use assets usually carry a holding cost (loan, insurance, upkeep, tax) — link it first.',
+              '自用资产通常有持有成本（贷款、保险、保养、税费），请先关联相关贷款或收支。',
+            )}
+          </div>
+          <div className="space-y-1.5">
+            {unlinkedRows.map(r => {
+              const a = assetById.get(r.asset_id);
+              if (!a) return null;
+              return (
+                <div key={r.asset_id} className="text-[11px] text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <span className="truncate">{a.name}</span>
+                    <span className="font-semibold shrink-0 ml-2">RM {fmt(a.current_value)}</span>
+                  </div>
                 </div>
-              )}
-              {total.count > 0 && (
-                <div className={`mt-2 pt-2 border-t border-white/60 text-[11px] font-semibold ${style.text}`}>
-                  {t('Net monthly cashflow','月净现金流')}: {total.net_cash_flow_monthly >= 0 ? '+' : '−'}RM {fmt(Math.abs(total.net_cash_flow_monthly))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {suggestions.length > 0 && (
+        <div className={`rounded-xl p-3 bg-blue-50/60 ${hasLabeled || unlinkedRows.length > 0 ? 'mt-3' : ''}`}>
+          <div className="text-xs font-bold text-xin-blue mb-2">{t('Suggested links','建议关联')}</div>
+          <div className="space-y-1.5">
+            {suggestions.map(s => (
+              <div key={s.liabilityId} className="flex items-center justify-between gap-2 text-[11px] text-slate-600">
+                <span className="truncate">{s.liabilityName} → {s.assetName}</span>
+                <button
+                  onClick={() => onLink(s.liabilityId, s.assetId)}
+                  className="shrink-0 text-[10px] font-semibold px-2 py-1 rounded-lg bg-xin-blue text-white hover:opacity-90"
+                >
+                  {t('Link','关联')}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -422,7 +543,7 @@ const AssetEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang }: any)
     </div>
   );
 };
-const LiabilityEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang, policies }: any) => {
+const LiabilityEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang, policies, assets }: any) => {
   const set = (k: string, v: any) => setForm((p: any) => ({ ...p, [k]: v }));
   return (
     <div className="px-5 py-3 border-b border-slate-50 last:border-0 bg-slate-50/60">
@@ -440,6 +561,9 @@ const LiabilityEditRow = ({ form, setForm, onSave, onCancel, saving, t, lang, po
         <Fr label={t('Start Date','开始日期')}><Inp type="date" value={form.start_date} onChange={v => set('start_date',v)} /></Fr>
         <Fr label={t('End Date','到期日期')}><Inp type="date" value={form.end_date} onChange={v => set('end_date',v)} /></Fr>
       </div>
+      <Fr label={t('Linked Asset','关联资产')}>
+        <AssetLinkSel value={form.linked_asset_id} onChange={v => set('linked_asset_id',v)} assets={assets} lang={lang} t={t} />
+      </Fr>
       {form.liability_type === 'policy_loan' && (
         <Fr label={t('Linked Policy','关联保单')}>
           <PolicyLinkSel value={form.linked_policy_id} onChange={v => set('linked_policy_id',v)} policies={policies} t={t} />
@@ -498,6 +622,19 @@ const PolicyLinkSel = ({ value, onChange, policies, t }: { value: string; onChan
     <option value="">{t('None','—')}</option>
     {(policies || []).map((p: any) => (
       <option key={p.id} value={p.id}>{(p.plan_name || p.policy_type) + ' · ' + (p.provider || '') + (p.policy_number ? ` #${p.policy_number}` : '')}</option>
+    ))}
+  </select>
+);
+
+// 关联资产 — a liability (typically car_loan/mortgage) can link to the asset
+// it finances (linked_asset_id FK -> assets) so the P3 2×2
+// (_shared/finance/assetQuality.ts) subtracts this liability's installment
+// from that asset's own net cash flow instead of leaving it uncounted.
+const AssetLinkSel = ({ value, onChange, assets, lang, t }: { value: string; onChange: (v: string) => void; assets: any[]; lang: 'zh' | 'en'; t: (en: string, zh: string) => string }) => (
+  <select value={value} onChange={e => onChange(e.target.value)} className={SEL_CLS}>
+    <option value="">{t('Not linked','不关联')}</option>
+    {(assets || []).map((a: any) => (
+      <option key={a.id} value={a.id}>{a.name + ' · ' + assetTypeLabel(a.asset_type, lang)}</option>
     ))}
   </select>
 );

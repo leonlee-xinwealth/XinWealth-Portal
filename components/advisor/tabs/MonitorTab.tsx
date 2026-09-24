@@ -14,7 +14,7 @@ import {
 import { defaultBasis, type PeriodRow } from '../../../supabase/functions/_shared/cashflow/periods';
 import type { StandingItem } from '../../../supabase/functions/_shared/cashflow/items';
 import {
-  computeAlerts, type Alert, type AlertLiability, type AlertReview, type AlertSeverity, type AlertSnapshot,
+  computeAlerts, type Alert, type AlertLiability, type AlertPolicy, type AlertReview, type AlertSeverity, type AlertSnapshot,
 } from '../../../supabase/functions/_shared/finance/alerts';
 
 // CFP P4 Task B — 客户详情「监控」: actual net worth (health_snapshots) vs a
@@ -62,7 +62,7 @@ export default function MonitorTab({ clientId }: { clientId: string }) {
       supabase.from('liabilities').select('id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, remaining_months, rate_type, original_principal, end_date').eq('client_id', clientId),
       supabase.from('cashflow_entries').select('amount, frequency, direction, period_month, category').eq('client_id', clientId),
       supabase.from('cashflow_items').select('*').eq('client_id', clientId),
-      supabase.from('insurance_policies').select('id, policy_type, plan_name, provider, premium, premium_frequency, sum_assured, end_date').eq('client_id', clientId),
+      supabase.from('insurance_policies').select('id, policy_type, plan_name, provider, premium, premium_frequency, status, sum_assured, end_date').eq('client_id', clientId),
       supabase.from('clients').select('has_epf, date_of_birth').eq('id', clientId).maybeSingle(),
     ]);
     setSnapshots(snaps || []);
@@ -153,15 +153,20 @@ export default function MonitorTab({ clientId }: { clientId: string }) {
       interest_rate: l.interest_rate, monthly_payment: l.monthly_payment, remaining_months: l.remaining_months,
       rate_type: l.rate_type, original_principal: l.original_principal, end_date: l.end_date,
     }));
+    const alertPolicies: AlertPolicy[] = (policies || []).map((p: any) => ({
+      policy_type: p.policy_type, premium: p.premium, premium_frequency: p.premium_frequency,
+      status: p.status, provider: p.provider, plan_name: p.plan_name,
+    }));
     return computeAlerts({
       client_id: clientId,
       snapshots: history,
       latestSnapshot,
       reviews: alertReviews,
       liabilities: alertLiabilities,
+      policies: alertPolicies,
       asOf: new Date(),
     });
-  }, [snapshots, reviews, liabilities, clientId]);
+  }, [snapshots, reviews, liabilities, policies, clientId]);
 
   if (loading) return <Loader />;
 

@@ -4,7 +4,7 @@ import { supabase } from '../../../lib/supabaseClient';
 import { useLanguage } from '../../../context/LanguageContext';
 import { getCaseTemplate } from '../cases/caseTemplates';
 import { Users, UserCheck, Target, AlertCircle, Calendar, Gift, ChevronRight } from 'lucide-react';
-import { computeAlerts, type Alert } from '../../../supabase/functions/_shared/finance/alerts';
+import { computeAlerts, type Alert, type AlertPolicy } from '../../../supabase/functions/_shared/finance/alerts';
 
 const ALERT_SEVERITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
@@ -84,13 +84,16 @@ export default function Dashboard() {
         // severity. `reviews` may not exist in every environment yet (P4
         // migration) — degrade to "no review-cadence alerts" rather than
         // failing the whole dashboard.
-        const [{ data: allSnaps }, { data: allLiabs }] = await Promise.all([
+        const [{ data: allSnaps }, { data: allLiabs }, { data: allPolicies }] = await Promise.all([
           supabase.from('health_snapshots')
             .select('client_id, snapshot_date, net_worth, debt_service_ratio, basic_liquidity_ratio, unexplained_gap')
             .in('client_id', clientIds)
             .order('snapshot_date'),
           supabase.from('liabilities')
             .select('id, client_id, name, liability_type, outstanding_balance, interest_rate, monthly_payment, remaining_months, rate_type, original_principal, end_date')
+            .in('client_id', clientIds),
+          supabase.from('insurance_policies')
+            .select('client_id, policy_type, premium, premium_frequency, status, provider, plan_name')
             .in('client_id', clientIds),
         ]);
         let allReviews: any[] = [];
@@ -122,6 +125,15 @@ export default function Dashboard() {
           arr.push(l);
           liabsByClient.set(l.client_id, arr);
         });
+        const policiesByClient = new Map<string, AlertPolicy[]>();
+        (allPolicies || []).forEach((p: any) => {
+          const arr = policiesByClient.get(p.client_id) || [];
+          arr.push({
+            policy_type: p.policy_type, premium: p.premium, premium_frequency: p.premium_frequency,
+            status: p.status, provider: p.provider, plan_name: p.plan_name,
+          });
+          policiesByClient.set(p.client_id, arr);
+        });
 
         const mergedAlerts: Alert[] = [];
         for (const cid of clientIds) {
@@ -137,6 +149,7 @@ export default function Dashboard() {
               kind: r.kind, status: r.status, period_end: r.period_end, approved_at: r.approved_at,
             })),
             liabilities: liabsByClient.get(cid) || [],
+            policies: policiesByClient.get(cid) || [],
             asOf: new Date(),
           }));
         }

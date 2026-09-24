@@ -304,18 +304,27 @@ export function reviseItem(
 ): ReviseResult {
   const fm = monthStart(fromMonth);
 
-  if (item.frequency === "one_off") {
+  if (item.frequency === "one_off" || fm <= item.effective_from) {
     const update: Partial<StandingItem> = { ...changes };
-    if (update.effective_from != null) {
-      const ef = monthStart(update.effective_from);
-      update.effective_from = ef;
-      update.effective_to = ef;
+    // resultingFrequency === "one_off" whenever this correction explicitly
+    // asks for one_off, or leaves an already-one_off item's frequency
+    // untouched — the two are indistinguishable in the resulting row, so
+    // both must keep the DB's effective_to === effective_from invariant.
+    const resultingFrequency = changes.frequency ?? item.frequency;
+    if (resultingFrequency === "one_off") {
+      const resultingEffectiveFrom = update.effective_from != null
+        ? monthStart(update.effective_from)
+        : item.effective_from;
+      update.effective_from = resultingEffectiveFrom;
+      update.effective_to = resultingEffectiveFrom;
+    } else if (item.frequency === "one_off") {
+      // Moving FROM one_off to a recurring frequency: the old
+      // effective_to === effective_from pin no longer applies — reopen it,
+      // rather than leaving a now-recurring item stuck ending the same
+      // month it starts.
+      update.effective_to = null;
     }
     return { mode: "correct", update };
-  }
-
-  if (fm <= item.effective_from) {
-    return { mode: "correct", update: { ...changes } };
   }
 
   const { id: _oldId, ...rest } = item;
