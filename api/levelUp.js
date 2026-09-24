@@ -4,6 +4,7 @@ import {
 } from './_lib/taxonomy.mjs';
 import { isMissingTableError } from './_lib/degrade.js';
 import { quarterlyPeriodEnd } from './_lib/reviewDates.js';
+import { dedupeById, parseStrictAmount } from './_lib/reviewSubmission.js';
 
 const parseAmount = (val) => {
   if (val == null || val === '') return 0;
@@ -249,8 +250,8 @@ async function handleReviewPrefill(res, clientId) {
  *  client, so the advisor's before/after comparison (ReviewTab.tsx) can't be
  *  spoofed by a stale or tampered request body. */
 async function handleSubmitReview(res, clientId, body) {
-  const submittedAssets = Array.isArray(body.assets) ? body.assets : [];
-  const submittedLiabilities = Array.isArray(body.liabilities) ? body.liabilities : [];
+  const submittedAssetsRaw = Array.isArray(body.assets) ? body.assets : [];
+  const submittedLiabilitiesRaw = Array.isArray(body.liabilities) ? body.liabilities : [];
   const notes = typeof body.notes === 'string' && body.notes.trim() ? body.notes.trim() : null;
 
   const [{ data: assets, error: assetsErr }, { data: liabilities, error: liabilitiesErr }] = await Promise.all([
@@ -260,42 +261,80 @@ async function handleSubmitReview(res, clientId, body) {
   if (assetsErr) return res.status(500).json({ error: 'Failed to fetch assets', details: assetsErr.message });
   if (liabilitiesErr) return res.status(500).json({ error: 'Failed to fetch liabilities', details: liabilitiesErr.message });
 
+  // A client can own at most one entry per asset/liability — cap the
+  // submitted arrays to that count up front so a bloated/malicious payload
+  // is rejected cheaply, before any de-dup/ownership work is done on it.
+  if (submittedAssetsRaw.length > (assets || []).length) {
+    return res.status(400).json({ error: 'too_many_assets' });
+  }
+  if (submittedLiabilitiesRaw.length > (liabilities || []).length) {
+    return res.status(400).json({ error: 'too_many_liabilities' });
+  }
+
+  // A repeated asset_id/liability_id in the submitted payload would later
+  // make the advisor's approval upsert fail with "ON CONFLICT DO UPDATE
+  // command cannot affect row a second time" — forever, on every retry, once
+  // it's stuck in reviews.payload. De-duplicate here, last entry wins.
+  // approveReview.ts applies the same rule again as defence in depth before
+  // writing.
+  const submittedAssets = dedupeById(submittedAssetsRaw, 'asset_id');
+  const submittedLiabilities = dedupeById(submittedLiabilitiesRaw, 'liability_id');
+
   const assetById = new Map((assets || []).map((a) => [a.id, a]));
   const liabilityById = new Map((liabilities || []).map((l) => [l.id, l]));
 
   // Only entries for assets/liabilities that actually belong to this client
   // make it into the payload — an id that doesn't resolve is silently
   // dropped rather than trusted from the request body.
-  const payloadAssets = submittedAssets
-    .filter((a) => a && assetById.has(a.asset_id))
-    .map((a) => {
-      const current = assetById.get(a.asset_id);
-      return {
-        asset_id: a.asset_id,
-        prev_value: current.current_value != null ? Number(current.current_value) : null,
-        value: parseAmount(a.value),
-      };
-    });
+  const ownedAssets = submittedAssets.filter((a) => a && assetById.has(a.asset_id));
+  const ownedLiabilities = submittedLiabilities.filter((l) => l && liabilityById.has(l.liability_id));
 
-  const payloadLiabilities = submittedLiabilities
-    .filter((l) => l && liabilityById.has(l.liability_id))
-    .map((l) => {
-      const current = liabilityById.get(l.liability_id);
-      const interestRate = l.interest_rate != null && l.interest_rate !== ''
-        ? parseAmount(l.interest_rate)
-        : (current.interest_rate != null ? Number(current.interest_rate) : null);
-      const monthlyPayment = l.monthly_payment != null && l.monthly_payment !== ''
-        ? parseAmount(l.monthly_payment)
-        : (current.monthly_payment != null ? Number(current.monthly_payment) : null);
-      return {
-        liability_id: l.liability_id,
-        prev_balance: current.outstanding_balance != null ? Number(current.outstanding_balance) : null,
-        balance: parseAmount(l.balance),
-        prev_rate: current.interest_rate != null ? Number(current.interest_rate) : null,
-        interest_rate: interestRate,
-        monthly_payment: monthlyPayment,
-      };
-    });
+  // Reject (rather than silently coerce to 0, or accept a nonsensical
+  // negative amount) a submitted value that doesn't parse to a finite,
+  // non-negative number.
+  for (const a of ownedAssets) {
+    if (!parseStrictAmount(a.value).ok) {
+      return res.status(400).json({ error: 'invalid_asset_value', asset_id: a.asset_id });
+    }
+  }
+  for (const l of ownedLiabilities) {
+    if (!parseStrictAmount(l.balance).ok) {
+      return res.status(400).json({ error: 'invalid_liability_balance', liability_id: l.liability_id });
+    }
+    if (l.interest_rate != null && l.interest_rate !== '' && !parseStrictAmount(l.interest_rate).ok) {
+      return res.status(400).json({ error: 'invalid_interest_rate', liability_id: l.liability_id });
+    }
+    if (l.monthly_payment != null && l.monthly_payment !== '' && !parseStrictAmount(l.monthly_payment).ok) {
+      return res.status(400).json({ error: 'invalid_monthly_payment', liability_id: l.liability_id });
+    }
+  }
+
+  const payloadAssets = ownedAssets.map((a) => {
+    const current = assetById.get(a.asset_id);
+    return {
+      asset_id: a.asset_id,
+      prev_value: current.current_value != null ? Number(current.current_value) : null,
+      value: parseAmount(a.value),
+    };
+  });
+
+  const payloadLiabilities = ownedLiabilities.map((l) => {
+    const current = liabilityById.get(l.liability_id);
+    const interestRate = l.interest_rate != null && l.interest_rate !== ''
+      ? parseAmount(l.interest_rate)
+      : (current.interest_rate != null ? Number(current.interest_rate) : null);
+    const monthlyPayment = l.monthly_payment != null && l.monthly_payment !== ''
+      ? parseAmount(l.monthly_payment)
+      : (current.monthly_payment != null ? Number(current.monthly_payment) : null);
+    return {
+      liability_id: l.liability_id,
+      prev_balance: current.outstanding_balance != null ? Number(current.outstanding_balance) : null,
+      balance: parseAmount(l.balance),
+      prev_rate: current.interest_rate != null ? Number(current.interest_rate) : null,
+      interest_rate: interestRate,
+      monthly_payment: monthlyPayment,
+    };
+  });
 
   // A client can't submit a second quarterly review while one is still
   // awaiting approval — mirrors the "if a submitted review exists show that

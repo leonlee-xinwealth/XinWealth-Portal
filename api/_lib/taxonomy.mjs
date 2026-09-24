@@ -1018,17 +1018,17 @@ function annualizeItemsByCategory(items, asOf, opts = {}) {
 }
 function reviseItem(item, changes, fromMonth) {
   const fm = monthStart(fromMonth);
-  if (item.frequency === "one_off") {
+  if (item.frequency === "one_off" || fm <= item.effective_from) {
     const update = { ...changes };
-    if (update.effective_from != null) {
-      const ef = monthStart(update.effective_from);
-      update.effective_from = ef;
-      update.effective_to = ef;
+    const resultingFrequency = changes.frequency ?? item.frequency;
+    if (resultingFrequency === "one_off") {
+      const resultingEffectiveFrom = update.effective_from != null ? monthStart(update.effective_from) : item.effective_from;
+      update.effective_from = resultingEffectiveFrom;
+      update.effective_to = resultingEffectiveFrom;
+    } else if (item.frequency === "one_off") {
+      update.effective_to = null;
     }
     return { mode: "correct", update };
-  }
-  if (fm <= item.effective_from) {
-    return { mode: "correct", update: { ...changes } };
   }
   const { id: _oldId, ...rest } = item;
   const insert = {

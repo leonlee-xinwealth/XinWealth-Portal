@@ -239,6 +239,33 @@ Deno.test("reviseItem: a one_off item is always corrected, never versioned", () 
   assertEquals(got.update.effective_to, "2026-07-01", "one_off keeps effective_to = effective_from");
 });
 
+Deno.test("reviseItem: correcting a recurring item's frequency to one_off pins effective_to to its (unchanged) effective_from", () => {
+  const item: StandingItem = { id: "i1", direction: "outflow", category: "travel", amount: 500, frequency: "monthly", effective_from: "2026-04-01", effective_to: null };
+  const got = reviseItem(item, { frequency: "one_off" }, "2026-04-01");
+  assertEquals(got.mode, "correct");
+  if (got.mode !== "correct") throw new Error("unreachable");
+  assertEquals(got.update.effective_from, "2026-04-01");
+  assertEquals(got.update.effective_to, "2026-04-01");
+});
+
+Deno.test("reviseItem: correcting a recurring item's frequency to one_off with a changed effective_from pins effective_to to the NEW effective_from", () => {
+  const item: StandingItem = { id: "i1", direction: "outflow", category: "travel", amount: 500, frequency: "monthly", effective_from: "2026-04-01", effective_to: null };
+  const got = reviseItem(item, { frequency: "one_off", effective_from: "2026-05-01" }, "2026-04-01");
+  assertEquals(got.mode, "correct");
+  if (got.mode !== "correct") throw new Error("unreachable");
+  assertEquals(got.update.effective_from, "2026-05-01");
+  assertEquals(got.update.effective_to, "2026-05-01");
+});
+
+Deno.test("reviseItem: changing a one_off item's frequency to a recurring one reopens it (effective_to: null)", () => {
+  const item: StandingItem = { id: "i1", direction: "outflow", category: "travel", amount: 5000, frequency: "one_off", effective_from: "2026-06-01", effective_to: "2026-06-01" };
+  const got = reviseItem(item, { frequency: "monthly" }, "2026-06-01");
+  assertEquals(got.mode, "correct");
+  if (got.mode !== "correct") throw new Error("unreachable");
+  assertEquals(got.update.frequency, "monthly");
+  assertEquals(got.update.effective_to, null, "no longer pinned to a single month once it's recurring again");
+});
+
 Deno.test("endItem writes effective_to, clamped so it never precedes effective_from", () => {
   const item: StandingItem = { id: "i1", direction: "outflow", category: "rent", amount: 1500, frequency: "monthly", effective_from: "2026-04-01" };
   assertEquals(endItem(item, "2026-08-01"), { id: "i1", effective_to: "2026-08-01" });

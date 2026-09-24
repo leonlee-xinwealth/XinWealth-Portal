@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Pencil, CalendarClock, Ban, Trash2, AlertTriangle, History } from 'lucide-react';
+import { Plus, Pencil, CalendarClock, Ban, Trash2, AlertTriangle, History, X } from 'lucide-react';
 import { supabase } from '../../../../lib/supabaseClient';
 import {
   endItem, itemMonthlyAmount, reviseItem,
@@ -45,18 +45,24 @@ export default function StandingItemsPanel({
   const [addModal, setAddModal] = useState<Direction | null>(null);
   const [addForm, setAddForm] = useState(emptyAddForm());
   const [saving, setSaving] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [revising, setRevising] = useState<StandingItemRow | null>(null);
   const [reviseForm, setReviseForm] = useState<any>({});
   const [savingRevise, setSavingRevise] = useState(false);
+  const [reviseError, setReviseError] = useState<string | null>(null);
 
   const [ending, setEnding] = useState<StandingItemRow | null>(null);
   const [endMonth, setEndMonth] = useState(currentMonthInput());
   const [savingEnd, setSavingEnd] = useState(false);
+  const [endError, setEndError] = useState<string | null>(null);
+
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // 决策 8: the same P2a dedupe rule applied to items — a manual item that
   // now duplicates a liability/policy installment is dropped from the plan's
@@ -78,14 +84,16 @@ export default function StandingItemsPanel({
 
   function startAdd(direction: Direction) {
     setAddForm(emptyAddForm());
+    setAddError(null);
     setAddModal(direction);
   }
 
   async function handleAdd() {
     if (!addModal || !addForm.category || !addForm.amount) return;
     setSaving(true);
+    setAddError(null);
     const from = `${addForm.month}-01`;
-    await supabase.from('cashflow_items').insert({
+    const { error } = await supabase.from('cashflow_items').insert({
       client_id: clientId,
       direction: addModal,
       category: addForm.category,
@@ -98,6 +106,10 @@ export default function StandingItemsPanel({
       source: 'advisor',
     });
     setSaving(false);
+    if (error) {
+      setAddError(t(`Failed to save: ${error.message}`, `保存失败：${error.message}`));
+      return;
+    }
     setAddModal(null);
     onSaved();
     onReload();
@@ -105,6 +117,7 @@ export default function StandingItemsPanel({
 
   function startEdit(item: StandingItemRow) {
     setEditingId(item.id);
+    setEditError(null);
     setEditForm({
       category: item.category,
       amount: String(item.amount),
@@ -114,7 +127,7 @@ export default function StandingItemsPanel({
       month: monthLabel(item.effective_from) || currentMonthInput(),
     });
   }
-  function cancelEdit() { setEditingId(null); setEditForm({}); }
+  function cancelEdit() { setEditingId(null); setEditForm({}); setEditError(null); }
 
   // 更正 — fixed in place. Passing the item's OWN effective_from as the
   // "from" month guarantees reviseItem returns { mode: 'correct' } (决策 3:
@@ -122,6 +135,7 @@ export default function StandingItemsPanel({
   async function saveEdit(item: StandingItemRow) {
     if (!editForm.category || !editForm.amount) return;
     setSavingEdit(true);
+    setEditError(null);
     const result = reviseItem(item, {
       category: editForm.category,
       amount: parseFloat(editForm.amount),
@@ -132,10 +146,15 @@ export default function StandingItemsPanel({
       needs_review: false,
       review_reason: null,
     }, item.effective_from);
+    let error = null;
     if (result.mode === 'correct') {
-      await supabase.from('cashflow_items').update(result.update).eq('id', item.id);
+      ({ error } = await supabase.from('cashflow_items').update(result.update).eq('id', item.id));
     }
     setSavingEdit(false);
+    if (error) {
+      setEditError(t(`Failed to save: ${error.message}`, `保存失败：${error.message}`));
+      return;
+    }
     setEditingId(null);
     onSaved();
     onReload();
@@ -143,6 +162,7 @@ export default function StandingItemsPanel({
 
   function startRevise(item: StandingItemRow) {
     setRevising(item);
+    setReviseError(null);
     setReviseForm({
       category: item.category,
       amount: String(item.amount),
@@ -159,6 +179,7 @@ export default function StandingItemsPanel({
   async function saveRevise() {
     if (!revising || !reviseForm.category || !reviseForm.amount) return;
     setSavingRevise(true);
+    setReviseError(null);
     const result = reviseItem(revising, {
       category: reviseForm.category,
       amount: parseFloat(reviseForm.amount),
@@ -170,14 +191,23 @@ export default function StandingItemsPanel({
       review_reason: null,
     }, `${reviseForm.month}-01`);
 
+    let error = null;
     if (result.mode === 'version') {
-      await supabase.from('cashflow_items').update({ effective_to: result.close.effective_to }).eq('id', result.close.id);
-      const { source_ids, divisor, ...insert } = result.insert as any;
-      await supabase.from('cashflow_items').insert(insert);
+      const closeRes = await supabase.from('cashflow_items').update({ effective_to: result.close.effective_to }).eq('id', result.close.id);
+      if (closeRes.error) {
+        error = closeRes.error;
+      } else {
+        const { source_ids, divisor, ...insert } = result.insert as any;
+        ({ error } = await supabase.from('cashflow_items').insert(insert));
+      }
     } else {
-      await supabase.from('cashflow_items').update(result.update).eq('id', revising.id);
+      ({ error } = await supabase.from('cashflow_items').update(result.update).eq('id', revising.id));
     }
     setSavingRevise(false);
+    if (error) {
+      setReviseError(t(`Failed to save: ${error.message}`, `保存失败：${error.message}`));
+      return;
+    }
     setRevising(null);
     onSaved();
     onReload();
@@ -185,14 +215,20 @@ export default function StandingItemsPanel({
 
   function startEnd(item: StandingItemRow) {
     setEnding(item);
+    setEndError(null);
     setEndMonth(currentMonthInput());
   }
   async function saveEnd() {
     if (!ending) return;
     setSavingEnd(true);
+    setEndError(null);
     const result = endItem(ending, `${endMonth}-01`);
-    await supabase.from('cashflow_items').update({ effective_to: result.effective_to }).eq('id', result.id);
+    const { error } = await supabase.from('cashflow_items').update({ effective_to: result.effective_to }).eq('id', result.id);
     setSavingEnd(false);
+    if (error) {
+      setEndError(t(`Failed to save: ${error.message}`, `保存失败：${error.message}`));
+      return;
+    }
     setEnding(null);
     onSaved();
     onReload();
@@ -200,20 +236,31 @@ export default function StandingItemsPanel({
 
   async function handleDelete(item: StandingItemRow) {
     if (!confirm(t('Delete this item? This is only for something entered by mistake — use "End" to close out something that genuinely stopped.', '确定删除？此操作仅适用于录错的项目——如果项目是真的结束了，请用「结束」。'))) return;
-    await supabase.from('cashflow_items').delete().eq('id', item.id);
+    setDeleteError(null);
+    const { error } = await supabase.from('cashflow_items').delete().eq('id', item.id);
+    if (error) {
+      setDeleteError(t(`Failed to delete: ${error.message}`, `删除失败：${error.message}`));
+      return;
+    }
     onSaved();
     onReload();
   }
 
   return (
     <div className="mb-6">
+      {deleteError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-red-600 text-sm mb-4 flex items-center justify-between gap-3">
+          <span>{deleteError}</span>
+          <button onClick={() => setDeleteError(null)} className="text-red-400 hover:text-red-600 shrink-0"><X size={14} /></button>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-4">
         <ItemTable
           title={t('Income (plan)', '收入（计划）')} color="text-emerald-600" borderColor="border-emerald-200"
           direction="inflow" rows={inflowRows} derived={[]} total={plan.totals.monthly_income}
           today={today} showHistory={showHistory} catLabel={catLabel} lang={lang} t={t}
           assets={assets} supersededIds={supersededIds}
-          editingId={editingId} editForm={editForm} setEditForm={setEditForm} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
+          editingId={editingId} editForm={editForm} setEditForm={setEditForm} editError={editError} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
           onRevise={startRevise} onEnd={startEnd} onDelete={handleDelete}
           onAdd={() => startAdd('inflow')} addLabel={t('Add income item', '添加收入项目')}
         />
@@ -222,7 +269,7 @@ export default function StandingItemsPanel({
           direction="outflow" rows={outflowRows} derived={derivedOutflow} total={plan.totals.monthly_expenses}
           today={today} showHistory={showHistory} catLabel={catLabel} lang={lang} t={t}
           assets={assets} supersededIds={supersededIds}
-          editingId={editingId} editForm={editForm} setEditForm={setEditForm} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
+          editingId={editingId} editForm={editForm} setEditForm={setEditForm} editError={editError} onEdit={startEdit} onCancelEdit={cancelEdit} onSaveEdit={saveEdit} savingEdit={savingEdit}
           onRevise={startRevise} onEnd={startEnd} onDelete={handleDelete}
           onAdd={() => startAdd('outflow')} addLabel={t('Add expense item', '添加支出项目')}
         />
@@ -288,6 +335,7 @@ export default function StandingItemsPanel({
           <Fr label={t('Linked asset (optional)', '关联资产（可选）')}>
             <AssetSelect assets={assets} value={addForm.linked_asset_id} onChange={(v) => setAddForm((p) => ({ ...p, linked_asset_id: v }))} language={language} />
           </Fr>
+          {addError && <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{addError}</div>}
           <div className="flex gap-2">
             <button onClick={handleAdd} disabled={saving} className="px-5 py-2.5 bg-xin-blue text-white font-semibold rounded-xl text-sm disabled:opacity-50">{saving ? '...' : t('Save', '保存')}</button>
             <button onClick={() => setAddModal(null)} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm">{t('Cancel', '取消')}</button>
@@ -316,6 +364,7 @@ export default function StandingItemsPanel({
           <div className="text-[11px] text-slate-400 mb-3">
             {t('Choosing a month at or before this item\'s own start just corrects it in place.', '如果所选月份早于或等于该项目本身的起始月，则视为「更正」。')}
           </div>
+          {reviseError && <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{reviseError}</div>}
           <div className="flex gap-2">
             <button onClick={saveRevise} disabled={savingRevise} className="px-5 py-2.5 bg-xin-blue text-white font-semibold rounded-xl text-sm disabled:opacity-50">{savingRevise ? '...' : t('Save', '保存')}</button>
             <button onClick={() => setRevising(null)} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm">{t('Cancel', '取消')}</button>
@@ -328,6 +377,7 @@ export default function StandingItemsPanel({
           <Fr label={t('Last month it applies', '最后生效的月份')}>
             <input type="month" value={endMonth} onChange={(e) => setEndMonth(e.target.value)} className={inp} />
           </Fr>
+          {endError && <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{endError}</div>}
           <div className="flex gap-2">
             <button onClick={saveEnd} disabled={savingEnd} className="px-5 py-2.5 bg-xin-blue text-white font-semibold rounded-xl text-sm disabled:opacity-50">{savingEnd ? '...' : t('Confirm', '确认')}</button>
             <button onClick={() => setEnding(null)} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm">{t('Cancel', '取消')}</button>
@@ -358,13 +408,13 @@ function RowActions({ t, onEdit, onRevise, onEnd, onDelete }: {
 
 function ItemTable({
   title, color, borderColor, direction, rows, derived, total, today, showHistory, catLabel, lang, t, assets, supersededIds,
-  editingId, editForm, setEditForm, onEdit, onCancelEdit, onSaveEdit, savingEdit, onRevise, onEnd, onDelete, onAdd, addLabel,
+  editingId, editForm, setEditForm, editError, onEdit, onCancelEdit, onSaveEdit, savingEdit, onRevise, onEnd, onDelete, onAdd, addLabel,
 }: {
   title: string; color: string; borderColor: string; direction: Direction;
   rows: StandingItemRow[]; derived: DerivedItem[]; total: number; today: Date; showHistory: boolean;
   catLabel: (code: string) => string; lang: 'zh' | 'en'; t: (en: string, zh: string) => string;
   assets: AssetOption[]; supersededIds: Set<string>;
-  editingId: string | null; editForm: any; setEditForm: (f: any) => void;
+  editingId: string | null; editForm: any; setEditForm: (f: any) => void; editError: string | null;
   onEdit: (item: StandingItemRow) => void; onCancelEdit: () => void; onSaveEdit: (item: StandingItemRow) => void; savingEdit: boolean;
   onRevise: (item: StandingItemRow) => void; onEnd: (item: StandingItemRow) => void; onDelete: (item: StandingItemRow) => void;
   onAdd: () => void; addLabel: string;
@@ -413,6 +463,7 @@ function ItemTable({
                   <Fr label={t('Linked asset (optional)', '关联资产（可选）')}>
                     <AssetSelect assets={assets} value={editForm.linked_asset_id} onChange={(v) => setEditForm((p: any) => ({ ...p, linked_asset_id: v }))} language={lang} />
                   </Fr>
+                  {editError && <div className="mb-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{editError}</div>}
                   <div className="flex gap-2">
                     <button onClick={() => onSaveEdit(item)} disabled={savingEdit} className="px-4 py-2 bg-xin-blue text-white font-semibold rounded-lg text-sm disabled:opacity-50">{savingEdit ? '...' : t('Save', '保存')}</button>
                     <button onClick={onCancelEdit} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm">{t('Cancel', '取消')}</button>

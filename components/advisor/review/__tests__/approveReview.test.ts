@@ -193,6 +193,72 @@ describe('approveReview — happy path', () => {
   });
 });
 
+describe('approveReview — duplicate and foreign ids (defence in depth)', () => {
+  it('de-duplicates a repeated asset_id/liability_id in the payload, keeping the LAST entry (one row each)', async () => {
+    const { calls, client } = makeFakeSupabase();
+    const ctx = baseContext({
+      review: baseReview({
+        payload: {
+          assets: [
+            { asset_id: 'a1', prev_value: 10000, value: 11000 },
+            { asset_id: 'a1', prev_value: 10000, value: 12500 },
+          ],
+          liabilities: [
+            { liability_id: 'l1', prev_balance: 5000, balance: 4200, prev_rate: 8, interest_rate: 7, monthly_payment: 180 },
+            { liability_id: 'l1', prev_balance: 5000, balance: 3900, prev_rate: 8, interest_rate: 7.5, monthly_payment: 190 },
+          ],
+        },
+      }),
+    });
+    const result = await approveReview(client, ctx);
+
+    expect(result.ok).toBe(true);
+
+    const valuationCall = calls.find((c) => c.table === 'asset_valuations' && c.op === 'upsert');
+    expect(valuationCall?.rows).toHaveLength(1);
+    expect(valuationCall?.rows?.[0].value).toBe(12500);
+
+    const assetUpdates = calls.filter((c) => c.table === 'assets' && c.op === 'update');
+    expect(assetUpdates).toHaveLength(1);
+    expect(assetUpdates[0].fields?.current_value).toBe(12500);
+
+    const balanceCall = calls.find((c) => c.table === 'liability_balances' && c.op === 'upsert');
+    expect(balanceCall?.rows).toHaveLength(1);
+    expect(balanceCall?.rows?.[0].balance).toBe(3900);
+
+    const liabUpdates = calls.filter((c) => c.table === 'liabilities' && c.op === 'update');
+    expect(liabUpdates).toHaveLength(1);
+    expect(liabUpdates[0].fields?.outstanding_balance).toBe(3900);
+  });
+
+  it('drops an asset_id/liability_id in the payload that does not belong to this client, and reports it in notes', async () => {
+    const { calls, client } = makeFakeSupabase();
+    const ctx = baseContext({
+      review: baseReview({
+        payload: {
+          assets: [
+            { asset_id: 'a1', prev_value: 10000, value: 11000 },
+            { asset_id: 'a-foreign', prev_value: 5000, value: 9000 },
+          ],
+          liabilities: [
+            { liability_id: 'l-foreign', prev_balance: 1000, balance: 500 },
+          ],
+        },
+      }),
+    });
+    const result = await approveReview(client, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(result.notes.some((n) => n.includes('a-foreign'))).toBe(true);
+    expect(result.notes.some((n) => n.includes('l-foreign'))).toBe(true);
+
+    const assetUpdates = calls.filter((c) => c.table === 'assets' && c.op === 'update');
+    expect(assetUpdates.map((c) => c.eqVal)).toEqual(['a1']);
+    expect(calls.some((c) => c.table === 'liabilities' && c.op === 'update')).toBe(false);
+    expect(calls.some((c) => c.table === 'liability_balances')).toBe(false);
+  });
+});
+
 describe('approveReview — graceful degradation', () => {
   it('degrades when asset_valuations does not exist yet, but still updates assets and completes', async () => {
     const { calls, client } = makeFakeSupabase({

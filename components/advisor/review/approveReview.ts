@@ -168,6 +168,26 @@ function errMessage(error: PostgrestLikeError | null | undefined, fallback: stri
   return error?.message || error?.code || fallback;
 }
 
+/** De-duplicates a list of objects by `idKey`, keeping only the LAST entry
+ *  for each id. Mirrors `dedupeById` in api/_lib/reviewSubmission.js (which
+ *  api/levelUp.js's handleSubmitReview already applies at submission time) —
+ *  independently, since this file is TypeScript, outside api/*.js's
+ *  only-allowed import, api/_lib/taxonomy.mjs. Applied again here as defence
+ *  in depth: a review row written before this fix shipped, or one written by
+ *  anything other than that endpoint, could still carry a duplicate id, and
+ *  a repeated conflict key in a single upsert fails Postgres with "ON
+ *  CONFLICT DO UPDATE command cannot affect row a second time". */
+function dedupeById<T, K extends keyof T>(list: readonly T[] | undefined, idKey: K): T[] {
+  const map = new Map<T[K], T>();
+  for (const item of list ?? []) {
+    if (item == null) continue;
+    const id = item[idKey];
+    if (id == null || (id as unknown) === "") continue;
+    map.set(id, item);
+  }
+  return [...map.values()];
+}
+
 function buildValuationRows(clientId: string, periodEnd: string, assets: ReviewPayloadAsset[]) {
   return assets.map((a) => ({
     asset_id: a.asset_id,
@@ -238,10 +258,38 @@ export async function approveReview(
     };
   }
 
-  const payloadAssets = review.payload?.assets ?? [];
-  const payloadLiabilities = review.payload?.liabilities ?? [];
   const periodEnd = review.period_end;
   const clientId = review.client_id;
+
+  // Defence in depth (see dedupeById's comment above): de-duplicate by
+  // asset_id/liability_id, last entry wins, before doing anything else with
+  // the payload.
+  const dedupedAssets = dedupeById(review.payload?.assets ?? [], "asset_id");
+  const dedupedLiabilities = dedupeById(review.payload?.liabilities ?? [], "liability_id");
+
+  // Every id in the payload must belong to THIS client — ctx.assets/
+  // ctx.liabilities are "every one of the client's assets/liabilities"
+  // (see ApproveReviewContext's docstring), i.e. already scoped to
+  // review.client_id by the caller, so membership in those lists is the
+  // ownership check. A foreign id is dropped and reported rather than
+  // trusted, instead of being written against another client's row.
+  const ownedAssetIds = new Set(ctx.assets.map((a) => a.id));
+  const ownedLiabilityIds = new Set(ctx.liabilities.map((l) => l.id));
+
+  const foreignAssetIds = dedupedAssets.filter((a) => !ownedAssetIds.has(a.asset_id)).map((a) => a.asset_id);
+  const foreignLiabilityIds = dedupedLiabilities
+    .filter((l) => !ownedLiabilityIds.has(l.liability_id))
+    .map((l) => l.liability_id);
+
+  if (foreignAssetIds.length > 0) {
+    notes.push(`忽略不属于该客户的资产 ID：${foreignAssetIds.join(", ")}`);
+  }
+  if (foreignLiabilityIds.length > 0) {
+    notes.push(`忽略不属于该客户的负债 ID：${foreignLiabilityIds.join(", ")}`);
+  }
+
+  const payloadAssets = dedupedAssets.filter((a) => ownedAssetIds.has(a.asset_id));
+  const payloadLiabilities = dedupedLiabilities.filter((l) => ownedLiabilityIds.has(l.liability_id));
 
   try {
     // 1. asset_valuations (决策 2, step 1) — degrade if the P3 table isn't there.
