@@ -32,10 +32,56 @@ Deno.test("deriveStatutoryItems: has_epf true but no active salary items produce
 });
 
 // ---------------------------------------------------------------------------
+// EPF Third Schedule — official examples from the plan: the wage is rounded
+// UP into its band (RM20 to RM5,000, RM100 to RM20,000, exact above) BEFORE
+// the rate is applied, and each side rounds UP to the next ringgit.
+// ---------------------------------------------------------------------------
+
+Deno.test("EPF Third Schedule: 3,250 -> 359 employee / 424 employer (13%, band upper 3,260)", () => {
+  const result = deriveStatutoryItems([salaryItem(3250)], { has_epf: true }, ASOF);
+  assertEquals(result.employee_epf_monthly, 359);
+  assertEquals(result.employer_epf_monthly, 424);
+});
+
+Deno.test("EPF Third Schedule: 4,250 -> 469 / 554 (band upper 4,260)", () => {
+  const result = deriveStatutoryItems([salaryItem(4250)], { has_epf: true }, ASOF);
+  assertEquals(result.employee_epf_monthly, 469);
+  assertEquals(result.employer_epf_monthly, 554);
+});
+
+Deno.test("EPF Third Schedule: 5,000 -> 550 / 650 (exact multiple of 20, at the employer-rate threshold)", () => {
+  const result = deriveStatutoryItems([salaryItem(5000)], { has_epf: true }, ASOF);
+  assertEquals(result.employee_epf_monthly, 550);
+  assertEquals(result.employer_epf_monthly, 650);
+});
+
+Deno.test("EPF Third Schedule: 5,050 -> 561 / 612 (crosses into the RM100 band, and the 12% employer rate)", () => {
+  const result = deriveStatutoryItems([salaryItem(5050)], { has_epf: true }, ASOF);
+  assertEquals(result.employee_epf_monthly, 561);
+  assertEquals(result.employer_epf_monthly, 612);
+});
+
+Deno.test("EPF Third Schedule: 25,000 -> 2,750 / 3,000 (above RM20,000: exact wage, no banding)", () => {
+  const result = deriveStatutoryItems([salaryItem(25000)], { has_epf: true }, ASOF);
+  assertEquals(result.employee_epf_monthly, 2750);
+  assertEquals(result.employer_epf_monthly, 3000);
+});
+
+Deno.test("EPF Third Schedule: a wage at/below RM10 contributes nothing to EPF (SOCSO/EIS's own rule is separate)", () => {
+  const result = deriveStatutoryItems([salaryItem(10)], { has_epf: true }, ASOF);
+  assertEquals(result.employee_epf_monthly, 0);
+  assertEquals(result.employer_epf_monthly, 0);
+  assertEquals(result.items.find((i) => i.category === "epf_employee"), undefined);
+  // SOCSO/EIS has no RM10 floor of its own — wage 10 still falls under the
+  // sub-RM300 flat-percentage fallback and produces a (tiny) item.
+  assertAlmostEquals(result.socso_eis_monthly, 10 * 0.007, 0.001);
+});
+
+// ---------------------------------------------------------------------------
 // Employer rate threshold — 决策 6
 // ---------------------------------------------------------------------------
 
-Deno.test("wage 4,000 -> employee 440, employer 520 (13%, at the threshold)", () => {
+Deno.test("wage 4,000 -> employee 440, employer 520 (13%, at the threshold, exact band)", () => {
   const result = deriveStatutoryItems([salaryItem(4000)], { has_epf: true }, ASOF);
   assertEquals(result.employee_epf_monthly, 440);
   assertEquals(result.employer_epf_monthly, 520);
@@ -47,24 +93,46 @@ Deno.test("wage 4,000 -> employee 440, employer 520 (13%, at the threshold)", ()
   assert(epfItem.warnings.includes(STATUTORY_NOTE));
 });
 
-Deno.test("wage 8,000 -> employee 880, employer 960 (12%, above the threshold)", () => {
+Deno.test("wage 8,000 -> employee 880, employer 960 (12%, above the threshold, exact band)", () => {
   const result = deriveStatutoryItems([salaryItem(8000)], { has_epf: true }, ASOF);
   assertEquals(result.employee_epf_monthly, 880);
   assertEquals(result.employer_epf_monthly, 960);
 });
 
+// ---------------------------------------------------------------------------
+// Bonus / non-monthly EPF-wage items: EPF(W) + Σ[EPF(W + occurrence) −
+// EPF(W)] / 12 per occurrence in the year — never linearly folded into W.
+// ---------------------------------------------------------------------------
+
+Deno.test("bonus example (plan spec): salary 4,000 + annual bonus 8,000 -> EPF(4,000)=440 + [EPF(12,000)-440]/12", () => {
+  const annualBonus: StandingItem = { direction: "inflow", category: "bonus", amount: 8000, frequency: "annual", effective_from: "2026-01-01" };
+  const result = deriveStatutoryItems([salaryItem(4000), annualBonus], { has_epf: true }, ASOF);
+
+  // EPF(4,000) employee = 440 (exact band). EPF(12,000) employee: band upper
+  // = 12,000 exact (RM100 band) -> 12,000*0.11 = 1,320. Marginal = 1,320-440
+  // = 880, once a year, /12 = 73.333... -> 440 + 73.33 = 513.33.
+  assertAlmostEquals(result.employee_epf_monthly, 440 + 880 / 12, 0.005);
+
+  // Employer rate stays 13% throughout (W=4,000 <= 5,000) even though
+  // W+bonus (12,000) alone would be > 5,000 — a bonus never changes the rate.
+  // EPF(4,000) employer = 520. EPF(12,000) employer = 1,560. Marginal =
+  // 1,040/12 = 86.67 -> 520 + 86.67 = 606.67.
+  assertAlmostEquals(result.employer_epf_monthly, 520 + 1040 / 12, 0.005);
+});
+
 Deno.test("a bonus adds to the EPF wage base but NOT to the employer-rate threshold test", () => {
-  // Regular wage 4,600 (≤ 5,000 -> 13%), plus a bonus item worth 1,000/mo more
-  // in the EPF base (epf_wage_monthly = 5,600, itself > 5,000). If the rate
-  // test wrongly used the full EPF base, this would flip to 12%.
+  // Regular wage 4,600 (<= 5,000 -> 13% employer rate), plus an annual bonus
+  // of 12,000 (one occurrence/yr). Both 4,600 and 4,600+12,000=16,600 land
+  // exactly on a Third Schedule band boundary (4,600/20 and 16,600/100 are
+  // both whole numbers), so the marginal formula's result here happens to
+  // match a plain linear rate*wage calculation (616 / 728) — a coincidence of
+  // these particular round numbers, not a general equivalence.
   const annualBonus: StandingItem = { direction: "inflow", category: "bonus", amount: 12000, frequency: "annual", effective_from: "2026-01-01" };
   const result = deriveStatutoryItems([salaryItem(4600), annualBonus], { has_epf: true }, ASOF);
 
-  assertEquals(result.epf_wage_monthly, 5600, "4,600 salary + 1,000/mo bonus equivalent");
-  // Employer rate must still be 13% (regular wage 4,600 ≤ 5,000), applied to
-  // the FULL 5,600 base -> 728, not 12% x 5,600 = 672.
+  assertEquals(result.epf_wage_monthly, 5600, "4,600 salary + 1,000/mo bonus equivalent (reporting figure only)");
   assertEquals(result.employer_epf_monthly, 728);
-  assertEquals(result.employee_epf_monthly, 616); // 5,600 x 11%
+  assertEquals(result.employee_epf_monthly, 616);
 });
 
 // ---------------------------------------------------------------------------
@@ -76,7 +144,7 @@ Deno.test("age 61 -> employee 0%, employer 4%, SOCSO/EIS 0", () => {
   const items = [salaryItem(8000)];
   const result = deriveStatutoryItems(items, { has_epf: true, date_of_birth: dob }, ASOF);
   assertEquals(result.employee_epf_monthly, 0);
-  assertEquals(result.employer_epf_monthly, roundUp(8000 * 0.04));
+  assertEquals(result.employer_epf_monthly, 320); // ceil(8,000 * 0.04)
   assertEquals(result.socso_eis_monthly, 0);
   // no epf_employee or socso_eis item — both are zero.
   assertEquals(result.items.length, 0);
@@ -101,15 +169,21 @@ Deno.test("exactly the 60th birthday itself is senior", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SOCSO/EIS — 决策 6
+// SOCSO/EIS — band midpoint (band upper - 50), capped at the top band's
+// midpoint (RM5,950). Official examples from the plan.
 // ---------------------------------------------------------------------------
 
-Deno.test("wage 10,000 -> SOCSO 30.00 + EIS 12.00 = 42.00, capped at the 6,000 ceiling", () => {
+Deno.test("SOCSO/EIS official example: wage 2,577 -> SOCSO 12.75 + EIS 5.10", () => {
+  const result = deriveStatutoryItems([salaryItem(2577)], { has_epf: true }, ASOF);
+  assertAlmostEquals(result.socso_eis_monthly, 12.75 + 5.10, 0.001);
+});
+
+Deno.test("SOCSO/EIS official example: wage 10,000 -> SOCSO 29.75 + EIS 11.90, capped at the top band's midpoint", () => {
   const result = deriveStatutoryItems([salaryItem(10000)], { has_epf: true }, ASOF);
-  assertAlmostEquals(result.socso_eis_monthly, 30 + 12, 0.001);
+  assertAlmostEquals(result.socso_eis_monthly, 29.75 + 11.90, 0.001);
   const item = result.items.find((i) => i.category === "socso_eis")!;
   assert(item);
-  assertAlmostEquals(item.monthly_amount, 42, 0.001);
+  assertAlmostEquals(item.monthly_amount, 41.65, 0.001);
 });
 
 Deno.test("SOCSO/EIS wage base includes overtime but not bonus", () => {
@@ -119,21 +193,36 @@ Deno.test("SOCSO/EIS wage base includes overtime but not bonus", () => {
     { direction: "inflow", category: "bonus", amount: 12000, frequency: "annual", effective_from: "2026-01-01" },
   ];
   const result = deriveStatutoryItems(items, { has_epf: true }, ASOF);
-  // socso/eis wage = 3000 + 500 = 3500 (bonus excluded); epf wage = 3000 + 1000(bonus/mo) = 4000.
+  // socso/eis wage = 3000 + 500 = 3500 (bonus excluded); epf wage (reporting
+  // figure) = 3000 + 1000(bonus/mo) = 4000.
   assertEquals(result.epf_wage_monthly, 4000);
-  assertAlmostEquals(result.socso_eis_monthly, 3500 * 0.007, 0.001);
+  // wage 3,500 -> midpoint = ceil(3500/100)*100 - 50 = 3,450.
+  // SOCSO = 0.005*3450 = 17.25, EIS = 0.002*3450 = 6.90 -> 24.15.
+  assertAlmostEquals(result.socso_eis_monthly, 24.15, 0.001);
+});
+
+Deno.test("SOCSO/EIS below RM300: flat-percentage fallback, flagged as an approximation", () => {
+  const result = deriveStatutoryItems([salaryItem(200)], { has_epf: true }, ASOF);
+  assertAlmostEquals(result.socso_eis_monthly, 200 * 0.007, 0.001);
+  const item = result.items.find((i) => i.category === "socso_eis")!;
+  assert(item);
+  assert(item.warnings.some((w) => w.includes("非官方分级表")));
 });
 
 // ---------------------------------------------------------------------------
-// Rounding — 决策 6
+// Rounding
 // ---------------------------------------------------------------------------
 
-Deno.test("EPF rounds UP to the next ringgit; SOCSO/EIS keeps 2dp", () => {
+Deno.test("EPF Third Schedule bands the wage BEFORE rounding the contribution up to the ringgit", () => {
+  // wage 4,001 is NOT a linear rate*wage rounding — it bands first: band
+  // upper = ceil(4001/20)*20 = 4,020, then employee = ceil(4,020*0.11) = 443
+  // and employer (<=5,000 -> 13%) = ceil(4,020*0.13) = 523. (A naive
+  // rate*wage-then-ceil approach, which this formula replaces, would have
+  // given 441 / 521 — the exact bug this Third Schedule implementation
+  // fixes.)
   const result = deriveStatutoryItems([salaryItem(4001)], { has_epf: true }, ASOF);
-  // 4001 x 0.11 = 440.11 -> rounds up to 441.
-  assertEquals(result.employee_epf_monthly, 441);
-  // 4001 x 0.13 = 520.13 -> rounds up to 521.
-  assertEquals(result.employer_epf_monthly, 521);
+  assertEquals(result.employee_epf_monthly, 443);
+  assertEquals(result.employer_epf_monthly, 523);
 });
 
 // ---------------------------------------------------------------------------
@@ -146,7 +235,3 @@ Deno.test("an ended salary item no longer contributes to the wage base", () => {
   assertEquals(result.items.length, 0);
   assertEquals(result.epf_wage_monthly, 0);
 });
-
-function roundUp(n: number): number {
-  return Math.ceil(n - 1e-9);
-}

@@ -233,17 +233,20 @@ Deno.test("household: two earners each get statutory EPF/SOCSO/EIS from their OW
   const b = computeBaseline(merged, {}, NOW);
 
   assertEquals(b.cashflow_source, "items");
-  // c-1 (8,000): employee 880, employer 960 (>5,000 threshold), SOCSO/EIS
-  // capped at 6,000 -> 42. c-2 (4,000): employee 440, employer 520 (<=5,000
-  // threshold), SOCSO/EIS on the uncapped 4,000 -> 28.
+  // c-1 (8,000): employee 880, employer 960 (>5,000 threshold). c-2 (4,000):
+  // employee 440, employer 520 (<=5,000 threshold). SOCSO/EIS (P2b followup:
+  // official band-midpoint formula) — c-1's wage caps at the top band's
+  // midpoint 5,950 -> 41.65; c-2's midpoint = ceil(4000/100)*100-50 = 3,950
+  // -> 27.65.
   assertEquals(b.monthly_employee_epf, 880 + 440);
   assertEquals(b.monthly_employer_epf, 960 + 520);
-  assertAlmostEquals(b.monthly_socso_eis, 42 + 28, 0.01);
+  assertAlmostEquals(b.monthly_socso_eis, 41.65 + 27.65, 0.01);
 
-  // Pooling both salaries into one 12,000 wage base would cap SOCSO/EIS once
-  // (42) instead of twice (70) — the exact bug the household `clients` map
-  // exists to prevent.
-  assert(b.monthly_socso_eis > 42, "must not be computed off a single pooled wage base");
+  // Pooling both salaries into one 12,000 wage base would cap SOCSO/EIS at
+  // its single top-band midpoint once (41.65) instead of pricing each
+  // employee's own wage separately (69.30) — the exact bug the household
+  // `clients` map exists to prevent.
+  assert(b.monthly_socso_eis > 41.65, "must not be computed off a single pooled wage base");
 
   assertEquals(b.annual_disposable_surplus, b.annual_surplus - (880 + 440) * 12);
 });

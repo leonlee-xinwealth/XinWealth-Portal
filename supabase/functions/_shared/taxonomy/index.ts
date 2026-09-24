@@ -9,6 +9,9 @@ export * from "../finance/loans.ts";
 export * from "../finance/derived.ts";
 export * from "../cashflow/items.ts";
 export * from "../finance/statutory.ts";
+// P2b followup: income-tax rates/reliefs/estimator — checked against every
+// module above for name collisions (none) before adding this line.
+export * from "../finance/incomeTax.ts";
 export * from "../finance/valuation.ts";
 export * from "../finance/assetQuality.ts";
 export { computeSnapshot } from "../finance/snapshot.ts";

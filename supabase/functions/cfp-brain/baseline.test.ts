@@ -389,11 +389,20 @@ Deno.test("P2b: a standing salary item switches cashflow_source to 'items' and d
   assertEquals(b.annual_income, 96000);
 
   // wage 8,000: employee 11% = 880 (transfer, never in expenses), employer
-  // 12% (>5,000 threshold) = 960, SOCSO/EIS 0.7% of the 6,000-capped wage = 42.
+  // 12% (>5,000 threshold) = 960. SOCSO/EIS uses the official band-midpoint
+  // formula (P2b followup): wage 8,000 caps at the top band's midpoint
+  // 5,950 -> 0.005*5,950 + 0.002*5,950 = 41.65 (was a flat 0.7% of the
+  // 6,000-capped wage = 42.00).
   assertEquals(b.monthly_employee_epf, 880);
   assertEquals(b.monthly_employer_epf, 960);
-  assertAlmostEquals(b.monthly_socso_eis, 42, 0.01);
-  assertAlmostEquals(b.annual_expenses, 42 * 12, 0.01);
+  assertAlmostEquals(b.monthly_socso_eis, 41.65, 0.01);
+  // P2b followup: a salary of 8,000/mo also owes real income tax, now
+  // estimated automatically on the items path (taxable 96,000, reliefs
+  // personal 9,000 + EPF 4,000 (capped) -> chargeable 83,000 -> annual tax
+  // 6,170 -> 514.17/mo), folded into annual_expenses alongside SOCSO/EIS.
+  // (FinancialBaseline doesn't surface monthly_income_tax itself yet — that's
+  // a separate follow-up — so this is pinned via the annual_expenses total.)
+  assertAlmostEquals(b.annual_expenses, (41.65 + 514.17) * 12, 0.5);
 
   // annual_disposable_surplus = annual_surplus − 12 × employee EPF.
   assertEquals(b.annual_disposable_surplus, b.annual_surplus - 880 * 12);

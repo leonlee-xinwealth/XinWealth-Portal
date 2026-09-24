@@ -13,6 +13,15 @@ import {
   progressiveTax,
   RELIEFS,
 } from "./rates2026.ts";
+// P2b followup: the shared taxable-income definition and RM400 rebate, moved
+// to _shared/finance/incomeTax.ts so the cash-flow estimate (derived.ts) and
+// this report never disagree. RELIEF_BY_CATEGORY also moved there (was
+// defined locally here) — imported instead of redefined.
+import {
+  RELIEF_BY_CATEGORY,
+  taxableIncomeFromItems,
+  taxAfterRebate,
+} from "../../../_shared/finance/incomeTax.ts";
 
 export interface ReliefDetail {
   key: string;
@@ -52,27 +61,6 @@ const round = (n: number) => Math.round(n);
 
 const OPPORTUNITY_KEYS = ["prs", "medical_insurance", "sspn", "lifestyle"];
 
-type DetectableReliefKey =
-  | "medical_insurance"
-  | "medical_expenses"
-  | "sspn"
-  | "lifestyle"
-  | "prs";
-
-// Which cash-flow categories evidence which relief. Codes, not keywords: the
-// category column is a foreign key into the taxonomy, so a guess is never
-// needed. SSPN and PRS deposits are transfers, so the scan includes transfers.
-const RELIEF_BY_CATEGORY: Readonly<Record<string, DetectableReliefKey>> = {
-  medical_card: "medical_insurance",
-  health_medical: "medical_expenses",
-  sspn: "sspn",
-  prs_contribution: "prs",
-  fitness: "lifestyle",
-  self_education: "lifestyle",
-  telco: "lifestyle",
-  subscriptions: "lifestyle",
-};
-
 /** Annual amounts per detectable relief, on the plan's own basis. Caller
  * still applies the relief cap; this only sums the matched amounts. */
 export function detectReliefsFromCashflow(
@@ -93,7 +81,16 @@ export function computeTax(
   b: FinancialBaseline,
   inputs: TaxInputs = {},
 ): TaxDet {
-  const income = b.annual_income;
+  // P2b followup: when the baseline came from standing items, use the SAME
+  // taxable-income definition the cash-flow tax estimate uses (I1 minus
+  // employer_epf, plus rental_income gross) instead of b.annual_income —
+  // which also counts dividends/interest/etc. that aren't taxable the same
+  // way, and would silently overstate this report's income vs. the estimate
+  // shown on the cash-flow page. The actuals path is unchanged (no items to
+  // read a taxable-income breakdown from).
+  const income = b.cashflow_source === "items" && b.items_as_of
+    ? taxableIncomeFromItems(f.items, new Date(b.items_as_of))
+    : b.annual_income;
   const nonResident = !!f.client.tax_residency &&
     f.client.tax_residency !== "resident";
   const overrides = inputs.reliefs ?? {};
@@ -164,7 +161,10 @@ export function computeTax(
     taxPayable = round(chargeableIncome * NON_RESIDENT_FLAT_RATE);
     marginalRate = NON_RESIDENT_FLAT_RATE;
   } else {
-    taxPayable = round(progressiveTax(chargeableIncome));
+    // P2b followup: the RM400 rebate (chargeable ≤ RM35,000, floored at 0) —
+    // shared with the cash-flow estimate via incomeTax.ts so the two never
+    // disagree on whether a low-income client owes anything at all.
+    taxPayable = taxAfterRebate(round(progressiveTax(chargeableIncome)), chargeableIncome);
     marginalRate = marginalRateFor(chargeableIncome);
   }
 

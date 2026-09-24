@@ -6,18 +6,21 @@
 //
 // Imports are relative-with-`.ts` only, and only from the modules the specs
 // name: ../taxonomy/balance.ts, ../taxonomy/cashflow.ts, ../cashflow/periods.ts,
-// ../cashflow/items.ts, ./loans.ts, ./statutory.ts. (Contrast with loans.ts,
-// statutory.ts and the taxonomy modules themselves, which must have ZERO or a
-// much narrower set of imports — this file is allowed the widest surface.)
-// This file MAY import statutory.ts; statutory.ts MUST NOT import this file
-// (that two-file cycle is exactly what every bundler here refuses to resolve).
+// ../cashflow/items.ts, ./loans.ts, ./statutory.ts, ./incomeTax.ts. (Contrast
+// with loans.ts, statutory.ts and the taxonomy modules themselves, which must
+// have ZERO or a much narrower set of imports — this file is allowed the
+// widest surface.)
+// This file MAY import statutory.ts and incomeTax.ts; neither may import this
+// file back (that two-file cycle is exactly what every bundler here refuses
+// to resolve) — incomeTax.ts in fact has ZERO imports of its own.
 
 import { liabilityTypeMeta } from "../taxonomy/balance.ts";
 import { CATEGORY_BY_CODE } from "../taxonomy/cashflow.ts";
-import { annualizeCashflow, isTransferCode, type CashflowBasis, type CashflowTotals, type PeriodRow } from "../cashflow/periods.ts";
-import { activeItems, annualizeItems, type StandingItem } from "../cashflow/items.ts";
+import { annualizeCashflow, annualizeByCategory, isTransferCode, type CashflowBasis, type CashflowTotals, type CategoryTotals, type PeriodRow } from "../cashflow/periods.ts";
+import { activeItems, annualizeItems, annualizeItemsByCategory, type StandingItem } from "../cashflow/items.ts";
 import { estimateLoan, type LoanInput } from "./loans.ts";
 import { deriveStatutoryItems, type DeriveStatutoryResult, type StatutoryClientInfo } from "./statutory.ts";
+import { estimateIncomeTax } from "./incomeTax.ts";
 
 export type LiabilityRow = LoanInput & { id?: string | null; name?: string | null };
 
@@ -38,7 +41,7 @@ export interface PolicyRow {
 
 export interface DerivedItem {
   key: string;
-  source_type: "liability" | "policy" | "statutory";
+  source_type: "liability" | "policy" | "statutory" | "tax";
   source_id: string | null;
   source_name: string;
   category: string;
@@ -46,12 +49,29 @@ export interface DerivedItem {
   monthly_amount: number;
   interest_monthly: number;
   principal_monthly: number;
-  estimated: Array<"monthly_payment" | "interest_rate" | "remaining_months" | "statutory_rate">;
+  estimated: Array<"monthly_payment" | "interest_rate" | "remaining_months" | "statutory_rate" | "tax_estimate">;
   warnings: string[];
 }
 
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * P2b followup — `monthly_planned_savings`: outflow minus inflow, summed
+ * across every TRANSFER category except the statutory `epf_employee` (that
+ * forced saving is already accounted for under 税与法定扣款, not here).
+ * Works on either periods.ts's or items.ts's CategoryTotals shape — the two
+ * are structurally identical — so one function serves both planCashflow paths.
+ */
+function plannedSavingsFromCategoryTotals(totals: CategoryTotals[]): number {
+  let net = 0;
+  for (const t of totals) {
+    if (t.category === "epf_employee") continue;
+    if (!isTransferCode(t.category)) continue;
+    net += t.monthly_expenses - t.monthly_income;
+  }
+  return round2(net);
 }
 
 /** How many times a year a premium is billed. Mirrors PREMIUM_ANNUALIZE in
@@ -220,6 +240,14 @@ export function isSuperseded(
   return false;
 }
 
+/** P2b 决策 6 + P2b followup: statutory info plus the client's tax residency
+ *  (needed only for the income-tax estimate — non-residents get the flat 30%
+ *  with no reliefs/rebate). Extends StatutoryClientInfo rather than modifying
+ *  it: statutory.ts is EPF/SOCSO/EIS-only and has no notion of tax. */
+export interface PlanCashflowClientInfo extends StatutoryClientInfo {
+  tax_residency?: string | null;
+}
+
 export interface PlanCashflowInput {
   rows: PeriodRow[];
   liabilities: LiabilityRow[];
@@ -232,7 +260,7 @@ export interface PlanCashflowInput {
   /** P2b 决策 6: only used on the items path (statutory needs standing salary
    *  items to compute a wage base from). Single-client reports only — a
    *  household report supplies `clients` instead (see below). */
-  client?: StatutoryClientInfo;
+  client?: PlanCashflowClientInfo;
   /** P2b 决策 6 (household): per-employee statutory info, keyed by client_id.
    *  SOCSO/EIS's wage ceiling and EPF's employer-rate threshold are each
    *  PER EMPLOYEE, so a joint plan must never pool both spouses' salaries into
@@ -241,7 +269,7 @@ export interface PlanCashflowInput {
    *  their own client_id already on each row), items are grouped by
    *  `client_id` and `deriveStatutoryItems` runs once per group; `client` is
    *  ignored. Absent = the single-client behaviour via `client` above. */
-  clients?: Record<string, StatutoryClientInfo>;
+  clients?: Record<string, PlanCashflowClientInfo>;
 }
 
 export interface PlanCashflowResult {
@@ -261,6 +289,30 @@ export interface PlanCashflowResult {
   /** one_off items near `today`; always empty on the actuals path (periods.ts
    *  has no such concept — see periods.cashflowEntries's own annual items). */
   one_off_items: StandingItem[];
+  /** P2b followup — the cash-flow-correctness fix. Estimated on the items
+   *  path (unless an active manual `income_tax` item exists — then that
+   *  item's own monthly amount, already inside `totals`); on the actuals
+   *  path, only ever a manual `income_tax` row's amount (never estimated). */
+  monthly_income_tax: number;
+  /** monthly_employee_epf + monthly_socso_eis — the statutory deductions
+   *  block shown above 实得收入 on the cash-flow waterfall. 0 on the actuals
+   *  path (statutory is only ever derived from standing salary items). */
+  monthly_statutory: number;
+  /** income − monthly_statutory − monthly_income_tax: what's actually left
+   *  in hand after EPF/SOCSO/EIS/tax, before any spending at all. */
+  monthly_take_home: number;
+  /** monthly_expenses minus the SOCSO/EIS and tax already shown separately
+   *  under statutory deductions — i.e. just living costs, installments and
+   *  premiums. */
+  monthly_living: number;
+  /** monthly_take_home − monthly_living. */
+  monthly_savable: number;
+  /** active transfer items (O1/I4 etc., excluding statutory epf_employee),
+   *  outflow minus inflow — money actually set aside/withdrawn on purpose,
+   *  as opposed to the forced statutory EPF already counted above. */
+  monthly_planned_savings: number;
+  /** monthly_savable − monthly_planned_savings — the headline figure. */
+  monthly_net_cash_flow: number;
 }
 
 /**
@@ -333,6 +385,22 @@ function planCashflowFromActuals(input: PlanCashflowInput): PlanCashflowResult {
   let monthly_premiums = 0;
   for (const item of premiumItems) monthly_premiums += item.monthly_amount;
 
+  // P2b followup: on the actuals path there is no statutory derivation and
+  // no automatic tax estimate — tax is whatever a manual `income_tax` row
+  // says, statutory is always 0. Planned savings still comes from the SAME
+  // kept rows, via periods.ts's own by-category breakdown (includeTransfers)
+  // so it uses the identical basis/divisor as every other actuals figure.
+  const incomeTaxByCategory = annualizeByCategory(keptRows, basis).find((t) => t.category === "income_tax");
+  const monthly_income_tax = round2(incomeTaxByCategory?.monthly_expenses ?? 0);
+  const monthly_statutory = 0;
+  const monthly_take_home = round2(totals.monthly_income - monthly_statutory - monthly_income_tax);
+  const monthly_living = round2(totals.monthly_expenses - monthly_income_tax);
+  const monthly_savable = round2(monthly_take_home - monthly_living);
+  const monthly_planned_savings = plannedSavingsFromCategoryTotals(
+    annualizeByCategory(keptRows, basis, { includeTransfers: true }),
+  );
+  const monthly_net_cash_flow = round2(monthly_savable - monthly_planned_savings);
+
   return {
     totals,
     derived,
@@ -346,6 +414,13 @@ function planCashflowFromActuals(input: PlanCashflowInput): PlanCashflowResult {
     monthly_employer_epf: 0,
     monthly_socso_eis: 0,
     one_off_items: [],
+    monthly_income_tax,
+    monthly_statutory,
+    monthly_take_home,
+    monthly_living,
+    monthly_savable,
+    monthly_planned_savings,
+    monthly_net_cash_flow,
   };
 }
 
@@ -406,6 +481,53 @@ function deriveStatutoryForHousehold(
   };
 }
 
+function isNonResident(info: PlanCashflowClientInfo | undefined): boolean {
+  return !!info?.tax_residency && info.tax_residency !== "resident";
+}
+
+/**
+ * P2b followup: the income-tax estimate, per employee when `clients` is
+ * given — mirrors deriveStatutoryForHousehold's own per-employee split, since
+ * each spouse's EPF relief and residency are their own. `policies` is passed
+ * whole to every person's estimate rather than split per spouse — the same
+ * simplification planCashflowFromItems already makes for loanItems/
+ * premiumItems, which are never split per spouse either.
+ */
+function estimateIncomeTaxMonthlyForPlan(
+  items: StandingItem[],
+  policies: PolicyRow[],
+  client: PlanCashflowClientInfo | undefined,
+  clients: Record<string, PlanCashflowClientInfo> | undefined,
+  today: Date,
+): number {
+  const estimateFor = (groupItems: StandingItem[], info: PlanCashflowClientInfo | undefined): number => {
+    const statutory = deriveStatutoryItems(groupItems, info ?? {}, today);
+    return estimateIncomeTax({
+      items: groupItems,
+      policies,
+      employeeEpfAnnual: 12 * statutory.employee_epf_monthly,
+      nonResident: isNonResident(info),
+      asOf: today,
+    }).monthly_tax;
+  };
+
+  if (!clients) return round2(estimateFor(items, client));
+
+  const byClient = new Map<string, StandingItem[]>();
+  for (const it of items ?? []) {
+    const cid = it.client_id ?? "";
+    const group = byClient.get(cid);
+    if (group) group.push(it);
+    else byClient.set(cid, [it]);
+  }
+
+  let total = 0;
+  for (const [cid, groupItems] of byClient) {
+    total += estimateFor(groupItems, clients[cid]);
+  }
+  return round2(total);
+}
+
 /**
  * P2b 决策 1/4/6/8: the plan read from cashflow_items. Active items at
  * `today` are kept unless `isSuperseded` (决策 8: the SAME P2a dedupe rule —
@@ -449,7 +571,37 @@ function planCashflowFromItems(input: PlanCashflowInput): PlanCashflowResult {
   const loanItems = deriveLoanItems(liabilities, today);
   const premiumItems = derivePremiumItems(policies, today);
   const statutory = deriveStatutoryForHousehold(items, client, clients, today);
-  const derived: DerivedItem[] = [...loanItems, ...premiumItems, ...statutory.items];
+
+  // P2b followup: the income-tax estimate. Skipped entirely when the client
+  // already has an active MANUAL income_tax item — O9 categories are never
+  // superseded (isSuperseded only handles O2/O3), so that row is already an
+  // ordinary kept expense; estimating on top of it would double-count.
+  const hasManualIncomeTax = active.some((it) => it.category === "income_tax");
+  const manualIncomeTaxMonthly = round2(
+    annualizeItemsByCategory(kept, today).find((t) => t.category === "income_tax")?.monthly_expenses ?? 0,
+  );
+  const estimatedIncomeTaxMonthly = hasManualIncomeTax
+    ? 0
+    : estimateIncomeTaxMonthlyForPlan(items, policies, client, clients, today);
+
+  const taxItems: DerivedItem[] = [];
+  if (!hasManualIncomeTax && estimatedIncomeTaxMonthly > 0) {
+    taxItems.push({
+      key: "tax:income_tax",
+      source_type: "tax",
+      source_id: null,
+      source_name: "所得税（估算）",
+      category: "income_tax",
+      direction: "outflow",
+      monthly_amount: round2(estimatedIncomeTaxMonthly),
+      interest_monthly: 0,
+      principal_monthly: 0,
+      estimated: ["tax_estimate"],
+      warnings: ["按 2026 税率与基本减免估算"],
+    });
+  }
+
+  const derived: DerivedItem[] = [...loanItems, ...premiumItems, ...statutory.items, ...taxItems];
 
   let derivedMonthlyExpense = 0;
   for (const item of derived) {
@@ -482,6 +634,22 @@ function planCashflowFromItems(input: PlanCashflowInput): PlanCashflowResult {
   let monthly_premiums = 0;
   for (const item of premiumItems) monthly_premiums += item.monthly_amount;
 
+  // P2b followup: monthly_income_tax reflects whichever source is actually
+  // inside monthly_expenses right now — the manual row if one exists,
+  // otherwise the estimate just added above (0 when neither applies).
+  const monthly_income_tax = hasManualIncomeTax ? manualIncomeTaxMonthly : round2(estimatedIncomeTaxMonthly);
+  const monthly_statutory = round2(statutory.employee_epf_monthly + statutory.socso_eis_monthly);
+  const monthly_take_home = round2(totals.monthly_income - monthly_statutory - monthly_income_tax);
+  // monthly_expenses already carries SOCSO/EIS and (if estimated/manual) tax
+  // under the deductions block above — strip them back out so "living" is
+  // just living costs, installments and premiums.
+  const monthly_living = round2(monthly_expenses - statutory.socso_eis_monthly - monthly_income_tax);
+  const monthly_savable = round2(monthly_take_home - monthly_living);
+  const monthly_planned_savings = plannedSavingsFromCategoryTotals(
+    annualizeItemsByCategory(kept, today, { includeTransfers: true }),
+  );
+  const monthly_net_cash_flow = round2(monthly_savable - monthly_planned_savings);
+
   return {
     totals,
     derived,
@@ -495,5 +663,12 @@ function planCashflowFromItems(input: PlanCashflowInput): PlanCashflowResult {
     monthly_employer_epf: statutory.employer_epf_monthly,
     monthly_socso_eis: statutory.socso_eis_monthly,
     one_off_items,
+    monthly_income_tax,
+    monthly_statutory,
+    monthly_take_home,
+    monthly_living,
+    monthly_savable,
+    monthly_planned_savings,
+    monthly_net_cash_flow,
   };
 }
